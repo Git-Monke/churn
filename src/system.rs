@@ -2,6 +2,7 @@
 
 use std::fs;
 use std::io;
+use std::path::Path;
 use std::process::{Command, Stdio};
 
 /// A Linux distribution churn knows how to install Docker on.
@@ -141,6 +142,35 @@ fn command_succeeds(program: &str, args: &[&str]) -> bool {
         .stderr(Stdio::null())
         .status()
         .is_ok_and(|status| status.success())
+}
+
+/// Start the Compose project in `dir` (detached). Docker's output is surfaced
+/// when the command fails, since `docker compose up` prints pull/build errors
+/// to stderr.
+pub fn compose_up(dir: &Path) -> io::Result<()> {
+    let output = Command::new("docker")
+        .args(["compose", "up", "-d"])
+        .current_dir(dir)
+        .output()?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let detail = [stdout.trim_end(), stderr.trim_end()]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    Err(io::Error::other(format!(
+        "docker compose up failed in {} ({})\n{}",
+        dir.display(),
+        output.status,
+        detail
+    )))
 }
 
 /// Run one installation step through `sh`, reporting stderr on failure.

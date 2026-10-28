@@ -28,7 +28,7 @@ impl Stack {
     pub fn description(self) -> &'static str {
         match self {
             Stack::Server => "Jellyfin media server",
-            Stack::Torrent => "qBittorrent behind a Mullvad WireGuard tunnel",
+            Stack::Torrent => "qBittorrent + Prowlarr behind a Mullvad WireGuard tunnel",
         }
     }
 
@@ -54,10 +54,10 @@ impl Stack {
 
     pub fn next_steps(self) -> &'static [&'static str] {
         match self {
-            Stack::Server => &["cd server && docker compose up -d", "open http://<vm-ip>:8096"],
+            Stack::Server => &["open http://<vm-ip>:8096"],
             Stack::Torrent => &[
-                "cd torrent && docker compose up -d",
                 "docker logs qbittorrent   # temporary admin password",
+                "open http://<vm-ip>:9696  # Prowlarr (qBittorrent is wired up for you)",
             ],
         }
     }

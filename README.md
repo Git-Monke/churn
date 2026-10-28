@@ -7,7 +7,7 @@ Two roles, one machine each (or both on the same box):
 | stack     | what it runs                                  | ports |
 | --------- | --------------------------------------------- | ----- |
 | `server`  | Jellyfin                                      | 8096  |
-| `torrent` | qBittorrent tunnelled through Mullvad WireGuard | 8080 |
+| `torrent` | qBittorrent + Prowlarr tunnelled through Mullvad WireGuard | 8080, 9696 |
 
 ## Usage
 
@@ -39,6 +39,9 @@ Answers are shared between installers, so selecting both roles asks for the
 storage path once. Reruns prefill previous answers and reuse them if you press
 Enter.
 
+Once the answers are written, churn starts each selected stack with
+`docker compose up -d` and reports the URLs to open.
+
 ```bash
 sudo ./target/release/churn --stacks server,torrent   # skip the menu
 sudo ./target/release/churn --dry-run                # collect answers, write nothing
@@ -46,7 +49,8 @@ sudo ./target/release/churn --dry-run                # collect answers, write no
 
 ## What it writes
 
-Only `.env` files; the compose files are static and committed.
+`.env` files only; the compose files are static and committed. churn then runs
+`docker compose up -d` in each selected stack directory.
 
 ```
 server/.env      DATA_DIR, PUID, PGID, TZ
@@ -59,10 +63,53 @@ host. Keys churn does not manage are preserved on rerun, so hand edits survive.
 
 ## Running a stack
 
+The installer starts the stacks for you. To bring them up again later (for
+example after a reboot):
+
 ```bash
 cd server  && docker compose up -d    # then open http://<ip>:8096
 cd torrent && docker compose up -d    # temporary password: docker logs qbittorrent
 ```
+
+Both web UIs are published on the `gluetun` container (the other two share its
+network namespace), so Prowlarr is at `http://<ip>:9696`.
+
+## Prowlarr and qBittorrent
+
+Prowlarr, qBittorrent and gluetun share one network namespace, so qBittorrent is
+reachable from Prowlarr at `http://localhost:8080` — no hostnames or VPN
+round-trip needed.
+
+The wiring is automatic on first `docker compose up`:
+
+1. `qbittorrent-init` seeds `config/qbittorrent` with a stable qBittorrent API
+   key before the app starts. The image otherwise regenerates a random WebUI
+   password on every restart.
+2. Once both apps are up, `prowlarr-init` reads Prowlarr's generated API key and
+   the qBittorrent key, then registers qBittorrent as a Prowlarr download client
+   through Prowlarr's API (category `prowlarr`). It is idempotent: if the client
+   already exists it does nothing.
+
+Because both containers mount the same `${DATA_DIR}` at `/data`, download paths
+line up without translation. qBittorrent saves to `/data/` and Prowlarr tags
+its downloads with the `prowlarr` category.
+
+Re-run the one-shots by recreating the stack (a plain `docker compose up -d`
+leaves already-exited one-shots alone):
+
+```bash
+cd torrent
+docker compose down && docker compose up -d
+```
+
+To re-register the client after deleting it in Prowlarr's UI, run just the
+registration step — it is idempotent:
+
+```bash
+docker compose run --rm prowlarr-init
+```
+
+Then add indexers under **Indexers** in Prowlarr.
 
 ## Development
 

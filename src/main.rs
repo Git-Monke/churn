@@ -19,14 +19,15 @@ const HELP: &str = "\
 churn — installer for the torrent/media stack
 
 Must be run as root (for example: sudo churn). If Docker is missing, churn
-offers to install it for the detected Linux distribution.
+offers to install it for the detected Linux distribution. After writing each
+stack's .env, it starts the stack with docker compose up -d.
 
 USAGE:
     churn [OPTIONS]
 
 OPTIONS:
     --stacks <LIST>   comma separated: server,torrent (skips the menu)
-    --dry-run         collect answers, write nothing
+    --dry-run         collect answers, write nothing, start nothing
     -y, --yes         skip the final confirmation
     -h, --help        show this help";
 
@@ -276,6 +277,30 @@ fn write_stacks(chosen: &[Stack], answers: &Answers, dry_run: bool) -> io::Resul
     Ok(())
 }
 
+fn start_stacks(chosen: &[Stack], dry_run: bool) -> io::Result<()> {
+    let progress = spinner();
+    for (index, stack) in chosen.iter().enumerate() {
+        progress.start(format!(
+            "[{}/{}] starting {}",
+            index + 1,
+            chosen.len(),
+            stack.key()
+        ));
+        if dry_run {
+            progress.stop(format!("would start {}", stack.key()));
+            continue;
+        }
+        match system::compose_up(&stack.dir()) {
+            Ok(()) => progress.stop(format!("started {}", stack.key())),
+            Err(err) => {
+                progress.stop(format!("failed to start {}", stack.key()));
+                return Err(err);
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Returns `false` when a preflight check stopped the installer.
 fn run(args: Args) -> io::Result<bool> {
     intro("churn · torrent stack installer")?;
@@ -292,15 +317,20 @@ fn run(args: Args) -> io::Result<bool> {
     show_plan(&chosen, &questions, &answers)?;
 
     if !args.yes
-        && !confirm("Write these files?")
-            .initial_value(true)
-            .interact()?
+        && !confirm(if args.dry_run {
+            "Write these files?"
+        } else {
+            "Write these files and start the services?"
+        })
+        .initial_value(true)
+        .interact()?
     {
         outro_cancel("cancelled — nothing written")?;
         return Ok(true);
     }
 
     write_stacks(&chosen, &answers, args.dry_run)?;
+    start_stacks(&chosen, args.dry_run)?;
 
     let mut steps = String::new();
     for stack in &chosen {
@@ -311,7 +341,7 @@ fn run(args: Args) -> io::Result<bool> {
     }
     outro_note("Next steps", steps.trim_end().to_string())?;
     if args.dry_run {
-        outro("dry run complete — no files written")?;
+        outro("dry run complete — no files written, services not started")?;
     } else {
         outro("done")?;
     }
