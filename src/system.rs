@@ -1,9 +1,12 @@
 //! Host preflight checks: root access, Linux distribution and Docker.
 
+use std::collections::VecDeque;
 use std::fs;
-use std::io;
+use std::io::{self, Read};
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::{Command, ExitStatus, Stdio};
+use std::sync::mpsc;
+use std::thread::{self, JoinHandle};
 
 /// A Linux distribution churn knows how to install Docker on.
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -144,33 +147,207 @@ fn command_succeeds(program: &str, args: &[&str]) -> bool {
         .is_ok_and(|status| status.success())
 }
 
-/// Start the Compose project in `dir` (detached). Docker's output is surfaced
-/// when the command fails, since `docker compose up` prints pull/build errors
-/// to stderr.
-pub fn compose_up(dir: &Path) -> io::Result<()> {
-    let output = Command::new("docker")
-        .args(["compose", "up", "-d"])
-        .current_dir(dir)
-        .output()?;
+/// Start the Compose project in `dir` (detached), forwarding each normalised
+/// output line to `on_line` as it arrives.
+///
+/// Plain progress and disabled ANSI colours keep the stream line-oriented.
+/// The tail of the output is retained so a failed run still reports what Docker
+/// was doing.
+pub fn compose_up(dir: &Path, on_line: &mut dyn FnMut(&str)) -> io::Result<()> {
+    let mut command = Command::new("docker");
+    command
+        .args([
+            "compose",
+            "--ansi",
+            "never",
+            "--progress",
+            "plain",
+            "up",
+            "-d",
+        ])
+        .current_dir(dir);
 
+    let output = run_streaming(command, on_line)?;
     if output.status.success() {
         return Ok(());
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let detail = [stdout.trim_end(), stderr.trim_end()]
-        .into_iter()
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    Err(io::Error::other(format!(
-        "docker compose up failed in {} ({})\n{}",
+    let detail = output.tail.join("\n");
+    let mut message = format!(
+        "docker compose up failed in {} ({})",
         dir.display(),
-        output.status,
-        detail
-    )))
+        output.status
+    );
+    if !detail.is_empty() {
+        message.push('\n');
+        message.push_str(&detail);
+    }
+    Err(io::Error::other(message))
+}
+
+/// How many normalised output lines to retain for error reporting.
+const TAIL_LIMIT: usize = 200;
+
+struct StreamedCommand {
+    status: ExitStatus,
+    tail: Vec<String>,
+}
+
+/// Run `command` with piped stdout/stderr, emitting each line as it appears.
+///
+/// Both pipes are drained on their own threads so a chatty stderr cannot block
+/// stdout (or vice versa). Lines are reassembled on the calling thread, which
+/// keeps the callback single-threaded and in a stable order.
+fn run_streaming(
+    mut command: Command,
+    on_line: &mut dyn FnMut(&str),
+) -> io::Result<StreamedCommand> {
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = command.spawn()?;
+
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| io::Error::other("failed to capture docker stdout"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| io::Error::other("failed to capture docker stderr"))?;
+
+    let (tx, rx) = mpsc::channel::<Vec<u8>>();
+    let stdout_reader = spawn_reader(stdout, tx.clone());
+    let stderr_reader = spawn_reader(stderr, tx);
+
+    let mut assembler = LineAssembler::default();
+    for chunk in rx {
+        assembler.push(&chunk, on_line);
+    }
+    assembler.finish(on_line);
+
+    let _ = stdout_reader.join();
+    let _ = stderr_reader.join();
+    let status = child.wait()?;
+
+    Ok(StreamedCommand {
+        status,
+        tail: assembler.tail.into_iter().collect(),
+    })
+}
+
+fn spawn_reader<R>(mut reader: R, tx: mpsc::Sender<Vec<u8>>) -> JoinHandle<()>
+where
+    R: Read + Send + 'static,
+{
+    thread::spawn(move || {
+        let mut buffer = [0u8; 8192];
+        loop {
+            match reader.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(read) => {
+                    if tx.send(buffer[..read].to_vec()).is_err() {
+                        break;
+                    }
+                }
+                Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
+                Err(_) => break,
+            }
+        }
+    })
+}
+
+#[derive(Default)]
+struct LineAssembler {
+    pending: Vec<u8>,
+    tail: VecDeque<String>,
+}
+
+impl LineAssembler {
+    /// Feed a chunk, emitting every complete `\n`/`\r`-terminated line.
+    fn push(&mut self, chunk: &[u8], on_line: &mut dyn FnMut(&str)) {
+        self.pending.extend_from_slice(chunk);
+
+        let mut start = 0;
+        while let Some(offset) = self.pending[start..]
+            .iter()
+            .position(|byte| *byte == b'\n' || *byte == b'\r')
+        {
+            let end = start + offset;
+            let line = self.pending[start..end].to_vec();
+            self.emit(&line, on_line);
+            start = end + 1;
+        }
+        if start > 0 {
+            self.pending.drain(..start);
+        }
+    }
+
+    fn finish(&mut self, on_line: &mut dyn FnMut(&str)) {
+        if !self.pending.is_empty() {
+            let pending = std::mem::take(&mut self.pending);
+            self.emit(&pending, on_line);
+        }
+    }
+
+    fn emit(&mut self, bytes: &[u8], on_line: &mut dyn FnMut(&str)) {
+        let raw = String::from_utf8_lossy(bytes);
+        let line = clean_line(&strip_ansi(&raw));
+        if line.is_empty() || self.tail.back().is_some_and(|prev| *prev == line) {
+            return;
+        }
+        if self.tail.len() == TAIL_LIMIT {
+            self.tail.pop_front();
+        }
+        self.tail.push_back(line.clone());
+        on_line(&line);
+    }
+}
+
+/// Remove ANSI CSI/OSC escape sequences from a line of terminal output.
+fn strip_ansi(input: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch != '\u{1b}' {
+            output.push(ch);
+            continue;
+        }
+
+        match chars.next() {
+            Some('[') => {
+                // CSI: consume parameter bytes until the final byte (0x40..=0x7e).
+                while let Some(&next) = chars.peek() {
+                    chars.next();
+                    if ('\u{40}'..='\u{7e}').contains(&next) {
+                        break;
+                    }
+                }
+            }
+            Some(']') => {
+                // OSC: consume until BEL or ST (ESC followed by a backslash).
+                while let Some(next) = chars.next() {
+                    if next == '\u{7}' {
+                        break;
+                    }
+                    if next == '\u{1b}' && chars.peek() == Some(&'\\') {
+                        chars.next();
+                        break;
+                    }
+                }
+            }
+            Some(_) | None => {}
+        }
+    }
+
+    output
+}
+
+fn clean_line(line: &str) -> String {
+    line.chars()
+        .filter(|ch| *ch == '\t' || !ch.is_control())
+        .collect::<String>()
+        .trim()
+        .to_string()
 }
 
 /// Run one installation step through `sh`, reporting stderr on failure.
@@ -292,3 +469,63 @@ const ARCH_STEPS: &[InstallStep] = &[
         command: "systemctl enable --now docker",
     },
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ansi_sequences_are_stripped() {
+        assert_eq!(
+            strip_ansi("\u{1b}[32m✔\u{1b}[0m container started"),
+            "✔ container started"
+        );
+        assert_eq!(strip_ansi("a\u{1b}]0;title\u{7}b"), "ab");
+    }
+
+    #[test]
+    fn lines_split_on_carriage_returns_and_newlines() {
+        let mut assembler = LineAssembler::default();
+        let mut lines = Vec::new();
+        assembler.push(b"one\rtwo\nthr", &mut |line| lines.push(line.to_string()));
+        assembler.push(b"ee\r\nfour", &mut |line| lines.push(line.to_string()));
+        assembler.finish(&mut |line| lines.push(line.to_string()));
+
+        assert_eq!(lines, ["one", "two", "three", "four"]);
+    }
+
+    #[test]
+    fn blank_and_repeated_lines_are_dropped() {
+        let mut assembler = LineAssembler::default();
+        let mut lines = Vec::new();
+        assembler.push(b"\n\nsame\nsame\nother\n", &mut |line| {
+            lines.push(line.to_string())
+        });
+
+        assert_eq!(lines, ["same", "other"]);
+    }
+
+    #[test]
+    fn command_output_is_streamed_in_line_order() {
+        let mut command = Command::new("sh");
+        command.arg("-c").arg("printf 'alpha\\nbeta\\n'");
+        let mut lines = Vec::new();
+
+        let output = run_streaming(command, &mut |line| lines.push(line.to_string()))
+            .expect("streaming command");
+
+        assert!(output.status.success());
+        assert_eq!(lines, ["alpha", "beta"]);
+    }
+
+    #[test]
+    fn failed_command_keeps_its_output_for_the_error() {
+        let mut command = Command::new("sh");
+        command.arg("-c").arg("printf 'boom\\n' >&2; exit 3");
+
+        let output = run_streaming(command, &mut |_| {}).expect("streaming command");
+
+        assert!(!output.status.success());
+        assert_eq!(output.tail, ["boom"]);
+    }
+}

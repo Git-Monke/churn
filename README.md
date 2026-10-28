@@ -44,7 +44,10 @@ Enter. Path prompts autocomplete as you type: use ↑/↓ to highlight a suggest
 then Tab or Enter to accept it.
 
 Once the answers are written, churn starts each selected stack with
-`docker compose up -d` and reports the URLs to open.
+`docker compose up -d` and reports the URLs to open. While Docker pulls images
+and starts containers, churn shows a rolling five-line view of the pull,
+create and start messages instead of an opaque spinner. If Compose fails, the
+end of its output is included in the error.
 
 ```bash
 sudo ./target/release/churn --stacks server,torrent   # skip the menu

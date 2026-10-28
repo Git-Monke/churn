@@ -11,6 +11,7 @@ use std::process::ExitCode;
 
 use cliclack::{confirm, intro, log, multiselect, note, outro, outro_cancel, outro_note, spinner};
 
+use churn::live::LiveLog;
 use churn::mullvad;
 use churn::question::{Question, Section};
 use churn::stack::{self, Answers, Stack};
@@ -297,22 +298,21 @@ fn write_stacks(chosen: &[Stack], answers: &Answers, dry_run: bool) -> io::Resul
 }
 
 fn start_stacks(chosen: &[Stack], dry_run: bool) -> io::Result<()> {
-    let progress = spinner();
     for (index, stack) in chosen.iter().enumerate() {
-        progress.start(format!(
-            "[{}/{}] starting {}",
-            index + 1,
-            chosen.len(),
-            stack.key()
-        ));
+        let header = format!("[{}/{}] starting {}", index + 1, chosen.len(), stack.key());
         if dry_run {
+            let progress = spinner();
+            progress.start(&header);
             progress.stop(format!("would start {}", stack.key()));
             continue;
         }
-        match system::compose_up(&stack.dir()) {
-            Ok(()) => progress.stop(format!("started {}", stack.key())),
+
+        let mut live = LiveLog::start(header);
+        let result = system::compose_up(&stack.dir(), &mut |line| live.push(line));
+        match result {
+            Ok(()) => live.success(format!("started {}", stack.key())),
             Err(err) => {
-                progress.stop(format!("failed to start {}", stack.key()));
+                live.error(format!("failed to start {}", stack.key()));
                 return Err(err);
             }
         }
