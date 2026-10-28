@@ -11,11 +11,23 @@ Two roles, one machine each (or both on the same box):
 
 ## Usage
 
+Run the installer as root:
+
 ```bash
-cargo run --release
+cargo build --release
+sudo ./target/release/churn
 ```
 
-The wizard asks which roles this machine should run, then collects what it needs:
+The wizard first runs two preflight checks:
+
+- **Root access** — required, because churn writes config files as root and may
+  install packages. It stops with a `sudo` hint if you are not root.
+- **Docker** — churn checks for Docker and the Compose plugin *before* asking
+  any setup questions. If they are missing it detects Ubuntu, Debian, Fedora or
+  Arch Linux and offers to install Docker with that distribution's official
+  commands. If you decline, it stops and asks you to install Docker and re-run.
+
+Then it asks which roles this machine should run and collects what it needs:
 
 - **Mullvad WireGuard credentials** — private key and interface address, both
   from a generated WireGuard config `.json`. The key input is masked.
@@ -27,9 +39,9 @@ Answers are shared between installers, so selecting both roles asks for the
 storage path once. Reruns prefill previous answers and reuse them if you press
 Enter.
 
-```
-cargo run -- --stacks server,torrent   # skip the menu
-cargo run -- --dry-run                # collect answers, write nothing
+```bash
+sudo ./target/release/churn --stacks server,torrent   # skip the menu
+sudo ./target/release/churn --dry-run                # collect answers, write nothing
 ```
 
 ## What it writes
@@ -59,6 +71,7 @@ cargo test
 ```
 
 `src/lib.rs` holds the testable core ([`question`](src/question.rs),
-[`stack`](src/stack.rs), [`envfile`](src/envfile.rs)); `src/main.rs` is the
-wizard flow. Dedupe of questions and the VPN-before-storage ordering are covered
-by `tests/installer.rs`.
+[`stack`](src/stack.rs), [`envfile`](src/envfile.rs),
+[`system`](src/system.rs)); `src/main.rs` is the wizard flow. Dedupe of questions
+and the VPN-before-storage ordering are covered by `tests/installer.rs`; distro
+detection and root-uid parsing by `tests/system.rs`.

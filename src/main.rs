@@ -13,9 +13,13 @@ use cliclack::{confirm, intro, log, multiselect, note, outro, outro_cancel, outr
 
 use churn::question::{Question, Section};
 use churn::stack::{self, Answers, Stack};
+use churn::system;
 
 const HELP: &str = "\
 churn — installer for the torrent/media stack
+
+Must be run as root (for example: sudo churn). If Docker is missing, churn
+offers to install it for the detected Linux distribution.
 
 USAGE:
     churn [OPTIONS]
@@ -152,7 +156,10 @@ fn ensure_data_dir(answers: &Answers) -> io::Result<()> {
         std::fs::create_dir_all(path)?;
         log::success(format!("created {}", path.display()))?;
     } else {
-        return Err(io::Error::new(io::ErrorKind::Interrupted, "data dir declined"));
+        return Err(io::Error::new(
+            io::ErrorKind::Interrupted,
+            "data dir declined",
+        ));
     }
     Ok(())
 }
@@ -172,12 +179,6 @@ fn show_plan(chosen: &[Stack], questions: &[Question], answers: &Answers) -> io:
 }
 
 fn preflight(chosen: &[Stack]) -> io::Result<()> {
-    if which("docker") {
-        log::success("docker found on PATH")?;
-    } else {
-        log::warning("docker not found on PATH — config will be written, but you need docker to run it")?;
-    }
-
     let findings: Vec<String> = chosen.iter().flat_map(|stack| stack.preflight()).collect();
     for finding in &findings {
         log::warning(finding)?;
@@ -188,16 +189,83 @@ fn preflight(chosen: &[Stack]) -> io::Result<()> {
     Ok(())
 }
 
-fn which(program: &str) -> bool {
-    std::env::var_os("PATH").is_some_and(|paths| {
-        std::env::split_paths(&paths).any(|dir| dir.join(program).is_file())
-    })
+/// Stop unless we have root, since the installer writes root-owned files and
+/// installs packages.
+fn ensure_root() -> io::Result<bool> {
+    if system::is_root() {
+        return Ok(true);
+    }
+    outro_note(
+        "Root access required",
+        "churn must run as root. Re-run it with sudo:\n\n    sudo churn",
+    )?;
+    Ok(false)
+}
+
+/// Check for Docker before asking anything, and offer to install it when it is
+/// missing (or when the Compose plugin is missing).
+fn ensure_docker() -> io::Result<bool> {
+    if system::docker_ready() {
+        log::success("docker and the compose plugin are available")?;
+        return Ok(true);
+    }
+
+    log::warning("docker with the compose plugin was not found")?;
+    if !confirm("Install Docker now with this installer?")
+        .initial_value(true)
+        .interact()?
+    {
+        outro_note(
+            "Docker is required",
+            "Install Docker (including the compose plugin), then re-run churn once it is available.",
+        )?;
+        return Ok(false);
+    }
+
+    let distro = system::Distro::from_host();
+    let Some(steps) = distro.install_steps() else {
+        outro_note(
+            format!("Unsupported distribution: {}", distro.display_name()),
+            "churn can install Docker automatically on Ubuntu, Debian, Fedora and Arch Linux.\n\
+             Install Docker manually from https://docs.docker.com/engine/install/, then re-run churn.",
+        )?;
+        return Ok(false);
+    };
+
+    log::info(format!("installing Docker for {}", distro.display_name()))?;
+    let progress = spinner();
+    for (index, step) in steps.iter().enumerate() {
+        progress.start(format!(
+            "[{}/{}] {}",
+            index + 1,
+            steps.len(),
+            step.description
+        ));
+        if let Err(err) = system::run_step(step) {
+            progress.stop(format!("failed: {}", step.description));
+            return Err(err);
+        }
+        progress.stop(step.description);
+    }
+
+    if !system::docker_ready() {
+        return Err(io::Error::other(
+            "docker was installed but is not usable yet — check `docker compose version` and re-run churn",
+        ));
+    }
+    log::success("docker installed and ready")?;
+    Ok(true)
 }
 
 fn write_stacks(chosen: &[Stack], answers: &Answers, dry_run: bool) -> io::Result<()> {
     let progress = spinner();
     for (index, stack) in chosen.iter().enumerate() {
-        progress.start(format!("[{}/{}] writing {}", index + 1, chosen.len(), stack.key()));
+        progress.start(format!(
+            "[{}/{}] writing {}",
+            index + 1,
+            chosen.len(),
+            stack.key()
+        ));
         if dry_run {
             progress.stop(format!("would write {}", stack.env_path().display()));
             continue;
@@ -208,8 +276,13 @@ fn write_stacks(chosen: &[Stack], answers: &Answers, dry_run: bool) -> io::Resul
     Ok(())
 }
 
-fn run(args: Args) -> io::Result<()> {
+/// Returns `false` when a preflight check stopped the installer.
+fn run(args: Args) -> io::Result<bool> {
     intro("churn · torrent stack installer")?;
+
+    if !ensure_root()? || !ensure_docker()? {
+        return Ok(false);
+    }
 
     let chosen = choose_stacks(&args)?;
     preflight(&chosen)?;
@@ -224,7 +297,7 @@ fn run(args: Args) -> io::Result<()> {
             .interact()?
     {
         outro_cancel("cancelled — nothing written")?;
-        return Ok(());
+        return Ok(true);
     }
 
     write_stacks(&chosen, &answers, args.dry_run)?;
@@ -242,7 +315,7 @@ fn run(args: Args) -> io::Result<()> {
     } else {
         outro("done")?;
     }
-    Ok(())
+    Ok(true)
 }
 
 fn main() -> ExitCode {
@@ -259,7 +332,8 @@ fn main() -> ExitCode {
     }
 
     match run(args) {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(true) => ExitCode::SUCCESS,
+        Ok(false) => ExitCode::FAILURE,
         Err(err) if err.kind() == io::ErrorKind::Interrupted => {
             let _ = outro_cancel("cancelled — nothing written");
             ExitCode::from(130)
