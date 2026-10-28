@@ -9,6 +9,12 @@ use crate::question::{Question, Section};
 
 pub type Answers = HashMap<Question, String>;
 
+/// Default Mullvad location written to `SERVER_COUNTRIES`.
+///
+/// Country selection is intentionally not a prompt right now; change the
+/// value in `torrent/.env` (or this default) when that becomes configurable.
+pub const DEFAULT_SERVER_COUNTRIES: &str = "Netherlands";
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Stack {
     Server,
@@ -35,12 +41,7 @@ impl Stack {
     pub fn questions(self) -> &'static [Question] {
         match self {
             Stack::Server => &[Question::DataDir],
-            Stack::Torrent => &[
-                Question::WireguardPrivateKey,
-                Question::WireguardAddresses,
-                Question::ServerCountries,
-                Question::DataDir,
-            ],
+            Stack::Torrent => &[Question::WireguardArchive, Question::DataDir],
         }
     }
 
@@ -67,7 +68,8 @@ impl Stack {
         let mut findings = Vec::new();
         if self == Stack::Torrent && !Path::new("/dev/net/tun").exists() {
             findings.push(
-                "/dev/net/tun is missing — gluetun needs TUN; enable it in the host/VM kernel".to_string(),
+                "/dev/net/tun is missing — gluetun needs TUN; enable it in the host/VM kernel"
+                    .to_string(),
             );
         }
         findings
@@ -76,7 +78,7 @@ impl Stack {
     /// Values from a previous run, so reruns can prefill the prompts.
     pub fn stored_answers(self) -> Answers {
         let env = envfile::read(&self.env_path());
-        self.questions()
+        Question::ALL
             .iter()
             .filter_map(|question| {
                 env.get(question.env_key())
@@ -103,20 +105,32 @@ impl Stack {
             managed.push(("VPN_SERVICE_PROVIDER", "mullvad".to_string()));
             managed.push(("VPN_TYPE", "wireguard".to_string()));
             for question in [
+                Question::WireguardArchive,
+                Question::WireguardConfig,
                 Question::WireguardPrivateKey,
                 Question::WireguardAddresses,
-                Question::ServerCountries,
             ] {
                 if let Some(value) = answers.get(&question) {
                     managed.push((question.env_key(), value.clone()));
                 }
             }
+            // No country prompt for now: keep a previous choice, else default.
+            let countries = server_countries(
+                envfile::read(&self.env_path())
+                    .get("SERVER_COUNTRIES")
+                    .map(String::as_str),
+            );
+            managed.push(("SERVER_COUNTRIES", countries));
         }
 
         let path = self.env_path();
         envfile::write_merged(&path, &managed)?;
         Ok(path)
     }
+}
+
+fn server_countries(existing: Option<&str>) -> String {
+    existing.unwrap_or(DEFAULT_SERVER_COUNTRIES).to_string()
 }
 
 /// Every unique question across the chosen stacks, VPN before Storage.
@@ -145,4 +159,15 @@ pub fn summary(question: Question, answers: &Answers) -> Option<String> {
     } else {
         value.clone()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn server_country_defaults_when_not_configured() {
+        assert_eq!(server_countries(None), DEFAULT_SERVER_COUNTRIES);
+        assert_eq!(server_countries(Some("Sweden")), "Sweden");
+    }
 }

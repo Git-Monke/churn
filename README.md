@@ -29,15 +29,19 @@ The wizard first runs two preflight checks:
 
 Then it asks which roles this machine should run and collects what it needs:
 
-- **Mullvad WireGuard credentials** — private key and interface address, both
-  from a generated WireGuard config `.json`. The key input is masked.
+- **Mullvad WireGuard config archive** — download the zip from
+  [mullvad.net](https://mullvad.net/en/account/wireguard-config) and give churn
+  its path. It opens the zip and reads `PrivateKey` and IPv4 `Address` from
+  one of the `.conf` files. (Every file in one archive carries the same key and
+  address, so churn just picks the first one instead of asking.)
 - **Storage path** — one absolute host path for media and downloads. It is
   mounted at `/data` inside every container, so Jellyfin and qBittorrent agree
   on paths regardless of which machine they run on.
 
 Answers are shared between installers, so selecting both roles asks for the
 storage path once. Reruns prefill previous answers and reuse them if you press
-Enter.
+Enter. Path prompts autocomplete as you type: use ↑/↓ to highlight a suggestion,
+then Tab or Enter to accept it.
 
 Once the answers are written, churn starts each selected stack with
 `docker compose up -d` and reports the URLs to open.
@@ -54,7 +58,7 @@ sudo ./target/release/churn --dry-run                # collect answers, write no
 
 ```
 server/.env      DATA_DIR, PUID, PGID, TZ
-torrent/.env     the above + Mullvad credentials
+torrent/.env     the above + Mullvad credentials (and the archive path)
 ```
 
 `PUID`/`PGID` come from whoever owns the storage directory and `TZ` from the
@@ -118,7 +122,12 @@ cargo test
 ```
 
 `src/lib.rs` holds the testable core ([`question`](src/question.rs),
-[`stack`](src/stack.rs), [`envfile`](src/envfile.rs),
-[`system`](src/system.rs)); `src/main.rs` is the wizard flow. Dedupe of questions
-and the VPN-before-storage ordering are covered by `tests/installer.rs`; distro
+[`mullvad`](src/mullvad.rs), [`stack`](src/stack.rs),
+[`envfile`](src/envfile.rs), [`system`](src/system.rs)); `src/main.rs` is the
+wizard flow. Dedupe of questions, the VPN-before-storage ordering, and parsing
+of Mullvad `.conf`/zip files are covered by `tests/installer.rs`; distro
 detection and root-uid parsing by `tests/system.rs`.
+
+`vendor/cliclack` is a local patch for path autocomplete: the first suggestion
+is selected automatically, Tab completes it without submitting, and Enter only
+submits the typed value.

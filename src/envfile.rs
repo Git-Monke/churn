@@ -40,7 +40,11 @@ pub fn write_merged(path: &Path, managed: &[(&str, String)]) -> io::Result<()> {
     let existing = read(path);
     let extras: Vec<(&String, &String)> = existing
         .iter()
-        .filter(|(key, _)| !managed.iter().any(|(managed_key, _)| managed_key == &key.as_str()))
+        .filter(|(key, _)| {
+            !managed
+                .iter()
+                .any(|(managed_key, _)| managed_key == &key.as_str())
+        })
         .collect();
 
     let mut out = String::from(PREAMBLE);

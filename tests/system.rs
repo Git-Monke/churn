@@ -43,9 +43,11 @@ fn unsupported_distribution_is_reported_by_id() {
         system::detect_distro(""),
         Distro::Unsupported("unknown Linux".to_string())
     );
-    assert!(system::detect_distro("ID=nixos\n")
-        .install_steps()
-        .is_none());
+    assert!(
+        system::detect_distro("ID=nixos\n")
+            .install_steps()
+            .is_none()
+    );
 }
 
 #[test]

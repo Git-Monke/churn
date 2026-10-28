@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use cliclack::{input, log, password};
+use cliclack::{input, log};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, PartialOrd, Ord)]
 pub enum Section {
@@ -23,17 +23,35 @@ impl Section {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Question {
     DataDir,
+    WireguardArchive,
+    WireguardConfig,
     WireguardPrivateKey,
     WireguardAddresses,
-    ServerCountries,
 }
 
 impl Question {
+    /// Every variant, used to prefill answers from a previous `.env`.
+    pub const ALL: [Question; 5] = [
+        Question::DataDir,
+        Question::WireguardArchive,
+        Question::WireguardConfig,
+        Question::WireguardPrivateKey,
+        Question::WireguardAddresses,
+    ];
+
+    /// Answers filled in from the archive, shown in the plan but never asked.
+    pub const DETAILS: [Question; 3] = [
+        Question::WireguardConfig,
+        Question::WireguardPrivateKey,
+        Question::WireguardAddresses,
+    ];
+
     pub fn section(self) -> Section {
         match self {
-            Question::WireguardPrivateKey
-            | Question::WireguardAddresses
-            | Question::ServerCountries => Section::Vpn,
+            Question::WireguardArchive
+            | Question::WireguardConfig
+            | Question::WireguardPrivateKey
+            | Question::WireguardAddresses => Section::Vpn,
             Question::DataDir => Section::Storage,
         }
     }
@@ -42,18 +60,20 @@ impl Question {
     pub fn env_key(self) -> &'static str {
         match self {
             Question::DataDir => "DATA_DIR",
+            Question::WireguardArchive => "WIREGUARD_ARCHIVE",
+            Question::WireguardConfig => "WIREGUARD_CONFIG",
             Question::WireguardPrivateKey => "WIREGUARD_PRIVATE_KEY",
             Question::WireguardAddresses => "WIREGUARD_ADDRESSES",
-            Question::ServerCountries => "SERVER_COUNTRIES",
         }
     }
 
     pub fn label(self) -> &'static str {
         match self {
             Question::DataDir => "Where should media and downloads live?",
+            Question::WireguardArchive => "Path to the Mullvad WireGuard config zip",
+            Question::WireguardConfig => "WireGuard config file",
             Question::WireguardPrivateKey => "WireGuard private key",
             Question::WireguardAddresses => "WireGuard interface address",
-            Question::ServerCountries => "Preferred server countries",
         }
     }
 
@@ -65,15 +85,18 @@ impl Question {
     ///
     /// Validation is handled here rather than with `Input::validate` so that a
     /// rejected answer gets a fresh prompt: cliclack keeps the typed buffer on
-    /// error, which makes a mistyped 44-character key impossible to correct.
+    /// error, which makes a mistyped path impossible to correct.
     pub fn ask(self, stored: Option<&str>) -> io::Result<String> {
         match self {
             Question::DataDir => {
-                let mut default = stored.map(normalize_path).unwrap_or_else(|| "/data".to_string());
+                let mut default = stored
+                    .map(normalize_path)
+                    .unwrap_or_else(|| "/data".to_string());
                 loop {
                     let value: String = input(self.label())
                         .placeholder("/data")
                         .default_input(&default)
+                        .autocomplete(directory_suggestions)
                         .interact()?;
                     let normalized = normalize_path(&value);
                     match validate_data_dir(&normalized) {
@@ -85,41 +108,32 @@ impl Question {
                     }
                 }
             }
-            Question::WireguardPrivateKey => loop {
-                let mut prompt = password(self.label()).mask('▪');
-                if stored.is_some() {
-                    prompt = prompt.allow_empty();
+            Question::WireguardArchive => {
+                let mut default = stored.map(normalize_path).unwrap_or_default();
+                loop {
+                    let mut prompt = input(self.label())
+                        .placeholder("~/Downloads/mullvad_wireguard_linux_us_all.zip")
+                        .autocomplete(file_path_suggestions);
+                    if !default.is_empty() {
+                        prompt = prompt.default_input(&default);
+                    }
+                    let value: String = prompt.interact()?;
+                    let path = expand_tilde(value.trim());
+                    let display = path.to_string_lossy().to_string();
+                    match crate::mullvad::entries(&path) {
+                        Ok(_) => return Ok(display),
+                        Err(message) => {
+                            log::error(message)?;
+                            default = display;
+                        }
+                    }
                 }
-                let value: String = prompt.interact()?;
-                if value.is_empty() {
-                    return Ok(stored.unwrap_or_default().to_string());
-                }
-                match validate_wireguard_key(&value) {
-                    Ok(()) => return Ok(value),
-                    Err(message) => log::error(message)?,
-                }
-            },
-            Question::WireguardAddresses => loop {
-                let mut prompt = input(self.label()).placeholder("10.64.12.34/32");
-                if let Some(previous) = stored {
-                    prompt = prompt.default_input(previous);
-                }
-                let value: String = prompt.interact()?;
-                match validate_wireguard_address(&value) {
-                    Ok(()) => return Ok(value),
-                    Err(message) => log::error(message)?,
-                }
-            },
-            Question::ServerCountries => loop {
-                let value: String = input(self.label())
-                    .placeholder("Netherlands,Sweden")
-                    .default_input(stored.unwrap_or("Netherlands"))
-                    .interact()?;
-                match validate_countries(&value) {
-                    Ok(()) => return Ok(value),
-                    Err(message) => log::error(message)?,
-                }
-            },
+            }
+            Question::WireguardConfig
+            | Question::WireguardPrivateKey
+            | Question::WireguardAddresses => Err(io::Error::other(
+                "internal error: WireGuard credentials come from the config archive",
+            )),
         }
     }
 }
@@ -127,11 +141,44 @@ impl Question {
 // -------------------------------------------------------------------- validation
 pub fn expand_tilde(value: &str) -> PathBuf {
     if value == "~" || value.starts_with("~/") {
-        if let Some(home) = std::env::var_os("HOME") {
-            return PathBuf::from(home).join(value.trim_start_matches("~/"));
+        if let Some(home) = home_dir() {
+            return home.join(value.strip_prefix("~/").unwrap_or(""));
         }
     }
     PathBuf::from(value)
+}
+
+/// Home directory for `~` expansion.
+///
+/// Under `sudo`, `HOME` points at root's home while the person typing `~/...`
+/// means the account that invoked sudo. Prefer that account when it is known.
+fn home_dir() -> Option<PathBuf> {
+    sudo_user_home().or_else(|| std::env::var_os("HOME").map(PathBuf::from))
+}
+
+fn sudo_user_home() -> Option<PathBuf> {
+    let user = std::env::var("SUDO_USER").ok();
+    let uid = std::env::var("SUDO_UID").ok();
+    if user.is_none() && uid.is_none() {
+        return None;
+    }
+    let passwd = fs::read_to_string("/etc/passwd").ok()?;
+    home_from_passwd(&passwd, user.as_deref(), uid.as_deref())
+}
+
+fn home_from_passwd(contents: &str, user: Option<&str>, uid: Option<&str>) -> Option<PathBuf> {
+    for line in contents.lines() {
+        let fields: Vec<&str> = line.split(':').collect();
+        if fields.len() < 7 {
+            continue;
+        }
+        let matches_user = user.is_some_and(|user| user == fields[0]);
+        let matches_uid = uid.is_some_and(|uid| uid == fields[2]);
+        if matches_user || matches_uid {
+            return Some(PathBuf::from(fields[5]));
+        }
+    }
+    None
 }
 
 pub fn normalize_path(value: &str) -> String {
@@ -140,6 +187,69 @@ pub fn normalize_path(value: &str) -> String {
         normalized.pop();
     }
     normalized
+}
+
+/// Suggestions for prompts that accept a file or directory path.
+fn file_path_suggestions(input: &str) -> Vec<String> {
+    complete_paths(input, true)
+}
+
+/// Suggestions for prompts that only accept a directory path.
+fn directory_suggestions(input: &str) -> Vec<String> {
+    complete_paths(input, false)
+}
+
+/// Complete the last path component, keeping the prefix the user typed.
+///
+/// Directories are returned with a trailing slash so pressing the completion
+/// again continues inside them.
+fn complete_paths(input: &str, include_files: bool) -> Vec<String> {
+    const MAX_SUGGESTIONS: usize = 25;
+
+    let (dir_part, prefix) = match input.rsplit_once('/') {
+        Some((dir, name)) => (format!("{dir}/"), name),
+        None => (String::new(), input),
+    };
+    let read_dir = if dir_part.is_empty() {
+        PathBuf::from(".")
+    } else {
+        expand_tilde(&dir_part)
+    };
+    let Ok(entries) = fs::read_dir(read_dir) else {
+        return Vec::new();
+    };
+    let prefix = prefix.to_lowercase();
+
+    let mut suggestions: Vec<(bool, String, String)> = entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if !name.to_lowercase().starts_with(&prefix) {
+                return None;
+            }
+            // Only offer dotfiles when the user is explicitly typing a dot.
+            if !prefix.starts_with('.') && name.starts_with('.') {
+                return None;
+            }
+            let is_dir = entry.file_type().ok()?.is_dir();
+            if !is_dir && !include_files {
+                return None;
+            }
+            let mut suggestion = format!("{dir_part}{name}");
+            if is_dir {
+                suggestion.push('/');
+            }
+            // Directories first, then alphabetically.
+            Some((!is_dir, name.to_lowercase(), suggestion))
+        })
+        .collect();
+
+    suggestions.sort();
+    suggestions.truncate(MAX_SUGGESTIONS);
+    suggestions
+        .into_iter()
+        .map(|(_, _, suggestion)| suggestion)
+        .collect()
 }
 
 pub fn validate_data_dir(value: &str) -> Result<(), String> {
@@ -198,9 +308,9 @@ fn nearest_existing(path: &Path) -> PathBuf {
 }
 
 pub fn validate_wireguard_key(value: &str) -> Result<(), String> {
-    let decoded = STANDARD
-        .decode(value)
-        .map_err(|_| "Not valid base64 — copy the \"PrivateKey\" value from the Mullvad .json config.")?;
+    let decoded = STANDARD.decode(value).map_err(
+        |_| "Not valid base64 — copy the \"PrivateKey\" value from the Mullvad .conf config.",
+    )?;
     match decoded.len() {
         32 => Ok(()),
         other => Err(format!(
@@ -213,9 +323,9 @@ pub fn validate_wireguard_address(value: &str) -> Result<(), String> {
     let (address, prefix) = value
         .split_once('/')
         .ok_or_else(|| "Expected CIDR notation, e.g. 10.64.12.34/32.".to_string())?;
-    address
-        .parse::<Ipv4Addr>()
-        .map_err(|_| "Not an IPv4 address — use the IPv4 \"Address\" entry from the config file.".to_string())?;
+    address.parse::<Ipv4Addr>().map_err(|_| {
+        "Not an IPv4 address — use the IPv4 \"Address\" entry from the config file.".to_string()
+    })?;
     let prefix: u8 = prefix
         .parse()
         .map_err(|_| "The /prefix after the slash must be a number, usually 32.".to_string())?;
@@ -225,11 +335,90 @@ pub fn validate_wireguard_address(value: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub fn validate_countries(value: &str) -> Result<(), String> {
-    if value.trim().is_empty() {
-        return Err("Give at least one country, or edit SERVER_COUNTRIES in torrent/.env later.".into());
+#[cfg(test)]
+mod path_completion_tests {
+    use super::*;
+
+    fn fixture(label: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("churn-complete-{}-{label}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("Downloads")).unwrap();
+        fs::create_dir_all(dir.join(".hidden-dir")).unwrap();
+        fs::write(dir.join("notes.txt"), "").unwrap();
+        fs::write(dir.join(".hidden.txt"), "").unwrap();
+        dir
     }
-    Ok(())
+
+    #[test]
+    fn completes_directories_and_files() {
+        let dir = fixture("files");
+        let prefix = dir.to_string_lossy();
+
+        assert_eq!(
+            complete_paths(&format!("{prefix}/Down"), true),
+            vec![format!("{prefix}/Downloads/")]
+        );
+        assert_eq!(
+            complete_paths(&format!("{prefix}/notes"), true),
+            vec![format!("{prefix}/notes.txt")]
+        );
+        // Directories come first and get a trailing slash.
+        let all = complete_paths(&format!("{prefix}/"), true);
+        assert_eq!(all[0], format!("{prefix}/Downloads/"));
+        assert!(!all.iter().any(|entry| entry.ends_with(".hidden.txt")));
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn directory_prompts_do_not_suggest_files() {
+        let dir = fixture("dirs");
+        let prefix = dir.to_string_lossy();
+
+        assert_eq!(
+            complete_paths(&format!("{prefix}/notes"), false),
+            Vec::<String>::new()
+        );
+        assert!(
+            complete_paths(&format!("{prefix}/"), false)
+                .iter()
+                .all(|entry| entry.ends_with('/'))
+        );
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn sudo_user_home_is_resolved_through_passwd() {
+        let passwd = "\
+root:x:0:0:root:/root:/bin/bash
+monke:x:1000:1000::/home/monke:/bin/bash
+";
+        assert_eq!(
+            home_from_passwd(passwd, Some("monke"), None),
+            Some(PathBuf::from("/home/monke"))
+        );
+        assert_eq!(
+            home_from_passwd(passwd, None, Some("1000")),
+            Some(PathBuf::from("/home/monke"))
+        );
+        assert_eq!(home_from_passwd(passwd, Some("nobody"), None), None);
+    }
+
+    #[test]
+    fn dotfiles_are_suggested_only_after_a_dot() {
+        let dir = fixture("dots");
+        let prefix = dir.to_string_lossy();
+
+        assert!(
+            complete_paths(&format!("{prefix}/.hidden"), true)
+                .iter()
+                .any(|entry| entry.ends_with(".hidden.txt"))
+        );
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
 }
 
 /// Redact a secret for the confirmation summary.

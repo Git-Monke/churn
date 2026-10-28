@@ -11,6 +11,7 @@ use std::process::ExitCode;
 
 use cliclack::{confirm, intro, log, multiselect, note, outro, outro_cancel, outro_note, spinner};
 
+use churn::mullvad;
 use churn::question::{Question, Section};
 use churn::stack::{self, Answers, Stack};
 use churn::system;
@@ -113,6 +114,22 @@ fn ask_questions(questions: &[Question]) -> std::io::Result<HashMap<Question, St
             explain(section);
             current = Some(section);
         }
+        if *question == Question::WireguardArchive {
+            loop {
+                let archive = question.ask(stored(question))?;
+                match mullvad::select_config(Path::new(&archive)) {
+                    Ok((entry, config)) => {
+                        answers.insert(Question::WireguardArchive, archive);
+                        answers.insert(Question::WireguardConfig, entry);
+                        answers.insert(Question::WireguardPrivateKey, config.private_key);
+                        answers.insert(Question::WireguardAddresses, config.address);
+                        break;
+                    }
+                    Err(message) => log::error(message)?,
+                }
+            }
+            continue;
+        }
         answers.insert(*question, question.ask(stored(question))?);
     }
     Ok(answers)
@@ -124,9 +141,10 @@ fn explain(section: Section) {
             let _ = note(
                 "Where to get these",
                 "mullvad.net → Account → WireGuard config → download zip\n\
-                 Open any .json inside it:\n\n\
-                 PrivateKey  →  WireGuard private key\n\
-                 Address     →  interface address, IPv4 entry with /32\n\n\
+                 Point churn at the downloaded .zip. It reads PrivateKey and the\n\
+                 IPv4 Address from one of the .conf files (any file works — they\n\
+                 share the same key).\n\n\
+                 Paths: Tab completes, ↑/↓ choose, Enter submits.\n\n\
                  The key is written only to torrent/.env, which is gitignored.",
             );
         }
@@ -135,7 +153,8 @@ fn explain(section: Section) {
                 "Storage layout",
                 "One absolute host path holds media and downloads.\n\
                  It is mounted at /data inside every container, so Jellyfin and\n\
-                 qBittorrent agree on paths no matter where they run.",
+                 qBittorrent agree on paths no matter where they run.\n\n\
+                 Paths: Tab completes, ↑/↓ choose, Enter submits.",
             );
         }
     }
@@ -171,8 +190,8 @@ fn show_plan(chosen: &[Stack], questions: &[Question], answers: &Answers) -> io:
         lines.push_str(&format!("{:<8} {}\n", stack.key(), stack.description()));
     }
     lines.push('\n');
-    for question in questions {
-        if let Some(value) = stack::summary(*question, answers) {
+    for question in questions.iter().copied().chain(Question::DETAILS) {
+        if let Some(value) = stack::summary(question, answers) {
             lines.push_str(&format!("{:<30} {value}\n", question.label()));
         }
     }
