@@ -53,6 +53,18 @@ impl Stack {
         self.dir().join(".env")
     }
 
+    /// Generated state that an uninstall removes.
+    ///
+    /// These are only app configuration, caches and the generated `.env`; the
+    /// media/download directory (`DATA_DIR`) is never included.
+    pub fn state_paths(self) -> Vec<PathBuf> {
+        let dir = self.dir();
+        match self {
+            Stack::Server => vec![dir.join("config"), dir.join("cache"), self.env_path()],
+            Stack::Torrent => vec![dir.join("config"), self.env_path()],
+        }
+    }
+
     pub fn next_steps(self) -> &'static [&'static str] {
         match self {
             Stack::Server => &[
@@ -212,5 +224,29 @@ mod tests {
     fn server_country_defaults_when_not_configured() {
         assert_eq!(server_countries(None), DEFAULT_SERVER_COUNTRIES);
         assert_eq!(server_countries(Some("Sweden")), "Sweden");
+    }
+
+    #[test]
+    fn uninstall_targets_only_generated_state() {
+        let names = |stack: Stack| {
+            stack
+                .state_paths()
+                .into_iter()
+                .map(|path| path.strip_prefix(stack.dir()).unwrap().to_path_buf())
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(
+            names(Stack::Server),
+            vec![
+                PathBuf::from("config"),
+                PathBuf::from("cache"),
+                PathBuf::from(".env")
+            ]
+        );
+        assert_eq!(
+            names(Stack::Torrent),
+            vec![PathBuf::from("config"), PathBuf::from(".env")]
+        );
     }
 }

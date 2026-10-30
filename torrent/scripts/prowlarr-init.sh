@@ -12,7 +12,8 @@
 #   * registers qBittorrent in Sonarr and Radarr using the `tv`/`movies`
 #     categories.
 #
-# Every step is idempotent: an existing item is left alone.
+# Every step is idempotent. Existing download clients are updated as well as
+# created, so a rotated qBittorrent API key is picked up on rerun.
 #
 # Same-machine assumption: Sonarr and Radarr run in the server stack on this
 # same host, so their keys are read from ../server/config (mounted below) and
@@ -46,6 +47,29 @@ read_key() {
     sed -n 's:.*<ApiKey>\([^<]*\)</ApiKey>.*:\1:p' "$1" | head -n 1
 }
 
+# Prowlarr/Sonarr/Radarr serialize API lists as pretty-printed arrays. Extract
+# the id of the object with the requested implementation, so an existing
+# download client can be updated instead of skipped.
+json_id_for_implementation() {
+    implementation=$1
+    awk -v wanted="$implementation" '
+        /^  \},?$/ {
+            if (match_impl && id != "") print id
+            match_impl = 0
+            id = ""
+            next
+        }
+        {
+            if ($0 ~ "\"implementation\"[[:space:]]*:[[:space:]]*\"" wanted "\"") match_impl = 1
+            if (match($0, /"id"[[:space:]]*:[[:space:]]*[0-9]+/)) {
+                value = substr($0, RSTART, RLENGTH)
+                sub(/^.*:[[:space:]]*/, "", value)
+                id = value
+            }
+        }
+    '
+}
+
 # ---------------------------------------------------------------- Prowlarr key
 # Prowlarr writes its API key to config.xml during first startup.
 started=$(date +%s)
@@ -64,9 +88,18 @@ while [ -z "$api_key" ]; do
     sleep 2
 done
 
-qbittorrent_key=$(sed -n 's:^WebUI\\APIKey=\(.*\)$:\1:p' "$qbittorrent_config" | head -n 1)
+# qBittorrent 5.x stores the API key under [WebUI] as APIKey=. Older churn
+# releases wrote WebUI\APIKey under [Preferences]; accept that as a fallback
+# while qbittorrent-init migrates it.
+qbittorrent_key=$(awk '
+    /^\[/ { in_webui = ($0 == "[WebUI]"); next }
+    in_webui && /^APIKey=/ { sub(/^APIKey=/, ""); print; exit }
+' "$qbittorrent_config")
 if [ -z "$qbittorrent_key" ]; then
-    echo "no WebUI\\APIKey in $qbittorrent_config" >&2
+    qbittorrent_key=$(sed -n 's:^WebUI\\APIKey=\(.*\)$:\1:p' "$qbittorrent_config" | head -n 1)
+fi
+if [ -z "$qbittorrent_key" ]; then
+    echo "no qBittorrent API key in $qbittorrent_config" >&2
     exit 1
 fi
 
@@ -91,14 +124,24 @@ for category in prowlarr tv movies; do
 done
 
 # ------------------------------------------------ Prowlarr download client
-existing=$(curl -fsS -H "X-Api-Key: $api_key" "$prowlarr/api/v1/downloadclient")
-if printf '%s' "$existing" | grep -Eq '"implementation"[[:space:]]*:[[:space:]]*"QBittorrent"'; then
-    echo "qBittorrent is already registered with Prowlarr"
+existing_id=$(curl -fsS -H "X-Api-Key: $api_key" "$prowlarr/api/v1/downloadclient" \
+    | json_id_for_implementation QBittorrent)
+if [ -n "$existing_id" ]; then
+    method=PUT
+    target="$prowlarr/api/v1/downloadclient/$existing_id"
+    id_field="\"id\": $existing_id,"
+    message="updated qBittorrent in Prowlarr"
 else
-    payload=$(mktemp)
-    trap 'rm -f "$payload"' EXIT INT TERM
-    cat >"$payload" <<EOF
+    method=POST
+    target="$prowlarr/api/v1/downloadclient"
+    id_field=
+    message="registered qBittorrent as a Prowlarr download client"
+fi
+payload=$(mktemp)
+trap 'rm -f "$payload"' EXIT INT TERM
+cat >"$payload" <<EOF
 {
+  $id_field
   "enable": true,
   "protocol": "torrent",
   "priority": 1,
@@ -125,14 +168,13 @@ else
 }
 EOF
 
-    curl -fsS -X POST \
-        -H "X-Api-Key: $api_key" \
-        -H "Content-Type: application/json" \
-        --data-binary "@$payload" \
-        "$prowlarr/api/v1/downloadclient" >/dev/null
+curl -fsS -X "$method" \
+    -H "X-Api-Key: $api_key" \
+    -H "Content-Type: application/json" \
+    --data-binary "@$payload" \
+    "$target" >/dev/null
 
-    echo "registered qBittorrent as a Prowlarr download client"
-fi
+echo "$message"
 
 # ------------------------------------------------- Sonarr and Radarr wiring
 if [ -z "$host_ip" ]; then
@@ -236,14 +278,23 @@ qbittorrent_host=${QBITTORRENT_HOST:-$host_ip}
 qbittorrent_port=${QBITTORRENT_PORT:-8080}
 
 register_sonarr_download_client() {
-    existing=$(curl -fsS -H "X-Api-Key: $sonarr_key" "$sonarr_url/api/v3/downloadclient")
-    if printf '%s' "$existing" | grep -Eq '"implementation"[[:space:]]*:[[:space:]]*"QBittorrent"'; then
-        echo "qBittorrent is already registered with Sonarr"
-        return 0
+    existing_id=$(curl -fsS -H "X-Api-Key: $sonarr_key" "$sonarr_url/api/v3/downloadclient" \
+        | json_id_for_implementation QBittorrent)
+    if [ -n "$existing_id" ]; then
+        method=PUT
+        target="$sonarr_url/api/v3/downloadclient/$existing_id"
+        id_field="\"id\": $existing_id,"
+        message="updated qBittorrent in Sonarr (category tv)"
+    else
+        method=POST
+        target="$sonarr_url/api/v3/downloadclient"
+        id_field=
+        message="registered qBittorrent as a Sonarr download client (category tv)"
     fi
     payload=$(mktemp)
     cat >"$payload" <<EOF
 {
+  $id_field
   "enable": true,
   "protocol": "torrent",
   "priority": 1,
@@ -271,24 +322,33 @@ register_sonarr_download_client() {
   ]
 }
 EOF
-    curl -fsS -X POST \
+    curl -fsS -X "$method" \
         -H "X-Api-Key: $sonarr_key" \
         -H "Content-Type: application/json" \
         --data-binary "@$payload" \
-        "$sonarr_url/api/v3/downloadclient" >/dev/null
+        "$target" >/dev/null
     rm -f "$payload"
-    echo "registered qBittorrent as a Sonarr download client (category tv)"
+    echo "$message"
 }
 
 register_radarr_download_client() {
-    existing=$(curl -fsS -H "X-Api-Key: $radarr_key" "$radarr_url/api/v3/downloadclient")
-    if printf '%s' "$existing" | grep -Eq '"implementation"[[:space:]]*:[[:space:]]*"QBittorrent"'; then
-        echo "qBittorrent is already registered with Radarr"
-        return 0
+    existing_id=$(curl -fsS -H "X-Api-Key: $radarr_key" "$radarr_url/api/v3/downloadclient" \
+        | json_id_for_implementation QBittorrent)
+    if [ -n "$existing_id" ]; then
+        method=PUT
+        target="$radarr_url/api/v3/downloadclient/$existing_id"
+        id_field="\"id\": $existing_id,"
+        message="updated qBittorrent in Radarr (category movies)"
+    else
+        method=POST
+        target="$radarr_url/api/v3/downloadclient"
+        id_field=
+        message="registered qBittorrent as a Radarr download client (category movies)"
     fi
     payload=$(mktemp)
     cat >"$payload" <<EOF
 {
+  $id_field
   "enable": true,
   "protocol": "torrent",
   "priority": 1,
@@ -315,13 +375,13 @@ register_radarr_download_client() {
   ]
 }
 EOF
-    curl -fsS -X POST \
+    curl -fsS -X "$method" \
         -H "X-Api-Key: $radarr_key" \
         -H "Content-Type: application/json" \
         --data-binary "@$payload" \
-        "$radarr_url/api/v3/downloadclient" >/dev/null
+        "$target" >/dev/null
     rm -f "$payload"
-    echo "registered qBittorrent as a Radarr download client (category movies)"
+    echo "$message"
 }
 
 if [ -n "$sonarr_key" ] && wait_for "Sonarr's API" \

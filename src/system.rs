@@ -157,17 +157,24 @@ fn command_succeeds(program: &str, args: &[&str]) -> bool {
 /// The tail of the output is retained so a failed run still reports what Docker
 /// was doing.
 pub fn compose_up(dir: &Path, on_event: &mut dyn FnMut(&str)) -> io::Result<()> {
+    compose_run(dir, "up", &["up", "-d"], on_event)
+}
+
+/// Stop and remove the project's containers and networks.
+pub fn compose_down(dir: &Path, on_event: &mut dyn FnMut(&str)) -> io::Result<()> {
+    compose_run(dir, "down", &["down", "--remove-orphans"], on_event)
+}
+
+fn compose_run(
+    dir: &Path,
+    action: &str,
+    args: &[&str],
+    on_event: &mut dyn FnMut(&str),
+) -> io::Result<()> {
     let mut command = Command::new("docker");
     command
-        .args([
-            "compose",
-            "--ansi",
-            "never",
-            "--progress",
-            "json",
-            "up",
-            "-d",
-        ])
+        .args(["compose", "--ansi", "never", "--progress", "json"])
+        .args(args)
         .current_dir(dir);
 
     let output = run_streaming(command, on_event)?;
@@ -183,7 +190,7 @@ pub fn compose_up(dir: &Path, on_event: &mut dyn FnMut(&str)) -> io::Result<()> 
         .collect::<Vec<_>>()
         .join("\n");
     let mut message = format!(
-        "docker compose up failed in {} ({})",
+        "docker compose {action} failed in {} ({})",
         dir.display(),
         output.status
     );

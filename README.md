@@ -55,6 +55,28 @@ sudo ./target/release/churn --stacks server,torrent   # skip the menu
 sudo ./target/release/churn --dry-run                # collect answers, write nothing
 ```
 
+## Uninstall
+
+`--uninstall` stops and removes the stack containers with `docker compose
+down --remove-orphans`, then deletes the generated app state:
+
+```
+server/config      server/cache      server/.env
+torrent/config     torrent/.env
+```
+
+The media/download directory (`DATA_DIR`), Docker images, and the committed
+compose files and scripts are left untouched. If Docker Compose fails to remove
+a stack, churn stops before deleting any config so the containers and their
+credentials stay consistent.
+
+```bash
+sudo ./target/release/churn --uninstall              # both stacks
+sudo ./target/release/churn --uninstall --dry-run    # show the plan only
+sudo ./target/release/churn --uninstall --stacks torrent
+sudo ./target/release/churn --uninstall --yes        # no confirmation
+```
+
 ## What it writes
 
 `.env` files only; the compose files are static and committed. churn then runs

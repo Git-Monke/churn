@@ -5,6 +5,7 @@
 //! the media path a single time.
 
 use std::collections::HashMap;
+use std::fs;
 use std::io;
 use std::path::Path;
 use std::process::ExitCode;
@@ -22,20 +23,25 @@ churn — installer for the torrent/media stack
 
 Must be run as root (for example: sudo churn). If Docker is missing, churn
 offers to install it for the detected Linux distribution. After writing each
-stack's .env, it starts the stack with docker compose up -d.
+stack's .env, it starts the stack with docker compose up -d. Use --uninstall to
+stop/remove the containers and delete generated config without touching DATA_DIR.
 
 USAGE:
     churn [OPTIONS]
 
 OPTIONS:
-    --stacks <LIST>   comma separated: server,torrent (skips the menu)
-    --dry-run         collect answers, write nothing, start nothing
+    --stacks <LIST>   comma separated: server,torrent (skips the menu; with
+                      --uninstall, limits what is removed)
+    --uninstall       stop and remove the stack containers, then delete their
+                      generated config, cache and .env files; DATA_DIR is kept
+    --dry-run         show the plan; write, remove and start nothing
     -y, --yes         skip the final confirmation
     -h, --help        show this help";
 
 #[derive(Default)]
 struct Args {
     stacks: Option<Vec<Stack>>,
+    uninstall: bool,
     dry_run: bool,
     yes: bool,
     help: bool,
@@ -50,6 +56,7 @@ fn parse_args() -> Result<Args, String> {
                 let value = raw.next().ok_or("--stacks needs a value")?;
                 args.stacks = Some(parse_stack_list(&value)?);
             }
+            "--uninstall" => args.uninstall = true,
             "--dry-run" => args.dry_run = true,
             "-y" | "--yes" => args.yes = true,
             "-h" | "--help" => args.help = true,
@@ -325,8 +332,94 @@ fn start_stacks(chosen: &[Stack], dry_run: bool) -> io::Result<()> {
     Ok(())
 }
 
+/// Stop/remove containers and delete generated state, while keeping `DATA_DIR`.
+fn uninstall(args: Args) -> io::Result<bool> {
+    intro("churn · torrent stack uninstaller")?;
+
+    if !ensure_root()? {
+        return Ok(false);
+    }
+
+    let chosen = stack::start_order(args.stacks.clone().unwrap_or_else(|| Stack::ALL.to_vec()));
+
+    let mut lines = String::new();
+    for stack in &chosen {
+        lines.push_str(&format!("{}\n", stack.key()));
+        for path in stack.state_paths() {
+            lines.push_str(&format!("  delete {}\n", path.display()));
+        }
+    }
+    lines.push_str("\nDATA_DIR, media and downloads are left untouched.");
+    note("About to uninstall", lines.trim_end().to_string())?;
+
+    if !args.yes
+        && !confirm(if args.dry_run {
+            "Remove these containers and files?"
+        } else {
+            "Stop and remove the containers, then delete these files?"
+        })
+        .initial_value(true)
+        .interact()?
+    {
+        outro_cancel("cancelled — nothing removed")?;
+        return Ok(true);
+    }
+
+    if args.dry_run {
+        outro("dry run complete — nothing removed")?;
+        return Ok(true);
+    }
+
+    if !system::docker_ready() {
+        log::warning("docker is not available — skipping container removal")?;
+    } else {
+        let mut errors = Vec::new();
+        for (index, stack) in chosen.iter().enumerate() {
+            let header = format!("[{}/{}] removing {}", index + 1, chosen.len(), stack.key());
+            let mut live = LiveLog::start(header);
+            match system::compose_down(&stack.dir(), &mut |line| live.push(line)) {
+                Ok(()) => live.success(format!("removed {} containers", stack.key())),
+                Err(err) => {
+                    live.error(format!("failed to remove {}", stack.key()));
+                    errors.push(err.to_string());
+                }
+            }
+        }
+        if !errors.is_empty() {
+            return Err(io::Error::other(format!(
+                "could not remove all containers; config files were left untouched:\n{}",
+                errors.join("\n")
+            )));
+        }
+    }
+
+    let progress = spinner();
+    for stack in &chosen {
+        for path in stack.state_paths() {
+            progress.start(format!("removing {}", path.display()));
+            if !path.exists() {
+                progress.stop(format!("already gone: {}", path.display()));
+                continue;
+            }
+            if path.is_dir() {
+                fs::remove_dir_all(&path)?;
+            } else {
+                fs::remove_file(&path)?;
+            }
+            progress.stop(format!("removed {}", path.display()));
+        }
+    }
+
+    outro("uninstalled — data and compose files were left in place")?;
+    Ok(true)
+}
+
 /// Returns `false` when a preflight check stopped the installer.
 fn run(args: Args) -> io::Result<bool> {
+    if args.uninstall {
+        return uninstall(args);
+    }
+
     intro("churn · torrent stack installer")?;
 
     if !ensure_root()? || !ensure_docker()? {
