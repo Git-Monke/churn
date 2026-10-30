@@ -62,11 +62,11 @@ npm install
 npm run dev        # UI http://127.0.0.1:5173, API http://127.0.0.1:4000
 ```
 
-Finish Jellyfin's first-run wizard and add `JELLYFIN_API_KEY` to `server/.env`
-to show the library. Sonarr and Radarr API keys are read from
-`server/config/*/config.xml` unless overridden. `churn` should eventually
-complete Jellyfin setup and create that key automatically; until then the
-dashboard shows a setup notice.
+After the server stack starts, churn completes Jellyfin's first-run wizard,
+creates an API key named `churn`, and writes it to `server/.env` as
+`JELLYFIN_API_KEY`. It asks for the Jellyfin admin username and password when
+needed; the password is not stored. Sonarr and Radarr API keys are read from
+`server/config/*/config.xml` unless overridden.
 
 The planned order is: library/status dashboard, search and media requests,
 download/activity queue, then Jellyfin playback controls. See

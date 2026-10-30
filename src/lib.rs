@@ -2,6 +2,7 @@
 
 pub mod compose;
 pub mod envfile;
+pub mod jellyfin;
 pub mod live;
 pub mod mullvad;
 pub mod question;

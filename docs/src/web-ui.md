@@ -39,22 +39,26 @@ survive a rerun.
 | `HOST` | `127.0.0.1` | Backend bind address |
 | `PORT` | `4000` | Backend port |
 | `JELLYFIN_URL` | `http://127.0.0.1:8096` | Jellyfin base URL |
-| `JELLYFIN_API_KEY` | — | Required for the library |
+| `JELLYFIN_API_KEY` | — | Written by churn after Jellyfin setup |
+| `JELLYFIN_ADMIN_USER` | `admin` | Optional non-interactive setup username |
+| `JELLYFIN_ADMIN_PASSWORD` | — | Optional non-interactive setup password |
 | `SONARR_URL` / `RADARR_URL` | localhost ports | Arr base URLs |
 | `SONARR_API_KEY` / `RADARR_API_KEY` | `config.xml` | Optional overrides |
 | `REQUEST_TIMEOUT_MS` | `5000` | Upstream timeout |
 | `CHURN_SERVER_DIR` | module-relative | Override `server/` root |
 
-Jellyfin needs its first-run wizard completed before an API key can exist. On a
-fresh install the dashboard shows a setup notice and the library stays empty.
-Create a key under Dashboard → API Keys and add it to `server/.env`:
+Churn completes Jellyfin's first-run setup after starting the server stack. It
+asks for a Jellyfin admin username and password when none is configured yet,
+creates the first admin, completes the wizard with remote access disabled, and
+creates an API key named `churn`. The key is written to `server/.env`:
 
 ```bash
-JELLYFIN_API_KEY=<key>
+JELLYFIN_API_KEY=<generated-key>
 ```
 
-**Follow-up:** churn should complete Jellyfin setup and write this key
-automatically during installation. That is not implemented yet.
+The admin password is not written to `.env`. Set `JELLYFIN_ADMIN_USER` and
+`JELLYFIN_ADMIN_PASSWORD` in the environment for non-interactive setup. Reruns
+reuse a valid existing key.
 
 ## API
 

@@ -9,9 +9,15 @@ use std::fs;
 use std::io;
 use std::path::Path;
 use std::process::ExitCode;
+use std::time::Duration;
 
-use cliclack::{confirm, intro, log, multiselect, note, outro, outro_cancel, outro_note, spinner};
+use cliclack::{
+    confirm, input, intro, log, multiselect, note, outro, outro_cancel, outro_note, password,
+    spinner,
+};
 
+use churn::envfile;
+use churn::jellyfin::{self, Credentials, Jellyfin};
 use churn::live::LiveLog;
 use churn::mullvad;
 use churn::question::{Question, Section};
@@ -23,7 +29,8 @@ churn — installer for the torrent/media stack
 
 Must be run as root (for example: sudo churn). If Docker is missing, churn
 offers to install it for the detected Linux distribution. After writing each
-stack's .env, it starts the stack with docker compose up -d. Use --uninstall to
+stack's .env, it starts the stack with docker compose up -d and completes Jellyfin
+first-run setup, writing a generated API key to server/.env. Use --uninstall to
 stop/remove the containers and delete generated config without touching DATA_DIR.
 
 USAGE:
@@ -208,6 +215,12 @@ fn show_plan(chosen: &[Stack], questions: &[Question], answers: &Answers) -> io:
             lines.push_str(&format!("{:<30} {value}\n", question.label()));
         }
     }
+    if chosen.contains(&Stack::Server) {
+        lines.push_str(
+            "\nJellyfin will be set up after it starts. If it needs an admin account,\n\
+             churn asks for the username and password then (the password is not saved).\n",
+        );
+    }
     note("About to install", lines.trim_end().to_string())
 }
 
@@ -288,6 +301,131 @@ fn ensure_docker() -> io::Result<bool> {
     }
     log::success("docker installed and ready")?;
     Ok(true)
+}
+
+/// Jellyfin is configured over its HTTP API after the server stack starts.
+/// This creates the first admin account when needed, completes the startup
+/// wizard, mints an API key and writes it to `server/.env`.
+fn setup_jellyfin(dry_run: bool) -> io::Result<()> {
+    if dry_run {
+        log::info("would complete Jellyfin setup and create an API key")?;
+        return Ok(());
+    }
+
+    let env_path = Stack::Server.env_path();
+    let env = envfile::read(&env_path);
+    let base_url = std::env::var("JELLYFIN_URL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| env.get("JELLYFIN_URL").cloned())
+        .unwrap_or_else(|| "http://127.0.0.1:8096".to_string());
+    let client = Jellyfin::new(base_url, Duration::from_secs(5));
+
+    let progress = spinner();
+    progress.start("waiting for Jellyfin");
+    let public = match client.wait_until_ready(Duration::from_secs(120)) {
+        Ok(public) => {
+            let version = public
+                .version
+                .as_deref()
+                .map(|version| format!(" {version}"))
+                .unwrap_or_default();
+            progress.stop(format!("Jellyfin{version} is ready"));
+            public
+        }
+        Err(err) => {
+            progress.stop("Jellyfin did not become ready");
+            return Err(err);
+        }
+    };
+
+    let existing_key = std::env::var(jellyfin::API_KEY_ENV)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| env.get(jellyfin::API_KEY_ENV).cloned());
+    if let Some(key) = existing_key {
+        match client.validate_api_key(&key) {
+            Ok(true) => {
+                log::success("Jellyfin is already configured and its API key is valid")?;
+                return Ok(());
+            }
+            Ok(false) => {
+                log::warning("the existing Jellyfin API key is invalid — creating a new one")?;
+            }
+            Err(err) => return Err(err),
+        }
+    }
+
+    let credentials = jellyfin_credentials(&env)?;
+    let progress = spinner();
+    progress.start("setting up Jellyfin and creating an API key");
+    match client.provision(&env_path, &credentials, &public) {
+        Ok(result) => {
+            if result.completed_setup {
+                progress.stop("Jellyfin setup complete; API key saved to server/.env");
+            } else {
+                progress.stop("Jellyfin API key saved to server/.env");
+            }
+            log::info(format!(
+                "Jellyfin admin user: {} (keep the password you entered)",
+                credentials.username
+            ))?;
+            Ok(())
+        }
+        Err(err) => {
+            progress.stop("Jellyfin setup failed");
+            Err(err)
+        }
+    }
+}
+
+fn jellyfin_credentials(env: &envfile::EnvMap) -> io::Result<Credentials> {
+    let env_value = |key: &str| {
+        std::env::var(key)
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| {
+                env.get(key)
+                    .map(|value| value.trim().to_string())
+                    .filter(|value| !value.is_empty())
+            })
+    };
+
+    let default_username = env_value("JELLYFIN_ADMIN_USER").unwrap_or_else(|| "admin".to_string());
+    let username = loop {
+        let value: String = input("Jellyfin admin username")
+            .placeholder("admin")
+            .default_input(&default_username)
+            .interact()?;
+        let value = value.trim().to_string();
+        match jellyfin::validate_username(&value) {
+            Ok(()) => break value,
+            Err(message) => log::error(message)?,
+        }
+    };
+
+    let stored_password = env_value("JELLYFIN_ADMIN_PASSWORD");
+    let password = if let Some(value) = stored_password {
+        jellyfin::validate_password(&value).map_err(io::Error::other)?;
+        value
+    } else {
+        loop {
+            let first: String = password("Choose a Jellyfin admin password").interact()?;
+            if let Err(message) = jellyfin::validate_password(&first) {
+                log::error(message)?;
+                continue;
+            }
+            let second: String = password("Confirm the Jellyfin admin password").interact()?;
+            if first != second {
+                log::error("Passwords do not match.")?;
+                continue;
+            }
+            break first;
+        }
+    };
+
+    log::info("the Jellyfin admin password is not stored by churn")?;
+    Ok(Credentials { username, password })
 }
 
 fn write_stacks(chosen: &[Stack], answers: &Answers, dry_run: bool) -> io::Result<()> {
@@ -458,6 +596,9 @@ fn run(args: Args) -> io::Result<bool> {
 
     write_stacks(&chosen, &answers, args.dry_run)?;
     start_stacks(&chosen, args.dry_run)?;
+    if chosen.contains(&Stack::Server) {
+        setup_jellyfin(args.dry_run)?;
+    }
 
     let mut steps = String::new();
     for stack in &chosen {

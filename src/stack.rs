@@ -71,7 +71,7 @@ impl Stack {
     pub fn next_steps(self) -> &'static [&'static str] {
         match self {
             Stack::Server => &[
-                "open http://<vm-ip>:8096  # Jellyfin",
+                "open http://<vm-ip>:8096  # Jellyfin (use the admin account churn created)",
                 "open http://<vm-ip>:8989  # Sonarr",
                 "open http://<vm-ip>:7878  # Radarr",
             ],

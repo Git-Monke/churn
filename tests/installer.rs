@@ -132,6 +132,32 @@ fn env_rewrite_preserves_hand_added_keys() {
     fs::remove_dir_all(&dir).unwrap();
 }
 
+#[test]
+fn env_upsert_updates_one_key_without_reformatting_the_file() {
+    let dir = std::env::temp_dir().join(format!("churn-upsert-test-{}", std::process::id()));
+    let path = dir.join(".env");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        &path,
+        "# generated\nDATA_DIR=/data\n# hand edited\nJELLYFIN_API_KEY=old\nKEEP=yes\n",
+    )
+    .unwrap();
+
+    envfile::upsert(&path, "JELLYFIN_API_KEY", "new").unwrap();
+
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        "# generated\nDATA_DIR=/data\n# hand edited\nJELLYFIN_API_KEY=new\nKEEP=yes\n"
+    );
+
+    envfile::upsert(&path, "JELLYFIN_API_KEY", "newer").unwrap();
+    let written = fs::read_to_string(&path).unwrap();
+    assert_eq!(written.matches("JELLYFIN_API_KEY=").count(), 1);
+    assert!(written.contains("JELLYFIN_API_KEY=newer"));
+
+    fs::remove_dir_all(&dir).unwrap();
+}
+
 const CONF: &str = "\
 [Interface]
 # Device: Square Dragon

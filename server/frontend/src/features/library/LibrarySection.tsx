@@ -105,8 +105,8 @@ function LibraryStateNotice({
         <AlertTitle>Finish Jellyfin setup</AlertTitle>
         <AlertDescription>
           Jellyfin&apos;s first-run wizard is not complete, so there is no library to show yet.
-          Complete setup, then create an API key and add it to <code>server/.env</code>. The
-          installer will eventually do this automatically.
+          Re-run the churn installer to finish setup and create the dashboard API key, or
+          complete the wizard and add <code>JELLYFIN_API_KEY</code> to <code>server/.env</code>.
         </AlertDescription>
         <AlertAction>
           <Button asChild variant="outline" size="sm">
@@ -124,8 +124,9 @@ function LibraryStateNotice({
         <CircleAlertIcon />
         <AlertTitle>Jellyfin API key required</AlertTitle>
         <AlertDescription>
-          Add <code>JELLYFIN_API_KEY</code> to <code>server/.env</code>, then restart the
-          backend. Create the key in Jellyfin under Dashboard → API Keys.
+          Re-run the churn installer to create the dashboard API key, or add
+          <code>JELLYFIN_API_KEY</code> to <code>server/.env</code> and restart the backend.
+          You can create a key in Jellyfin under Dashboard → API Keys.
         </AlertDescription>
         <AlertAction>
           <Button asChild variant="outline" size="sm">

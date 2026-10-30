@@ -65,6 +65,36 @@ pub fn write_merged(path: &Path, managed: &[(&str, String)]) -> io::Result<()> {
     fs::write(path, out)
 }
 
+/// Set one key in place, preserving comments, ordering and every other key.
+///
+/// Used after installation for values that only exist once a container has
+/// started, such as Jellyfin's generated API key.
+pub fn upsert(path: &Path, key: &str, value: &str) -> io::Result<()> {
+    let existing = fs::read_to_string(path).unwrap_or_default();
+    let prefix = format!("{key}=");
+    let mut out = String::with_capacity(existing.len() + key.len() + value.len() + 8);
+    let mut found = false;
+
+    for line in existing.lines() {
+        if line.trim_start().starts_with(&prefix) {
+            out.push_str(&format!("{key}={value}"));
+            found = true;
+        } else {
+            out.push_str(line);
+        }
+        out.push('\n');
+    }
+
+    if !found {
+        out.push_str(&format!("{key}={value}\n"));
+    }
+
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, out)
+}
+
 /// Owning uid/gid of the data directory, so containers can write to it.
 pub fn owner(path: &Path) -> (u32, u32) {
     match fs::metadata(path) {

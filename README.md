@@ -83,7 +83,7 @@ sudo ./target/release/churn --uninstall --yes        # no confirmation
 `docker compose up -d` in each selected stack directory.
 
 ```
-server/.env      DATA_DIR, PUID, PGID, TZ
+server/.env      DATA_DIR, PUID, PGID, TZ, JELLYFIN_API_KEY (after setup)
 torrent/.env     the above + HOST_IP + Mullvad credentials (and the archive path)
 ```
 
@@ -104,9 +104,11 @@ npm install
 npm run dev        # UI http://127.0.0.1:5173, API http://127.0.0.1:4000
 ```
 
-For the library to show, finish Jellyfin's first-run wizard and add a Jellyfin
-API key to `server/.env` as `JELLYFIN_API_KEY` (Dashboard → API Keys). Sonarr
-and Radarr keys are read automatically from `server/config/*/config.xml`.
+After the server stack starts, churn completes Jellyfin's first-run setup,
+creates an API key named `churn`, and writes it to `server/.env` as
+`JELLYFIN_API_KEY`. The installer asks for a Jellyfin admin username and
+password when needed; the password is not saved. Reruns reuse a valid key.
+Sonarr and Radarr keys are read automatically from `server/config/*/config.xml`.
 
 Production build:
 
@@ -119,10 +121,6 @@ npm start          # Fastify serves the SPA at http://127.0.0.1:4000
 See `server/README.md` for configuration and container notes. Development is
 planned in this order: library/status dashboard, search and media requests,
 download/activity queue, then Jellyfin playback controls.
-
-**Installer follow-up:** churn should eventually complete Jellyfin first-run
-setup and write `JELLYFIN_API_KEY` automatically. Jellyfin cannot create a key
-before an admin exists, so this is manual for now.
 
 ## Running a stack
 

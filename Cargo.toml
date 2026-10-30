@@ -9,6 +9,7 @@ cliclack = "0.5.6"
 console = "0.16"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+ureq = { version = "2.12", default-features = false, features = ["json"] }
 zip = { version = "5.1.1", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [patch.crates-io]

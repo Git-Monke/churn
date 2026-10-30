@@ -17,7 +17,7 @@ frontend only calls `/api/*` on the backend.
 
 - Node.js 22 or newer
 - The `server` stack running (Jellyfin, Sonarr, Radarr)
-- A Jellyfin API key to show the library (see below)
+- Churn to finish Jellyfin setup and create the API key (see below)
 
 ## Install and run
 
@@ -54,7 +54,9 @@ preserves unknown keys, so hand-added settings survive a rerun.
 | `HOST` | `127.0.0.1` | Backend bind address |
 | `PORT` | `4000` | Backend port |
 | `JELLYFIN_URL` | `http://127.0.0.1:8096` | Jellyfin base URL |
-| `JELLYFIN_API_KEY` | — | Required for the library; create under Dashboard → API Keys |
+| `JELLYFIN_API_KEY` | — | Written by churn after Jellyfin setup |
+| `JELLYFIN_ADMIN_USER` | `admin` | Optional non-interactive setup username |
+| `JELLYFIN_ADMIN_PASSWORD` | — | Optional non-interactive setup password; not persisted |
 | `SONARR_URL` | `http://127.0.0.1:8989` | Sonarr base URL |
 | `RADARR_URL` | `http://127.0.0.1:7878` | Radarr base URL |
 | `SONARR_API_KEY` | `server/config/sonarr/config.xml` | Optional override |
@@ -62,26 +64,28 @@ preserves unknown keys, so hand-added settings survive a rerun.
 | `REQUEST_TIMEOUT_MS` | `5000` | Upstream request timeout |
 | `CHURN_SERVER_DIR` | resolved from the backend module | Override the `server/` root |
 
-### Jellyfin API key
+### Jellyfin setup and API key
 
-Jellyfin's first-run wizard must be complete before an API key can be created.
-On the current install the wizard is still incomplete, so the dashboard shows a
-setup notice instead of the library.
+After starting the server stack, churn talks to Jellyfin's HTTP API to finish
+first-run setup:
 
-1. Open <http://127.0.0.1:8096> and finish the first-run wizard.
-2. Open Dashboard → API Keys and create a key.
-3. Add it to `server/.env`:
+1. It prompts for a Jellyfin admin username and password if Jellyfin is not
+   configured yet. The password is not saved by churn.
+2. It creates the first admin, completes the startup wizard locally with remote
+   access disabled, authenticates, and creates an API key named `churn`.
+3. It writes the key to `server/.env` as `JELLYFIN_API_KEY`. The backend reads
+   that file on startup; restart it if it is already running.
 
-```bash
-JELLYFIN_API_KEY=<key>
-```
+Reruns are idempotent: a valid existing key is reused. If the key is missing or
+invalid, churn authenticates with the admin credentials and creates/reuses the
+`churn` key.
 
-4. Restart the backend.
+For non-interactive provisioning, set `JELLYFIN_ADMIN_USER` and
+`JELLYFIN_ADMIN_PASSWORD` in the process environment or `server/.env`. These are
+only installer inputs, not backend settings; the password is never written back.
 
-**Installer follow-up:** churn should eventually complete Jellyfin first-run
-setup and create this key automatically during installation, writing
-`JELLYFIN_API_KEY` into `server/.env`. Jellyfin cannot create the key before an
-admin user exists, so this is manual until that work lands.
+If you configure Jellyfin manually, create a key under Dashboard → API Keys and
+put it in `server/.env`, then restart the backend.
 
 ## API
 
