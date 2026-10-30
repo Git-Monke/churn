@@ -8,6 +8,8 @@ use std::process::{Command, ExitStatus, Stdio};
 use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
 
+use crate::compose;
+
 /// A Linux distribution churn knows how to install Docker on.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Distro {
@@ -147,13 +149,14 @@ fn command_succeeds(program: &str, args: &[&str]) -> bool {
         .is_ok_and(|status| status.success())
 }
 
-/// Start the Compose project in `dir` (detached), forwarding each normalised
-/// output line to `on_line` as it arrives.
+/// Start the project in `dir` (detached), forwarding parsed Compose events to
+/// `on_event` as they arrive.
 ///
-/// Plain progress and disabled ANSI colours keep the stream line-oriented.
+/// JSON progress keeps each event's process id intact so the caller can keep a
+/// single latest line per image, container, network or volume.
 /// The tail of the output is retained so a failed run still reports what Docker
 /// was doing.
-pub fn compose_up(dir: &Path, on_line: &mut dyn FnMut(&str)) -> io::Result<()> {
+pub fn compose_up(dir: &Path, on_event: &mut dyn FnMut(&str)) -> io::Result<()> {
     let mut command = Command::new("docker");
     command
         .args([
@@ -161,18 +164,24 @@ pub fn compose_up(dir: &Path, on_line: &mut dyn FnMut(&str)) -> io::Result<()> {
             "--ansi",
             "never",
             "--progress",
-            "plain",
+            "json",
             "up",
             "-d",
         ])
         .current_dir(dir);
 
-    let output = run_streaming(command, on_line)?;
+    let output = run_streaming(command, on_event)?;
     if output.status.success() {
         return Ok(());
     }
 
-    let detail = output.tail.join("\n");
+    let detail = output
+        .tail
+        .iter()
+        .map(|line| compose::describe(line))
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
     let mut message = format!(
         "docker compose up failed in {} ({})",
         dir.display(),

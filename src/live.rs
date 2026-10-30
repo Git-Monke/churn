@@ -1,96 +1,30 @@
-//! A live, rolling view of the output of a long-running command.
+//! A live view of the output of a long-running command.
 //!
-//! Only a handful of informative lines are kept so the user can see Docker
-//! pulling, creating and starting containers while a spinner keeps the screen
-//! alive during quiet stretches.
+//! Compose runs pulls, creates and starts in parallel. Instead of keeping the
+//! last few lines overall, each process keeps only its latest line, so one
+//! chatty image or layer cannot push another process out of view.
 
-use std::collections::VecDeque;
 use std::fmt::Display;
 
 use cliclack::{ProgressBar, spinner};
 use console::Term;
 
-/// How many log lines to keep on screen.
-const WINDOW: usize = 5;
+use crate::compose::Event;
 
-/// The kinds of Compose output worth showing.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum LineKind {
-    /// Pull/create/start/error milestones: always appended.
-    Milestone,
-    /// Layer download/extract updates: replace the previous activity line.
-    Activity,
+/// One row in the live view: the latest event for a single process.
+struct ProcessLine {
+    key: String,
+    line: String,
 }
 
-/// Decide whether a Compose line is worth showing and how it should be treated.
-pub fn classify(line: &str) -> Option<LineKind> {
-    let line = line.trim();
-    if line.is_empty() {
-        return None;
-    }
-    let lower = line.to_ascii_lowercase();
-
-    const PROBLEMS: &[&str] = &[
-        "error",
-        "failed",
-        "failure",
-        "warning",
-        "denied",
-        "cannot",
-        "unable",
-        "not found",
-    ];
-    if PROBLEMS.iter().any(|needle| lower.contains(needle)) {
-        return Some(LineKind::Milestone);
-    }
-
-    const MILESTONES: &[&str] = &[
-        "pulled",
-        "created",
-        "started",
-        "recreated",
-        "stopped",
-        "removed",
-        "healthy",
-        "waiting",
-        "building",
-        "built",
-        "network",
-        "container",
-        "volume",
-    ];
-    if line.starts_with("[+]") || MILESTONES.iter().any(|needle| lower.contains(needle)) {
-        return Some(LineKind::Milestone);
-    }
-
-    // A pull that has just begun has no progress counters yet.
-    if lower.ends_with("pulling") || lower.ends_with("waiting") {
-        return Some(LineKind::Milestone);
-    }
-
-    const ACTIVITY: &[&str] = &[
-        "downloading",
-        "extracting",
-        "pulling",
-        "waiting",
-        "building",
-    ];
-    if ACTIVITY.iter().any(|needle| lower.contains(needle)) {
-        return Some(LineKind::Activity);
-    }
-
-    None
-}
-
-/// A spinner with a rolling window of the most recent interesting output lines.
+/// A spinner with one line per process, updated in place.
 ///
 /// When stderr is not a terminal the lines are written plainly instead of using
 /// cursor movement.
 pub struct LiveLog {
     bar: Option<ProgressBar>,
     title: String,
-    lines: VecDeque<String>,
-    last_is_activity: bool,
+    processes: Vec<ProcessLine>,
     width: usize,
 }
 
@@ -111,33 +45,30 @@ impl LiveLog {
         Self {
             bar,
             title,
-            lines: VecDeque::new(),
-            last_is_activity: false,
+            processes: Vec::new(),
             width: term.size().1 as usize,
         }
     }
 
-    /// Add one output line. Lines classified as noise are ignored.
-    pub fn push(&mut self, line: &str) {
-        let Some(kind) = classify(line) else {
+    /// Update the latest line for the event's process.
+    pub fn push(&mut self, raw: &str) {
+        let Some(event) = Event::parse(raw) else {
             return;
         };
-        let line = self.shorten(line);
+        let key = event.key().to_string();
+        let line = self.shorten(&event.line());
 
         let Some(bar) = &self.bar else {
             eprintln!("  {line}");
             return;
         };
 
-        if kind == LineKind::Activity && self.last_is_activity {
-            self.lines.pop_back();
+        if let Some(process) = self.processes.iter_mut().find(|process| process.key == key) {
+            process.line = line;
+        } else {
+            self.processes.push(ProcessLine { key, line });
         }
-        while self.lines.len() >= WINDOW {
-            self.lines.pop_front();
-        }
-        self.lines.push_back(line);
-        self.last_is_activity = kind == LineKind::Activity;
-        bar.set_message(render(&self.title, &self.lines));
+        bar.set_message(render(&self.title, &self.processes));
     }
 
     fn shorten(&self, line: &str) -> String {
@@ -178,14 +109,14 @@ impl Drop for LiveLog {
     }
 }
 
-/// Title first, then the newest log line, then older lines.
-fn render(title: &str, lines: &VecDeque<String>) -> String {
+/// Title first, then one stable row per process in first-seen order.
+fn render(title: &str, processes: &[ProcessLine]) -> String {
     let mut message = title.to_string();
-    for line in lines.iter().rev() {
+    for process in processes {
         message.push('\n');
         message.push('│');
         message.push_str("  ");
-        message.push_str(line);
+        message.push_str(&process.line);
     }
     message
 }
@@ -195,47 +126,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn milestones_are_kept() {
-        for line in [
-            "[+] Pulling 4/4",
-            " ✔ gluetun Pulled",
-            " ✔ Container qbittorrent Started",
-            " ✔ Network torrent_default Created",
-            "⠿ gluetun Pulling",
-            "error: pull access denied",
+    fn each_process_keeps_only_its_latest_line() {
+        let mut processes: Vec<ProcessLine> = Vec::new();
+
+        for (key, line) in [
+            ("Image jellyfin", "Image jellyfin · Pulling"),
+            ("Image sonarr", "Image sonarr · Pulling"),
+            ("Image jellyfin", "Image jellyfin · Downloading 50%"),
+            ("Image sonarr", "Image sonarr · Pull complete"),
         ] {
-            assert_eq!(classify(line), Some(LineKind::Milestone), "{line:?}");
+            if let Some(process) = processes.iter_mut().find(|process| process.key == key) {
+                process.line = line.to_string();
+            } else {
+                processes.push(ProcessLine {
+                    key: key.to_string(),
+                    line: line.to_string(),
+                });
+            }
         }
-    }
-
-    #[test]
-    fn layer_progress_is_activity() {
-        for line in [
-            "982c2f Pulling fs layer",
-            "Downloading [====>     ] 12MB/45MB",
-            "Extracting [==========] 100%",
-        ] {
-            assert_eq!(classify(line), Some(LineKind::Activity), "{line:?}");
-        }
-    }
-
-    #[test]
-    fn unimportant_lines_are_dropped() {
-        for line in ["", "   ", "some image metadata"] {
-            assert_eq!(classify(line), None, "{line:?}");
-        }
-    }
-
-    #[test]
-    fn window_is_rendered_newest_first_with_bar_prefixes() {
-        let mut lines = VecDeque::new();
-        lines.push_back("oldest".to_string());
-        lines.push_back("middle".to_string());
-        lines.push_back("newest".to_string());
 
         assert_eq!(
-            render("[1/2] starting torrent", &lines),
-            "[1/2] starting torrent\n│  newest\n│  middle\n│  oldest"
+            render("[1/2] starting server", &processes),
+            "[1/2] starting server\n\
+             │  Image jellyfin · Downloading 50%\n\
+             │  Image sonarr · Pull complete"
         );
     }
 }

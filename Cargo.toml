@@ -7,6 +7,8 @@ edition = "2024"
 base64 = "0.23.1"
 cliclack = "0.5.6"
 console = "0.16"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 zip = { version = "5.1.1", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [patch.crates-io]
