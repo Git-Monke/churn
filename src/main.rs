@@ -86,14 +86,18 @@ fn parse_stack_list(value: &str) -> Result<Vec<Stack>, String> {
 
 // ---------------------------------------------------------------- orchestrator
 fn choose_stacks(args: &Args) -> io::Result<Vec<Stack>> {
-    if let Some(explicit) = &args.stacks {
-        return Ok(explicit.clone());
-    }
-    let mut prompt = multiselect::<Stack>("Which installers should this machine run?");
-    for stack in Stack::ALL {
-        prompt = prompt.item(stack, stack.key(), stack.description());
-    }
-    prompt.interact()
+    let chose = if let Some(explicit) = &args.stacks {
+        explicit.clone()
+    } else {
+        let mut prompt = multiselect::<Stack>("Which installers should this machine run?");
+        for stack in Stack::ALL {
+            prompt = prompt.item(stack, stack.key(), stack.description());
+        }
+        prompt.interact()?
+    };
+    // Always start `server` before `torrent`: prowlarr-init wires Sonarr/Radarr
+    // and needs their API keys, which the server stack writes on startup.
+    Ok(stack::start_order(chose))
 }
 
 fn ask_questions(questions: &[Question]) -> std::io::Result<HashMap<Question, String>> {
@@ -153,8 +157,9 @@ fn explain(section: Section) {
             let _ = note(
                 "Storage layout",
                 "One absolute host path holds media and downloads.\n\
-                 It is mounted at /data inside every container, so Jellyfin and\n\
-                 qBittorrent agree on paths no matter where they run.\n\n\
+                 It is mounted at /data inside every container, so Jellyfin,\n\
+                 Sonarr, Radarr and qBittorrent agree on paths no matter where\n\
+                 they run.\n\n\
                  Paths: Tab completes, ↑/↓ choose, Enter submits.",
             );
         }

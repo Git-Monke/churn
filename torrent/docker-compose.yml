@@ -13,6 +13,9 @@ services:
     environment:
       - VPN_SERVICE_PROVIDER=mullvad
       - VPN_TYPE=wireguard
+      # Allow the VPN namespace to reach this host's published ports: Prowlarr
+      # must reach Sonarr/Radarr on the server stack (same machine).
+      - FIREWALL_OUTBOUND_SUBNETS=${HOST_IP:-127.0.0.1}/32
       - WIREGUARD_PRIVATE_KEY=${WIREGUARD_PRIVATE_KEY:?run churn first}
       - WIREGUARD_ADDRESSES=${WIREGUARD_ADDRESSES:?run churn first}
       - SERVER_COUNTRIES=${SERVER_COUNTRIES:-}
@@ -74,6 +77,8 @@ services:
     container_name: prowlarr-init
     network_mode: "service:gluetun"      # localhost reaches Prowlarr and qBittorrent
     user: "0:0"
+    environment:
+      - HOST_IP=${HOST_IP:-}
     depends_on:
       gluetun:
         condition: service_healthy
@@ -86,6 +91,9 @@ services:
     volumes:
       - ./config/prowlarr:/prowlarr-config:ro
       - ./config/qbittorrent:/qbittorrent-config:ro
+      # Same-machine wiring: the server stack writes Sonarr/Radarr API keys here.
+      - ../server/config/sonarr:/sonarr-config:ro
+      - ../server/config/radarr:/radarr-config:ro
       - ./scripts/prowlarr-init.sh:/scripts/prowlarr-init.sh:ro
     entrypoint: ["/bin/sh", "/scripts/prowlarr-init.sh"]
     restart: "no"

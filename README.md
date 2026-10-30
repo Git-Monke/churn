@@ -6,7 +6,7 @@ Two roles, one machine each (or both on the same box):
 
 | stack     | what it runs                                  | ports |
 | --------- | --------------------------------------------- | ----- |
-| `server`  | Jellyfin                                      | 8096  |
+| `server`  | Jellyfin + Sonarr + Radarr                    | 8096, 8989, 7878 |
 | `torrent` | qBittorrent + Prowlarr tunnelled through Mullvad WireGuard | 8080, 9696 |
 
 ## Usage
@@ -62,7 +62,7 @@ sudo ./target/release/churn --dry-run                # collect answers, write no
 
 ```
 server/.env      DATA_DIR, PUID, PGID, TZ
-torrent/.env     the above + Mullvad credentials (and the archive path)
+torrent/.env     the above + HOST_IP + Mullvad credentials (and the archive path)
 ```
 
 `PUID`/`PGID` come from whoever owns the storage directory and `TZ` from the
@@ -75,7 +75,8 @@ The installer starts the stacks for you. To bring them up again later (for
 example after a reboot):
 
 ```bash
-cd server  && docker compose up -d    # then open http://<ip>:8096
+cd server  && docker compose up -d    # then open http://<ip>:8096 (Jellyfin),
+                                     #   http://<ip>:8989 (Sonarr), http://<ip>:7878 (Radarr)
 cd torrent && docker compose up -d    # temporary password: docker logs qbittorrent
 ```
 
@@ -93,10 +94,20 @@ The wiring is automatic on first `docker compose up`:
 1. `qbittorrent-init` seeds `config/qbittorrent` with a stable qBittorrent API
    key before the app starts. The image otherwise regenerates a random WebUI
    password on every restart.
-2. Once both apps are up, `prowlarr-init` reads Prowlarr's generated API key and
-   the qBittorrent key, then registers qBittorrent as a Prowlarr download client
-   through Prowlarr's API (category `prowlarr`). It is idempotent: if the client
-   already exists it does nothing.
+2. Once the apps are up, `prowlarr-init` reads Prowlarr's generated API key, the
+   qBittorrent key and the Sonarr/Radarr keys, then wires everything through the
+   APIs (all steps are idempotent):
+   - creates the qBittorrent categories `prowlarr`, `tv` and `movies`;
+   - registers qBittorrent in Prowlarr as a download client (category `prowlarr`);
+   - registers Sonarr and Radarr as Prowlarr applications, so Prowlarr pushes
+     its indexers to them;
+   - registers qBittorrent in Sonarr and Radarr with the `tv` and `movies`
+     categories.
+3. Prowlarr and Sonarr/Radarr sit in different network namespaces, so they talk
+   over the host's LAN address, written to `torrent/.env` as `HOST_IP` (auto-
+   detected, override with `CHURN_HOST_IP`). gluetun gets that single address
+   as `FIREWALL_OUTBOUND_SUBNETS`, so the VPN kill switch still blocks
+   everything else.
 
 Because both containers mount the same `${DATA_DIR}` at `/data`, download paths
 line up without translation. qBittorrent saves to `/data/` and Prowlarr tags
@@ -110,14 +121,42 @@ cd torrent
 docker compose down && docker compose up -d
 ```
 
-To re-register the client after deleting it in Prowlarr's UI, run just the
-registration step — it is idempotent:
+To re-apply the wiring after deleting something in the UIs (or after adding the
+server stack later), run just the one-shot — it is idempotent:
 
 ```bash
 docker compose run --rm prowlarr-init
 ```
 
-Then add indexers under **Indexers** in Prowlarr.
+Then add indexers under **Indexers** in Prowlarr; they propagate to Sonarr and
+Radarr automatically.
+
+## Sonarr and Radarr
+
+Both run on the `server` box, outside the VPN, and share `/data` with Jellyfin.
+Images are pinned (`sonarr:4.0.20.3014-ls1`, `radarr:6.4.4.10685-ls324`) so
+upstream releases do not move under you. Bump those tags deliberately after
+checking the release notes.
+
+They are wired up automatically by `prowlarr-init`, so after both stacks are up
+you only need to set root folders (`/data/media/tv`, `/data/media/movies`) and
+add media.
+
+`prowlarr-init` reads the Sonarr/Radarr API keys from `../server/config`, so it
+expects both stacks on **one machine**. The installer starts `server` before
+`torrent` for this reason. If the server stack was not up yet, re-run the wiring
+after starting it:
+
+```bash
+cd torrent && docker compose run --rm prowlarr-init
+```
+
+**Separate machines (not wired yet):** the current setup hardcodes the
+same-host assumption through `HOST_IP`. Moving Sonarr/Radarr to their own box
+means passing the server's address and API keys into the torrent stack (or
+vice versa) instead of reading `../server/config`; that is a planned follow-up,
+not something the installer supports today. Until then, keep both stacks on the
+same host.
 
 ## Development
 

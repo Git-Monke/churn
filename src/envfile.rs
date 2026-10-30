@@ -113,3 +113,32 @@ fn detect_tz() -> String {
 pub fn timezone() -> String {
     detect_tz()
 }
+
+/// Best-effort LAN address of this host.
+///
+/// Prowlarr (inside gluetun's namespace) and Sonarr/Radarr (in the server
+/// stack) sit in different network namespaces, so they cannot use `localhost`
+/// to reach each other. The host's LAN address works for both when the stacks
+/// share a machine. `CHURN_HOST_IP` overrides detection.
+pub fn host_ip() -> String {
+    if let Ok(ip) = std::env::var("CHURN_HOST_IP") {
+        let ip = ip.trim();
+        if !ip.is_empty() {
+            return ip.to_string();
+        }
+    }
+    detect_host_ip().unwrap_or_else(|| "127.0.0.1".to_string())
+}
+
+/// Ask the kernel which source address it would use for an internet route.
+/// Connecting a UDP socket sends no packets, so this is offline-safe.
+fn detect_host_ip() -> Option<String> {
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("1.1.1.1:80").ok()?;
+    let address = socket.local_addr().ok()?;
+    let ip = address.ip();
+    if ip.is_loopback() || ip.is_unspecified() {
+        return None;
+    }
+    Some(ip.to_string())
+}

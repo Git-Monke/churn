@@ -33,7 +33,7 @@ impl Stack {
 
     pub fn description(self) -> &'static str {
         match self {
-            Stack::Server => "Jellyfin media server",
+            Stack::Server => "Jellyfin + Sonarr + Radarr media server",
             Stack::Torrent => "qBittorrent + Prowlarr behind a Mullvad WireGuard tunnel",
         }
     }
@@ -55,7 +55,11 @@ impl Stack {
 
     pub fn next_steps(self) -> &'static [&'static str] {
         match self {
-            Stack::Server => &["open http://<vm-ip>:8096"],
+            Stack::Server => &[
+                "open http://<vm-ip>:8096  # Jellyfin",
+                "open http://<vm-ip>:8989  # Sonarr",
+                "open http://<vm-ip>:7878  # Radarr",
+            ],
             Stack::Torrent => &[
                 "docker logs qbittorrent   # temporary admin password",
                 "open http://<vm-ip>:9696  # Prowlarr (qBittorrent is wired up for you)",
@@ -71,6 +75,21 @@ impl Stack {
                 "/dev/net/tun is missing — gluetun needs TUN; enable it in the host/VM kernel"
                     .to_string(),
             );
+        }
+        if self == Stack::Torrent {
+            let detected = envfile::host_ip();
+            let stored = envfile::read(&self.env_path());
+            let configured = if detected.starts_with("127.") {
+                stored.get("HOST_IP").map(String::as_str).unwrap_or("")
+            } else {
+                &detected
+            };
+            if configured.is_empty() {
+                findings.push(
+                    "could not detect a LAN IP — Prowlarr cannot reach Sonarr/Radarr; set HOST_IP in torrent/.env"
+                        .to_string(),
+                );
+            }
         }
         findings
     }
@@ -121,12 +140,28 @@ impl Stack {
                     .map(String::as_str),
             );
             managed.push(("SERVER_COUNTRIES", countries));
+            // Prowlarr and Sonarr/Radarr live in different network namespaces;
+            // both reach each other through this address (same-machine setups).
+            // When detection fails, keep a hand-edited HOST_IP from .env.
+            let host_ip = envfile::host_ip();
+            if !host_ip.starts_with("127.") {
+                managed.push(("HOST_IP", host_ip));
+            }
         }
 
         let path = self.env_path();
         envfile::write_merged(&path, &managed)?;
         Ok(path)
     }
+}
+
+/// Sort chosen stacks into [`Stack::ALL`] order.
+///
+/// `server` must start before `torrent`: prowlarr-init reads the Sonarr/Radarr
+/// API keys that the server stack writes during startup.
+pub fn start_order(mut chosen: Vec<Stack>) -> Vec<Stack> {
+    chosen.sort_by_key(|stack| Stack::ALL.iter().position(|known| known == stack));
+    chosen
 }
 
 fn server_countries(existing: Option<&str>) -> String {
@@ -164,6 +199,14 @@ pub fn summary(question: Question, answers: &Answers) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn server_starts_before_torrent() {
+        assert_eq!(
+            start_order(vec![Stack::Torrent, Stack::Server]),
+            vec![Stack::Server, Stack::Torrent]
+        );
+    }
 
     #[test]
     fn server_country_defaults_when_not_configured() {
