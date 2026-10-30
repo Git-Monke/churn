@@ -71,7 +71,7 @@ services:
       - "${DATA_DIR:?run churn to set DATA_DIR}:/data"
     restart: unless-stopped
 
-  # One-shot: registers the seeded qBittorrent instance in Prowlarr's API.
+  # One-shot: wires qBittorrent, public indexers, and Sonarr/Radarr.
   prowlarr-init:
     image: curlimages/curl:8.23.0
     container_name: prowlarr-init
@@ -79,6 +79,7 @@ services:
     user: "0:0"
     environment:
       - HOST_IP=${HOST_IP:-}
+      - PROWLARR_INDEXERS=${PROWLARR_INDEXERS:-eztv,yts,thepiratebay}
     depends_on:
       gluetun:
         condition: service_healthy

@@ -41,3 +41,27 @@ services:
       - ./config/radarr:/config
       - "${DATA_DIR:?run churn to set DATA_DIR}:/data"
     restart: unless-stopped
+
+  # One-shot: creates the shared media folders and registers them as the
+  # Sonarr/Radarr root folders.
+  server-init:
+    image: curlimages/curl:8.23.0
+    container_name: server-init
+    user: "0:0"
+    entrypoint: ["/bin/sh", "/server-init.sh"]
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - SONARR_URL=http://sonarr:8989
+      - RADARR_URL=http://radarr:7878
+    depends_on:
+      sonarr:
+        condition: service_started
+      radarr:
+        condition: service_started
+    volumes:
+      - ./scripts/server-init.sh:/server-init.sh:ro
+      - ./config/sonarr:/sonarr-config:ro
+      - ./config/radarr:/radarr-config:ro
+      - "${DATA_DIR:?run churn to set DATA_DIR}:/data"
+    restart: "no"

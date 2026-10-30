@@ -121,6 +121,8 @@ The wiring is automatic on first `docker compose up`:
    APIs (all steps are idempotent):
    - creates the qBittorrent categories `prowlarr`, `tv` and `movies`;
    - registers qBittorrent in Prowlarr as a download client (category `prowlarr`);
+   - enables the public indexers `EZTV`, `YTS` and `The Pirate Bay` if they
+     are missing;
    - registers Sonarr and Radarr as Prowlarr applications, so Prowlarr pushes
      its indexers to them;
    - registers qBittorrent in Sonarr and Radarr with the `tv` and `movies`
@@ -131,9 +133,9 @@ The wiring is automatic on first `docker compose up`:
    as `FIREWALL_OUTBOUND_SUBNETS`, so the VPN kill switch still blocks
    everything else.
 
-Because both containers mount the same `${DATA_DIR}` at `/data`, download paths
-line up without translation. qBittorrent saves to `/data/` and Prowlarr tags
-its downloads with the `prowlarr` category.
+Because every container mounts the same `${DATA_DIR}` at `/data`, download
+paths line up without translation. qBittorrent saves to `/data/` and Prowlarr
+tags its downloads with the `prowlarr` category.
 
 Re-run the one-shots by recreating the stack (a plain `docker compose up -d`
 leaves already-exited one-shots alone):
@@ -150,8 +152,22 @@ server stack later), run just the one-shot — it is idempotent:
 docker compose run --rm prowlarr-init
 ```
 
-Then add indexers under **Indexers** in Prowlarr; they propagate to Sonarr and
-Radarr automatically.
+The default public indexers need no accounts and are enough to get started.
+Override them with a comma-separated list in `torrent/.env`:
+
+```bash
+PROWLARR_INDEXERS=eztv,yts,thepiratebay
+```
+
+Supported keys are `1337x`, `eztv`, `yts`, `thepiratebay` and `limetorrents`;
+unknown names are skipped. New indexers propagate to Sonarr and Radarr
+automatically. If Prowlarr's connectivity test fails for one, it is left added
+but disabled — fix access and run `docker compose run --rm prowlarr-init` again
+to enable it.
+
+`1337x` is supported but is not enabled by default because it currently
+requires FlareSolverr, which this stack does not run yet. Planned follow-up:
+add FlareSolverr to the torrent stack, then include `1337x` in the defaults.
 
 ## Sonarr and Radarr
 
@@ -160,9 +176,12 @@ Images are pinned (`sonarr:4.0.20.3014-ls1`, `radarr:6.4.4.10685-ls324`) so
 upstream releases do not move under you. Bump those tags deliberately after
 checking the release notes.
 
-They are wired up automatically by `prowlarr-init`, so after both stacks are up
-you only need to set root folders (`/data/media/tv`, `/data/media/movies`) and
-add media.
+They are wired up automatically by `prowlarr-init`. The `server` stack also
+runs `server-init`, which creates `/data/media/tv` and `/data/media/movies`
+inside `DATA_DIR`, sets their ownership to `PUID`/`PGID`, and registers them as
+the Sonarr/Radarr root folders. It waits for both APIs and is idempotent. Add
+media under those directories, and point Jellyfin's TV and movie libraries at
+the same container paths (`/data/media/tv`, `/data/media/movies`).
 
 `prowlarr-init` reads the Sonarr/Radarr API keys from `../server/config`, so it
 expects both stacks on **one machine**. The installer starts `server` before
@@ -171,6 +190,12 @@ after starting it:
 
 ```bash
 cd torrent && docker compose run --rm prowlarr-init
+```
+
+If the root folders were removed in the UI, re-run the server one-shot:
+
+```bash
+cd server && docker compose run --rm server-init
 ```
 
 **Separate machines (not wired yet):** the current setup hardcodes the

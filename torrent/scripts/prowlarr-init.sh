@@ -7,6 +7,8 @@
 #
 #   * creates the qBittorrent categories (`prowlarr`, `tv`, `movies`),
 #   * registers qBittorrent as a Prowlarr download client,
+#   * enables a few public indexers (EZTV, YTS, The Pirate Bay) so searches
+#     work immediately,
 #   * registers Sonarr and Radarr as Prowlarr applications (so Prowlarr pushes
 #     its indexers to them), and
 #   * registers qBittorrent in Sonarr and Radarr using the `tv`/`movies`
@@ -68,6 +70,28 @@ json_id_for_implementation() {
             }
         }
     '
+}
+
+# Pull the pretty-printed top-level provider object for a given name. The
+# object boundaries are the two-space-indented braces Prowlarr emits.
+json_object_for_name() {
+    wanted=$1
+    awk -v wanted="$wanted" '
+        /^  \},?$/ {
+            if (match_name) printf "%s", object
+            object = ""
+            match_name = 0
+            next
+        }
+        {
+            object = object $0 "\n"
+            if ($0 ~ "\"name\"[[:space:]]*:[[:space:]]*\"" wanted "\"") match_name = 1
+        }
+    '
+}
+
+json_id_from_object() {
+    sed -n 's/^[[:space:]]*"id"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\),\{0,1\}[[:space:]]*$/\1/p' | head -n 1
 }
 
 # ---------------------------------------------------------------- Prowlarr key
@@ -175,6 +199,116 @@ curl -fsS -X "$method" \
     "$target" >/dev/null
 
 echo "$message"
+
+# --------------------------------------------------------- Prowlarr indexers
+# Public indexers need no credentials. Add them disabled first so a failed
+# Prowlarr connectivity test cannot prevent the rest of the wiring; then try to
+# enable each one. A failed enable leaves it disabled for a later rerun.
+write_indexer_payload() {
+    file=$1
+    id_field=$2
+    enable=$3
+    name=$4
+    definition=$5
+    base_url=$6
+    cat >"$file" <<EOF
+{
+  $id_field
+  "enable": $enable,
+  "name": "$name",
+  "implementation": "Cardigann",
+  "implementationName": "Cardigann",
+  "configContract": "CardigannSettings",
+  "appProfileId": 1,
+  "priority": 25,
+  "tags": [],
+  "fields": [
+    { "name": "definitionFile", "value": "$definition" },
+    { "name": "baseUrl", "value": "$base_url" }
+  ]
+}
+EOF
+}
+
+ensure_indexer() {
+    name=$1
+    definition=$2
+    base_url=$3
+
+    existing=$(curl -fsS -H "X-Api-Key: $api_key" "$prowlarr/api/v1/indexer" \
+        | json_object_for_name "$name")
+    if [ -n "$existing" ]; then
+        id=$(printf '%s\n' "$existing" | json_id_from_object)
+        if [ -z "$id" ]; then
+            echo "could not determine the Prowlarr id for $name" >&2
+            return 1
+        fi
+        if printf '%s\n' "$existing" | grep -Eq '"enable"[[:space:]]*:[[:space:]]*true'; then
+            echo "$name is already enabled in Prowlarr"
+            return 0
+        fi
+        echo "$name exists in Prowlarr but is disabled; trying to enable it"
+    else
+        payload=$(mktemp)
+        write_indexer_payload "$payload" "" false "$name" "$definition" "$base_url"
+        if ! curl -fsS -X POST \
+            -H "X-Api-Key: $api_key" \
+            -H "Content-Type: application/json" \
+            --data-binary "@$payload" \
+            "$prowlarr/api/v1/indexer" >/dev/null; then
+            rm -f "$payload"
+            echo "could not add $name to Prowlarr" >&2
+            return 1
+        fi
+        rm -f "$payload"
+
+        existing=$(curl -fsS -H "X-Api-Key: $api_key" "$prowlarr/api/v1/indexer" \
+            | json_object_for_name "$name")
+        id=$(printf '%s\n' "$existing" | json_id_from_object)
+        if [ -z "$id" ]; then
+            echo "added $name to Prowlarr but could not find its id" >&2
+            return 1
+        fi
+        echo "added $name to Prowlarr (disabled)"
+    fi
+
+    payload=$(mktemp)
+    id_field="\"id\": $id,"
+    write_indexer_payload "$payload" "$id_field" true "$name" "$definition" "$base_url"
+    if curl -fsS -X PUT \
+        -H "X-Api-Key: $api_key" \
+        -H "Content-Type: application/json" \
+        --data-binary "@$payload" \
+        "$prowlarr/api/v1/indexer/$id?forceSave=true" >/dev/null; then
+        echo "enabled $name in Prowlarr"
+    else
+        echo "warning: $name is in Prowlarr but the test failed; it stays disabled" >&2
+    fi
+    rm -f "$payload"
+}
+
+# Override with PROWLARR_INDEXERS in torrent/.env, e.g. "eztv,yts".
+# 1337x is supported but currently requires FlareSolverr, which this stack does
+# not run yet; keep it out of the default set until that is added.
+indexers=$(printf '%s' "${PROWLARR_INDEXERS:-eztv,yts,thepiratebay}" | tr -d '[:space:]')
+old_ifs=$IFS
+IFS=,
+for indexer in $indexers; do
+    case "$indexer" in
+        1337x) name=1337x; base_url=https://1337x.to/ ;;
+        eztv) name=EZTV; base_url=https://eztvx.to/ ;;
+        yts) name=YTS; base_url=https://yts.gg/ ;;
+        thepiratebay) name="The Pirate Bay"; base_url=https://thepiratebay.org/ ;;
+        limetorrents) name=LimeTorrents; base_url=https://www.limetorrents.fun/ ;;
+        "") continue ;;
+        *)
+            echo "unknown indexer '$indexer' in PROWLARR_INDEXERS; skipping" >&2
+            continue
+            ;;
+    esac
+    ensure_indexer "$name" "$indexer" "$base_url" || true
+done
+IFS=$old_ifs
 
 # ------------------------------------------------- Sonarr and Radarr wiring
 if [ -z "$host_ip" ]; then
