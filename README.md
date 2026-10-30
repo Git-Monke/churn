@@ -121,8 +121,7 @@ The wiring is automatic on first `docker compose up`:
    APIs (all steps are idempotent):
    - creates the qBittorrent categories `prowlarr`, `tv` and `movies`;
    - registers qBittorrent in Prowlarr as a download client (category `prowlarr`);
-   - enables the public indexers `EZTV`, `YTS` and `The Pirate Bay` if they
-     are missing;
+   - adds and enables the public indexers `EZTV`, `YTS` and `The Pirate Bay`;
    - registers Sonarr and Radarr as Prowlarr applications, so Prowlarr pushes
      its indexers to them;
    - registers qBittorrent in Sonarr and Radarr with the `tv` and `movies`
@@ -161,9 +160,10 @@ PROWLARR_INDEXERS=eztv,yts,thepiratebay
 
 Supported keys are `1337x`, `eztv`, `yts`, `thepiratebay` and `limetorrents`;
 unknown names are skipped. New indexers propagate to Sonarr and Radarr
-automatically. If Prowlarr's connectivity test fails for one, it is left added
-but disabled — fix access and run `docker compose run --rm prowlarr-init` again
-to enable it.
+automatically. They are enabled even when Prowlarr's immediate connectivity
+test fails (for example, Cloudflare blocking EZTV); Prowlarr can then back off
+that indexer until it responds. Re-run the one-shot to re-apply the enabled
+state after changing an indexer in the UI.
 
 `1337x` is supported but is not enabled by default because it currently
 requires FlareSolverr, which this stack does not run yet. Planned follow-up:

@@ -90,8 +90,11 @@ json_object_for_name() {
     '
 }
 
+# Only the top-level object's id is the provider id. Nested resources such as
+# IndexerCapabilityResource also serialize an id (usually 0), so match the
+# four-space property indentation instead of any indented "id" line.
 json_id_from_object() {
-    sed -n 's/^[[:space:]]*"id"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\),\{0,1\}[[:space:]]*$/\1/p' | head -n 1
+    sed -n 's/^    "id"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\),\{0,1\}[[:space:]]*$/\1/p' | head -n 1
 }
 
 # ---------------------------------------------------------------- Prowlarr key
@@ -201,20 +204,18 @@ curl -fsS -X "$method" \
 echo "$message"
 
 # --------------------------------------------------------- Prowlarr indexers
-# Public indexers need no credentials. Add them disabled first so a failed
-# Prowlarr connectivity test cannot prevent the rest of the wiring; then try to
-# enable each one. A failed enable leaves it disabled for a later rerun.
+# Public indexers need no credentials. Add them disabled first so Prowlarr's
+# create-time connectivity test cannot prevent the rest of the wiring; then
+# enable them through the bulk endpoint, which does not run a connectivity test.
+# That matters for indexers that are temporarily blocked by Cloudflare (EZTV).
 write_indexer_payload() {
     file=$1
-    id_field=$2
-    enable=$3
-    name=$4
-    definition=$5
-    base_url=$6
+    name=$2
+    definition=$3
+    base_url=$4
     cat >"$file" <<EOF
 {
-  $id_field
-  "enable": $enable,
+  "enable": false,
   "name": "$name",
   "implementation": "Cardigann",
   "implementationName": "Cardigann",
@@ -250,7 +251,7 @@ ensure_indexer() {
         echo "$name exists in Prowlarr but is disabled; trying to enable it"
     else
         payload=$(mktemp)
-        write_indexer_payload "$payload" "" false "$name" "$definition" "$base_url"
+        write_indexer_payload "$payload" "$name" "$definition" "$base_url"
         if ! curl -fsS -X POST \
             -H "X-Api-Key: $api_key" \
             -H "Content-Type: application/json" \
@@ -273,18 +274,31 @@ ensure_indexer() {
     fi
 
     payload=$(mktemp)
-    id_field="\"id\": $id,"
-    write_indexer_payload "$payload" "$id_field" true "$name" "$definition" "$base_url"
-    if curl -fsS -X PUT \
+    cat >"$payload" <<EOF
+{
+  "ids": [$id],
+  "enable": true
+}
+EOF
+    if ! curl -fsS -X PUT \
         -H "X-Api-Key: $api_key" \
         -H "Content-Type: application/json" \
         --data-binary "@$payload" \
-        "$prowlarr/api/v1/indexer/$id?forceSave=true" >/dev/null; then
-        echo "enabled $name in Prowlarr"
-    else
-        echo "warning: $name is in Prowlarr but the test failed; it stays disabled" >&2
+        "$prowlarr/api/v1/indexer/bulk" >/dev/null; then
+        rm -f "$payload"
+        echo "warning: could not enable $name in Prowlarr" >&2
+        return 1
     fi
     rm -f "$payload"
+
+    existing=$(curl -fsS -H "X-Api-Key: $api_key" "$prowlarr/api/v1/indexer" \
+        | json_object_for_name "$name")
+    if printf '%s\n' "$existing" | grep -Eq '"enable"[[:space:]]*:[[:space:]]*true'; then
+        echo "enabled $name in Prowlarr"
+    else
+        echo "warning: $name is still disabled in Prowlarr" >&2
+        return 1
+    fi
 }
 
 # Override with PROWLARR_INDEXERS in torrent/.env, e.g. "eztv,yts".
