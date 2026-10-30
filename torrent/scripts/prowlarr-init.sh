@@ -10,7 +10,9 @@
 #   * enables a few public indexers (EZTV, YTS, The Pirate Bay) so searches
 #     work immediately,
 #   * registers Sonarr and Radarr as Prowlarr applications (so Prowlarr pushes
-#     its indexers to them), and
+#     its indexers to them),
+#   * registers FlareSolverr as a Prowlarr indexer proxy and tags the managed
+#     indexers so Cloudflare-protected sites such as EZTV work, and
 #   * registers qBittorrent in Sonarr and Radarr using the `tv`/`movies`
 #     categories.
 #
@@ -24,6 +26,8 @@ set -eu
 
 prowlarr=${PROWLARR_URL:-http://localhost:9696}
 qbittorrent=${QBITTORRENT_URL:-http://localhost:8080}
+flaresolverr=${FLARESOLVERR_URL:-http://localhost:8191}
+flaresolverr_tag=flaresolverr
 prowlarr_config=${PROWLARR_CONFIG_ROOT:-/prowlarr-config}/config.xml
 qbittorrent_config=${QBITTORRENT_CONFIG_ROOT:-/qbittorrent-config}/qBittorrent/qBittorrent.conf
 sonarr_config=${SONARR_CONFIG_ROOT:-/sonarr-config}/config.xml
@@ -95,6 +99,27 @@ json_object_for_name() {
 # four-space property indentation instead of any indented "id" line.
 json_id_from_object() {
     sed -n 's/^    "id"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\),\{0,1\}[[:space:]]*$/\1/p' | head -n 1
+}
+
+# Tags serialize as flat `{ "id": ..., "label": ... }` objects.
+json_id_for_label() {
+    wanted=$1
+    awk -v wanted="$wanted" '
+        /^  \},?$/ {
+            if (match_label && id != "") print id
+            match_label = 0
+            id = ""
+            next
+        }
+        {
+            if ($0 ~ "\"label\"[[:space:]]*:[[:space:]]*\"" wanted "\"") match_label = 1
+            if (match($0, /"id"[[:space:]]*:[[:space:]]*[0-9]+/)) {
+                value = substr($0, RSTART, RLENGTH)
+                sub(/^.*:[[:space:]]*/, "", value)
+                id = value
+            }
+        }
+    '
 }
 
 # ---------------------------------------------------------------- Prowlarr key
@@ -203,6 +228,77 @@ curl -fsS -X "$method" \
 
 echo "$message"
 
+# ---------------------------------------------------- FlareSolverr indexer proxy
+# FlareSolverr only wakes up when Prowlarr detects a Cloudflare challenge, so
+# tagging every managed indexer is safe and also covers EZTV's intermittent
+# challenges. The proxy is optional: if FlareSolverr is unavailable, keep the
+# rest of the stack wiring working.
+flaresolverr_tag_id=
+if wait_for "FlareSolverr's API" \
+    curl -fsS -X POST \
+    -H "Content-Type: application/json" \
+    --data '{"cmd":"sessions.list"}' \
+    "${flaresolverr%/}/v1"; then
+    flaresolverr_host=${flaresolverr%/}/
+    flaresolverr_tag_id=$(curl -fsS -H "X-Api-Key: $api_key" "$prowlarr/api/v1/tag" \
+        | json_id_for_label "$flaresolverr_tag")
+    if [ -z "$flaresolverr_tag_id" ]; then
+        curl -fsS -X POST \
+            -H "X-Api-Key: $api_key" \
+            -H "Content-Type: application/json" \
+            --data "{\"label\":\"$flaresolverr_tag\"}" \
+            "$prowlarr/api/v1/tag" >/dev/null
+        flaresolverr_tag_id=$(curl -fsS -H "X-Api-Key: $api_key" "$prowlarr/api/v1/tag" \
+            | json_id_for_label "$flaresolverr_tag")
+    fi
+
+    if [ -z "$flaresolverr_tag_id" ]; then
+        echo "warning: could not create Prowlarr tag '$flaresolverr_tag'" >&2
+    else
+        existing_id=$(curl -fsS -H "X-Api-Key: $api_key" "$prowlarr/api/v1/indexerProxy" \
+            | json_id_for_implementation FlareSolverr)
+        if [ -n "$existing_id" ]; then
+            method=PUT
+            target="$prowlarr/api/v1/indexerProxy/$existing_id"
+            id_field="\"id\": $existing_id,"
+            message="updated FlareSolverr as a Prowlarr indexer proxy"
+        else
+            method=POST
+            target="$prowlarr/api/v1/indexerProxy"
+            id_field=
+            message="registered FlareSolverr as a Prowlarr indexer proxy"
+        fi
+        payload=$(mktemp)
+        cat >"$payload" <<EOF
+{
+  $id_field
+  "name": "FlareSolverr",
+  "implementation": "FlareSolverr",
+  "implementationName": "FlareSolverr",
+  "configContract": "FlareSolverrSettings",
+  "tags": [$flaresolverr_tag_id],
+  "fields": [
+    { "name": "host", "value": "$flaresolverr_host" },
+    { "name": "requestTimeout", "value": 60 }
+  ]
+}
+EOF
+        if curl -fsS -X "$method" \
+            -H "X-Api-Key: $api_key" \
+            -H "Content-Type: application/json" \
+            --data-binary "@$payload" \
+            "$target" >/dev/null; then
+            echo "$message"
+        else
+            flaresolverr_tag_id=
+            echo "warning: could not configure FlareSolverr in Prowlarr" >&2
+        fi
+        rm -f "$payload"
+    fi
+else
+    echo "warning: FlareSolverr is not reachable at $flaresolverr; skipping proxy setup" >&2
+fi
+
 # --------------------------------------------------------- Prowlarr indexers
 # Public indexers need no credentials. Add them disabled first so Prowlarr's
 # create-time connectivity test cannot prevent the rest of the wiring; then
@@ -245,10 +341,10 @@ ensure_indexer() {
             return 1
         fi
         if printf '%s\n' "$existing" | grep -Eq '"enable"[[:space:]]*:[[:space:]]*true'; then
-            echo "$name is already enabled in Prowlarr"
-            return 0
+            echo "$name is already enabled in Prowlarr; ensuring its proxy tag"
+        else
+            echo "$name exists in Prowlarr but is disabled; trying to enable it"
         fi
-        echo "$name exists in Prowlarr but is disabled; trying to enable it"
     else
         payload=$(mktemp)
         write_indexer_payload "$payload" "$name" "$definition" "$base_url"
@@ -273,11 +369,18 @@ ensure_indexer() {
         echo "added $name to Prowlarr (disabled)"
     fi
 
+    tags_field=
+    if [ -n "$flaresolverr_tag_id" ]; then
+        tags_field=",
+  \"tags\": [$flaresolverr_tag_id],
+  \"applyTags\": \"add\""
+    fi
+
     payload=$(mktemp)
     cat >"$payload" <<EOF
 {
   "ids": [$id],
-  "enable": true
+  "enable": true$tags_field
 }
 EOF
     if ! curl -fsS -X PUT \
@@ -302,8 +405,6 @@ EOF
 }
 
 # Override with PROWLARR_INDEXERS in torrent/.env, e.g. "eztv,yts".
-# 1337x is supported but currently requires FlareSolverr, which this stack does
-# not run yet; keep it out of the default set until that is added.
 indexers=$(printf '%s' "${PROWLARR_INDEXERS:-eztv,yts,thepiratebay}" | tr -d '[:space:]')
 old_ifs=$IFS
 IFS=,

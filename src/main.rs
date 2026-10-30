@@ -319,6 +319,16 @@ fn start_stacks(chosen: &[Stack], dry_run: bool) -> io::Result<()> {
             continue;
         }
 
+        if *stack == Stack::Torrent {
+            let progress = spinner();
+            progress.start("checking torrent VPN isolation");
+            if let Err(err) = system::verify_torrent_isolation(&stack.dir()) {
+                progress.stop("torrent VPN isolation check failed");
+                return Err(err);
+            }
+            progress.stop("torrent VPN isolation check passed");
+        }
+
         let mut live = LiveLog::start(header);
         let result = system::compose_up(&stack.dir(), &mut |line| live.push(line));
         match result {

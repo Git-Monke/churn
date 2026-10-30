@@ -5,5 +5,6 @@ pub mod envfile;
 pub mod live;
 pub mod mullvad;
 pub mod question;
+pub mod security;
 pub mod stack;
 pub mod system;

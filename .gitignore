@@ -2,3 +2,5 @@ target/
 .env
 config/
 cache/
+/docs/book/
+/docs/.mdbook/

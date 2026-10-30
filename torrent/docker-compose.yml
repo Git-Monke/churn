@@ -13,19 +13,73 @@ services:
     environment:
       - VPN_SERVICE_PROVIDER=mullvad
       - VPN_TYPE=wireguard
-      # Allow the VPN namespace to reach this host's published ports: Prowlarr
-      # must reach Sonarr/Radarr on the server stack (same machine).
+      # Kill switch: block all egress except the tunnel. The only non-VPN
+      # exception is this host's LAN address, needed for Sonarr/Radarr.
+      - FIREWALL_ENABLED_DISABLING_IT_SHOOTS_YOU_IN_YOUR_FOOT=on
       - FIREWALL_OUTBOUND_SUBNETS=${HOST_IP:-127.0.0.1}/32
+      # DNS is answered by Gluetun's local resolver (127.0.0.1) over DoT.
+      # Never fall back to the host/Docker nameserver; that would leak DNS.
+      - DNS_SERVER=on
+      - DNS_ADDRESS=127.0.0.1
+      - DNS_KEEP_NAMESERVER=off
+      - DNS_UPSTREAM_RESOLVER_TYPE=dot
+      - HEALTH_RESTART_VPN=on
       - WIREGUARD_PRIVATE_KEY=${WIREGUARD_PRIVATE_KEY:?run churn first}
       - WIREGUARD_ADDRESSES=${WIREGUARD_ADDRESSES:?run churn first}
       - SERVER_COUNTRIES=${SERVER_COUNTRIES:-}
       - TZ=${TZ:-UTC}
+    # The config parser only accepts an IPv4 tunnel address, so disable IPv6
+    # in the shared namespace rather than risk an un-tunnelled IPv6 route.
+    sysctls:
+      net.ipv6.conf.all.disable_ipv6: 1
+      net.ipv6.conf.default.disable_ipv6: 1
+    restart: unless-stopped
+
+  # Fail-closed startup gate. It shares Gluetun's network namespace and proves
+  # that egress is a Mullvad exit, direct eth0 egress is blocked, and DNS uses
+  # Gluetun's local resolver. qBittorrent, Prowlarr and FlareSolverr wait for it.
+  vpn-check:
+    image: curlimages/curl:8.23.0
+    container_name: vpn-check
+    network_mode: "service:gluetun"
+    user: "0:0"
+    environment:
+      - HOST_IP=${HOST_IP:-}
+      - TZ=${TZ:-UTC}
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    volumes:
+      - ./resolv.conf:/etc/resolv.conf:ro    # Gluetun's local DNS
+      - ./scripts/vpn-check.sh:/scripts/vpn-check.sh:ro
+    entrypoint: ["/bin/sh", "/scripts/vpn-check.sh"]
+    restart: "no"
+
+  # Bypasses Cloudflare/DDoS-GUARD challenges for indexers such as EZTV.
+  # Shares Gluetun's network namespace so browser traffic also exits the VPN.
+  flaresolverr:
+    image: flaresolverr/flaresolverr:v3.5.2
+    container_name: flaresolverr
+    network_mode: "service:gluetun"
+    depends_on:
+      gluetun:
+        condition: service_healthy
+      vpn-check:
+        condition: service_completed_successfully
+    environment:
+      - LOG_LEVEL=info
+      - TZ=${TZ:-UTC}
+    volumes:
+      - ./resolv.conf:/etc/resolv.conf:ro    # Gluetun's local DNS
+    tmpfs:
+      - /tmp:size=256M,mode=1777       # Chromium profiles stay in RAM
     restart: unless-stopped
 
   # One-shot: seeds qBittorrent's config with a stable API key before it starts.
   qbittorrent-init:
     image: curlimages/curl:8.23.0
     container_name: qbittorrent-init
+    network_mode: "none"                # writes config only; no network at all
     user: "0:0"
     environment:
       - PUID=${PUID:-1000}
@@ -43,6 +97,8 @@ services:
     depends_on:
       gluetun:
         condition: service_healthy       # gluetun's image ships a healthcheck
+      vpn-check:
+        condition: service_completed_successfully
       qbittorrent-init:
         condition: service_completed_successfully
     environment:
@@ -53,6 +109,7 @@ services:
     volumes:
       - ./config/qbittorrent:/config
       - "${DATA_DIR:?run churn to set DATA_DIR}:/data"
+      - ./resolv.conf:/etc/resolv.conf:ro    # Gluetun's local DNS
     restart: unless-stopped
 
   prowlarr:
@@ -62,6 +119,8 @@ services:
     depends_on:
       gluetun:
         condition: service_healthy
+      vpn-check:
+        condition: service_completed_successfully
     environment:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
@@ -69,6 +128,7 @@ services:
     volumes:
       - ./config/prowlarr:/config
       - "${DATA_DIR:?run churn to set DATA_DIR}:/data"
+      - ./resolv.conf:/etc/resolv.conf:ro    # Gluetun's local DNS
     restart: unless-stopped
 
   # One-shot: wires qBittorrent, public indexers, and Sonarr/Radarr.
@@ -79,10 +139,15 @@ services:
     user: "0:0"
     environment:
       - HOST_IP=${HOST_IP:-}
+      - FLARESOLVERR_URL=${FLARESOLVERR_URL:-http://localhost:8191}
       - PROWLARR_INDEXERS=${PROWLARR_INDEXERS:-eztv,yts,thepiratebay}
     depends_on:
       gluetun:
         condition: service_healthy
+      vpn-check:
+        condition: service_completed_successfully
+      flaresolverr:
+        condition: service_started
       qbittorrent-init:
         condition: service_completed_successfully
       qbittorrent:
@@ -95,6 +160,7 @@ services:
       # Same-machine wiring: the server stack writes Sonarr/Radarr API keys here.
       - ../server/config/sonarr:/sonarr-config:ro
       - ../server/config/radarr:/radarr-config:ro
+      - ./resolv.conf:/etc/resolv.conf:ro    # Gluetun's local DNS
       - ./scripts/prowlarr-init.sh:/scripts/prowlarr-init.sh:ro
     entrypoint: ["/bin/sh", "/scripts/prowlarr-init.sh"]
     restart: "no"

@@ -9,6 +9,7 @@ use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
 
 use crate::compose;
+use crate::security;
 
 /// A Linux distribution churn knows how to install Docker on.
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -158,6 +159,35 @@ fn command_succeeds(program: &str, args: &[&str]) -> bool {
 /// was doing.
 pub fn compose_up(dir: &Path, on_event: &mut dyn FnMut(&str)) -> io::Result<()> {
     compose_run(dir, "up", &["up", "-d"], on_event)
+}
+
+/// Verify the effective Compose configuration keeps the torrent stack inside
+/// Gluetun's network namespace and behind its kill switch.
+pub fn verify_torrent_isolation(dir: &Path) -> io::Result<()> {
+    let output = Command::new("docker")
+        .args(["compose", "config", "--format", "json"])
+        .current_dir(dir)
+        .output()?;
+    if !output.status.success() {
+        return Err(io::Error::other(format!(
+            "docker compose config failed in {}:\n{}",
+            dir.display(),
+            String::from_utf8_lossy(&output.stderr).trim_end()
+        )));
+    }
+
+    let config = serde_json::from_slice(&output.stdout).map_err(|err| {
+        io::Error::other(format!(
+            "docker compose config in {} was not valid JSON: {err}",
+            dir.display()
+        ))
+    })?;
+    security::verify_torrent_isolation(&config).map_err(|problems| {
+        io::Error::other(format!(
+            "refusing to start the torrent stack because its VPN isolation is unsafe:\n  - {}",
+            problems.join("\n  - ")
+        ))
+    })
 }
 
 /// Stop and remove the project's containers and networks.

@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use crate::envfile;
 use crate::question::{Question, Section};
+use crate::security;
 
 pub type Answers = HashMap<Question, String>;
 
@@ -34,7 +35,9 @@ impl Stack {
     pub fn description(self) -> &'static str {
         match self {
             Stack::Server => "Jellyfin + Sonarr + Radarr media server",
-            Stack::Torrent => "qBittorrent + Prowlarr behind a Mullvad WireGuard tunnel",
+            Stack::Torrent => {
+                "qBittorrent + Prowlarr + FlareSolverr behind a Mullvad WireGuard tunnel"
+            }
         }
     }
 
@@ -73,6 +76,7 @@ impl Stack {
                 "open http://<vm-ip>:7878  # Radarr",
             ],
             Stack::Torrent => &[
+                "docker logs vpn-check    # confirms torrent egress is VPN-only",
                 "docker logs qbittorrent   # temporary admin password",
                 "open http://<vm-ip>:9696  # Prowlarr (qBittorrent is wired up for you)",
             ],
@@ -101,6 +105,10 @@ impl Stack {
                     "could not detect a LAN IP — Prowlarr cannot reach Sonarr/Radarr; set HOST_IP in torrent/.env"
                         .to_string(),
                 );
+            } else if !security::is_local_ipv4(configured) {
+                findings.push(format!(
+                    "HOST_IP={configured} is not a loopback/LAN address — the torrent stack will refuse to start, because that address is the only non-VPN firewall exception"
+                ));
             }
         }
         findings

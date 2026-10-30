@@ -7,7 +7,7 @@ Two roles, one machine each (or both on the same box):
 | stack     | what it runs                                  | ports |
 | --------- | --------------------------------------------- | ----- |
 | `server`  | Jellyfin + Sonarr + Radarr                    | 8096, 8989, 7878 |
-| `torrent` | qBittorrent + Prowlarr tunnelled through Mullvad WireGuard | 8080, 9696 |
+| `torrent` | qBittorrent + Prowlarr + FlareSolverr tunnelled through Mullvad WireGuard | 8080, 9696 |
 
 ## Usage
 
@@ -102,14 +102,14 @@ cd server  && docker compose up -d    # then open http://<ip>:8096 (Jellyfin),
 cd torrent && docker compose up -d    # temporary password: docker logs qbittorrent
 ```
 
-Both web UIs are published on the `gluetun` container (the other two share its
+Both web UIs are published on the `gluetun` container (the other three share its
 network namespace), so Prowlarr is at `http://<ip>:9696`.
 
 ## Prowlarr and qBittorrent
 
-Prowlarr, qBittorrent and gluetun share one network namespace, so qBittorrent is
-reachable from Prowlarr at `http://localhost:8080` — no hostnames or VPN
-round-trip needed.
+Prowlarr, qBittorrent, FlareSolverr and gluetun share one network namespace, so
+qBittorrent is reachable from Prowlarr at `http://localhost:8080` and
+FlareSolverr at `http://localhost:8191` — no hostnames or VPN round-trip needed.
 
 The wiring is automatic on first `docker compose up`:
 
@@ -122,6 +122,8 @@ The wiring is automatic on first `docker compose up`:
    - creates the qBittorrent categories `prowlarr`, `tv` and `movies`;
    - registers qBittorrent in Prowlarr as a download client (category `prowlarr`);
    - adds and enables the public indexers `EZTV`, `YTS` and `The Pirate Bay`;
+   - registers FlareSolverr as a Prowlarr indexer proxy and tags the managed
+     indexers so Cloudflare-protected sites such as EZTV work;
    - registers Sonarr and Radarr as Prowlarr applications, so Prowlarr pushes
      its indexers to them;
    - registers qBittorrent in Sonarr and Radarr with the `tv` and `movies`
@@ -159,15 +161,53 @@ PROWLARR_INDEXERS=eztv,yts,thepiratebay
 ```
 
 Supported keys are `1337x`, `eztv`, `yts`, `thepiratebay` and `limetorrents`;
-unknown names are skipped. New indexers propagate to Sonarr and Radarr
-automatically. They are enabled even when Prowlarr's immediate connectivity
-test fails (for example, Cloudflare blocking EZTV); Prowlarr can then back off
-that indexer until it responds. Re-run the one-shot to re-apply the enabled
-state after changing an indexer in the UI.
+unknown names are skipped. Indexers named in `PROWLARR_INDEXERS` are added to
+Prowlarr and tagged for FlareSolverr automatically. They are enabled even when
+Prowlarr's immediate connectivity test fails (for example, Cloudflare blocking
+EZTV); Prowlarr can then back off that indexer until it responds. Re-run the
+one-shot to re-apply the enabled state and proxy tag after changing an indexer
+in the UI.
 
-`1337x` is supported but is not enabled by default because it currently
-requires FlareSolverr, which this stack does not run yet. Planned follow-up:
-add FlareSolverr to the torrent stack, then include `1337x` in the defaults.
+FlareSolverr only runs when Prowlarr detects a Cloudflare challenge, so ordinary
+indexers do not pay the Chromium startup cost. Its network traffic shares
+Gluetun's namespace and therefore exits through Mullvad like the other torrent
+containers. `1337x` is supported and can be enabled with
+`PROWLARR_INDEXERS=1337x,eztv,yts,thepiratebay`.
+
+## VPN leak protection
+
+The torrent stack is designed to fail closed, not merely to prefer the VPN:
+
+- Only `gluetun` joins a Docker network. qBittorrent, Prowlarr, FlareSolverr,
+  the one-shots and `vpn-check` all use `network_mode: "service:gluetun"`, so
+  they have no network path of their own. `qbittorrent-init` writes files only
+  and runs with `network_mode: "none"`.
+- Gluetun's kill switch is explicitly enabled. The only non-VPN exception is
+  `HOST_IP/32`, which must be a loopback/LAN address; a public or broad
+  exception is rejected. IPv6 is disabled in the shared namespace because the
+  Mullvad import only configures IPv4.
+- Every sidecar with network access bind-mounts a static
+  `torrent/resolv.conf` containing only
+  `nameserver 127.0.0.1`, Gluetun's DNS-over-TLS resolver. Docker does not
+  allow the `dns:` option together with `network_mode: service:gluetun`, so the
+  mount is what prevents a host or Docker nameserver fallback.
+- Before qBittorrent, Prowlarr or FlareSolverr starts, `vpn-check` verifies that
+  the public exit is a Mullvad exit, that `eth0` cannot reach the internet
+  directly, and that DNS is using Gluetun's resolver. A failure stops the
+  dependent containers from starting.
+- `churn` validates the effective `docker compose config --format json` before
+  `compose up` and refuses to start `torrent` if any service could bypass the
+  VPN namespace, publish its own ports, use a non-Gluetun network, or if the
+  firewall/DNS/IPv6 settings are unsafe.
+
+Re-run the runtime check at any time:
+
+```bash
+cd torrent && docker compose up --force-recreate vpn-check
+```
+
+A passing run ends with `PASS: torrent egress is confined to the VPN`. Check
+`docker logs vpn-check` for the result of the last automatic startup check.
 
 ## Sonarr and Radarr
 
@@ -209,6 +249,16 @@ same host.
 
 ```bash
 cargo test
+```
+
+### Documentation
+
+The stack notes are an mdBook in `docs/`. Markdown pages live in `docs/src/`.
+
+```bash
+cargo install mdbook
+mdbook serve docs    # preview at http://localhost:3000
+mdbook build docs    # render the static site to docs/book
 ```
 
 `src/lib.rs` holds the testable core ([`question`](src/question.rs),
