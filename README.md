@@ -91,6 +91,39 @@ torrent/.env     the above + HOST_IP + Mullvad credentials (and the archive path
 host. Keys churn does not manage are preserved on rerun, so hand edits survive.
 `.env` is gitignored — secrets never land in the repo.
 
+## Web dashboard
+
+`server/backend` and `server/frontend` hold an optional dashboard for the
+Jellyfin library and the health of Jellyfin, Sonarr and Radarr. It is a
+stateless BFF: it reads the service APIs, stores no database, and the browser
+only talks to the backend. It binds to `127.0.0.1` by default.
+
+```bash
+cd server
+npm install
+npm run dev        # UI http://127.0.0.1:5173, API http://127.0.0.1:4000
+```
+
+For the library to show, finish Jellyfin's first-run wizard and add a Jellyfin
+API key to `server/.env` as `JELLYFIN_API_KEY` (Dashboard → API Keys). Sonarr
+and Radarr keys are read automatically from `server/config/*/config.xml`.
+
+Production build:
+
+```bash
+cd server
+npm run build
+npm start          # Fastify serves the SPA at http://127.0.0.1:4000
+```
+
+See `server/README.md` for configuration and container notes. Development is
+planned in this order: library/status dashboard, search and media requests,
+download/activity queue, then Jellyfin playback controls.
+
+**Installer follow-up:** churn should eventually complete Jellyfin first-run
+setup and write `JELLYFIN_API_KEY` automatically. Jellyfin cannot create a key
+before an admin exists, so this is manual for now.
+
 ## Running a stack
 
 The installer starts the stacks for you. To bring them up again later (for

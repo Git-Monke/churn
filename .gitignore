@@ -4,3 +4,7 @@ config/
 cache/
 /docs/book/
 /docs/.mdbook/
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo

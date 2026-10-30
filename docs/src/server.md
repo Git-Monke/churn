@@ -48,3 +48,26 @@ service, so they are reachable at:
 The torrent stack's `prowlarr-init` reads the Sonarr and Radarr API keys from
 `server/config/`. This is why the current wiring expects both stacks on the
 same machine.
+
+## Dashboard
+
+The optional TypeScript app in `server/backend` and `server/frontend` serves a
+single dashboard for the Jellyfin library and the health of Jellyfin, Sonarr and
+Radarr. It binds to `127.0.0.1` and the browser only calls the backend; upstream
+keys and URLs stay server-side.
+
+```bash
+cd server
+npm install
+npm run dev        # UI http://127.0.0.1:5173, API http://127.0.0.1:4000
+```
+
+Finish Jellyfin's first-run wizard and add `JELLYFIN_API_KEY` to `server/.env`
+to show the library. Sonarr and Radarr API keys are read from
+`server/config/*/config.xml` unless overridden. `churn` should eventually
+complete Jellyfin setup and create that key automatically; until then the
+dashboard shows a setup notice.
+
+The planned order is: library/status dashboard, search and media requests,
+download/activity queue, then Jellyfin playback controls. See
+[Web dashboard](web-ui.md) for the current API and configuration.
