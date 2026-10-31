@@ -22,6 +22,10 @@ export interface JellyfinItem {
   CommunityRating?: number;
   OfficialRating?: string;
   Overview?: string;
+  PremiereDate?: string;
+  ParentIndexNumber?: number;
+  IndexNumber?: number;
+  ProviderIds?: Record<string, string>;
   ImageTags?: {
     Primary?: string;
   };
@@ -49,10 +53,11 @@ const LIBRARY_QUERY = new URLSearchParams({
   IncludeItemTypes: "Movie,Series",
   SortBy: "SortName",
   SortOrder: "Ascending",
-  Fields: "ProductionYear,RunTimeTicks,CommunityRating,OfficialRating,Genres,Overview",
+  Fields: "ProductionYear,RunTimeTicks,CommunityRating,OfficialRating,Genres,Overview,ProviderIds",
   ImageTypeLimit: "1",
   EnableImageTypes: "Primary",
 });
+const DETAIL_FIELDS = "ProductionYear,RunTimeTicks,CommunityRating,OfficialRating,Genres,Overview,ProviderIds";
 
 export function createJellyfinClient(config: ServiceConfig, timeoutMs: number) {
   const authHeaders = (): Record<string, string> =>
@@ -82,6 +87,52 @@ export function createJellyfinClient(config: ServiceConfig, timeoutMs: number) {
       const response = await fetchJson<JellyfinItemsResponse>(
         "jellyfin",
         `${config.url}${LIBRARY_PATH}?${LIBRARY_QUERY.toString()}`,
+        { timeoutMs, headers: authHeaders() },
+      );
+      return response.Items ?? [];
+    },
+
+    async getItem(itemId: string): Promise<JellyfinItem> {
+      if (!config.apiKey) {
+        throw new UpstreamError("jellyfin", "unauthorized", "Jellyfin API key is not configured");
+      }
+      const query = new URLSearchParams({ Fields: DETAIL_FIELDS });
+      return fetchJson<JellyfinItem>(
+        "jellyfin",
+        `${config.url}/Items/${encodeURIComponent(itemId)}?${query.toString()}`,
+        { timeoutMs, headers: authHeaders() },
+      );
+    },
+
+    async getSeasons(seriesId: string): Promise<JellyfinItem[]> {
+      if (!config.apiKey) {
+        throw new UpstreamError("jellyfin", "unauthorized", "Jellyfin API key is not configured");
+      }
+      const query = new URLSearchParams({
+        Fields: "ProviderIds",
+        ImageTypeLimit: "1",
+        EnableImageTypes: "Primary",
+      });
+      const response = await fetchJson<JellyfinItemsResponse>(
+        "jellyfin",
+        `${config.url}/Shows/${encodeURIComponent(seriesId)}/Seasons?${query.toString()}`,
+        { timeoutMs, headers: authHeaders() },
+      );
+      return response.Items ?? [];
+    },
+
+    async getEpisodes(seriesId: string): Promise<JellyfinItem[]> {
+      if (!config.apiKey) {
+        throw new UpstreamError("jellyfin", "unauthorized", "Jellyfin API key is not configured");
+      }
+      const query = new URLSearchParams({
+        Fields: "Overview,ProviderIds",
+        ImageTypeLimit: "1",
+        EnableImageTypes: "Primary",
+      });
+      const response = await fetchJson<JellyfinItemsResponse>(
+        "jellyfin",
+        `${config.url}/Shows/${encodeURIComponent(seriesId)}/Episodes?${query.toString()}`,
         { timeoutMs, headers: authHeaders() },
       );
       return response.Items ?? [];
@@ -152,5 +203,24 @@ export function mapJellyfinItem(item: JellyfinItem): LibraryItem | null {
     imageUrl: tag
       ? `/api/library/images/${encodeURIComponent(item.Id)}?tag=${encodeURIComponent(tag)}`
       : undefined,
+    tmdbId: providerNumber(item, "tmdb"),
+    tvdbId: providerNumber(item, "tvdb"),
+    imdbId: providerString(item, "imdb"),
   };
+}
+
+function providerNumber(item: JellyfinItem, key: string): number | undefined {
+  const value = providerString(item, key);
+  if (value === undefined) {
+    return undefined;
+  }
+  const number = Number.parseInt(value, 10);
+  return Number.isSafeInteger(number) && number > 0 ? number : undefined;
+}
+
+function providerString(item: JellyfinItem, key: string): string | undefined {
+  const entry = Object.entries(item.ProviderIds ?? {}).find(
+    ([providerKey]) => providerKey.toLowerCase() === key.toLowerCase(),
+  );
+  return entry?.[1]?.trim() || undefined;
 }

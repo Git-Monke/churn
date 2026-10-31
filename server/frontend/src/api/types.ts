@@ -33,6 +33,9 @@ export interface LibraryItem {
   officialRating?: string;
   runtimeMinutes?: number;
   imageUrl?: string;
+  tmdbId?: number;
+  tvdbId?: number;
+  imdbId?: string;
 }
 
 export interface LibraryResponse {
@@ -79,6 +82,114 @@ export interface SearchResponse {
   searchedAt: string;
   results: SearchResult[];
   services: SearchServiceState[];
+}
+
+export type ActivityStatus = "queued" | "downloading" | "importing" | "warning";
+
+export interface ActivityItem {
+  key: string;
+  service: "sonarr" | "radarr";
+  kind: RequestKind;
+  title: string;
+  year?: number;
+  overview?: string;
+  network?: string;
+  rating?: number;
+  runtimeMinutes?: number;
+  imageUrl?: string;
+  tmdbId?: number;
+  tvdbId?: number;
+  imdbId?: string;
+  movieId?: number;
+  seriesId?: number;
+  seasons?: number[];
+  queueCount: number;
+  status: ActivityStatus;
+  progress: number;
+  sizeBytes?: number;
+  sizeLeftBytes?: number;
+  timeLeft?: string;
+  estimatedCompletionTime?: string;
+  downloadClients: string[];
+  protocols: Array<"torrent" | "usenet">;
+  quality?: string;
+  statusMessages?: string[];
+}
+
+export interface ActivityServiceState {
+  id: "sonarr" | "radarr";
+  state: ArrServiceState;
+  detail?: string;
+  count: number;
+}
+
+export interface ActivityResponse {
+  checkedAt: string;
+  services: ActivityServiceState[];
+  items: ActivityItem[];
+  total: number;
+  detail?: string;
+}
+
+export type ShowSource = "jellyfin" | "sonarr";
+export type ShowAvailability = "jellyfin" | "sonarr" | "missing" | "upcoming";
+
+export interface ShowDownload {
+  status: ActivityStatus;
+  progress: number;
+  timeLeft?: string;
+  estimatedCompletionTime?: string;
+  sizeBytes?: number;
+  downloadClient?: string;
+  protocol?: "torrent" | "usenet";
+  quality?: string;
+  seasonPack?: boolean;
+  statusMessages?: string[];
+}
+
+export interface ShowEpisode {
+  key: string;
+  seasonNumber: number;
+  episodeNumber: number;
+  title: string;
+  overview?: string;
+  airDate?: string;
+  runtimeMinutes?: number;
+  imageUrl?: string;
+  monitored?: boolean;
+  availability: ShowAvailability;
+  download?: ShowDownload;
+}
+
+export interface ShowSeason {
+  seasonNumber: number;
+  name: string;
+  episodeCount: number;
+  availableCount: number;
+  downloadingCount: number;
+}
+
+export interface ShowSeriesSummary {
+  title: string;
+  year?: number;
+  overview?: string;
+  network?: string;
+  rating?: number;
+  imageUrl?: string;
+  tvdbId?: number;
+  tmdbId?: number;
+  imdbId?: string;
+}
+
+export interface ShowDetailResponse {
+  source: ShowSource;
+  state: ArrServiceState;
+  detail?: string;
+  warnings?: string[];
+  series: ShowSeriesSummary;
+  defaultSeason?: number;
+  seasons: ShowSeason[];
+  episodes: ShowEpisode[];
 }
 
 export interface ArrQualityProfile {

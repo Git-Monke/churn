@@ -71,5 +71,6 @@ needed; the password is not stored. Sonarr and Radarr API keys are read from
 `server/config/*/config.xml` unless overridden.
 
 The planned order is: library/status dashboard, search and media requests
-(done), download/activity queue, then Jellyfin playback controls. See
-[Web dashboard](web-ui.md) for the current API and configuration.
+(done), active downloads in Library (done), download history and queue actions,
+then Jellyfin playback controls. See [Web dashboard](web-ui.md) for the current
+API and configuration.

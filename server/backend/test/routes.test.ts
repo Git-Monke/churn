@@ -190,6 +190,7 @@ describe("library", () => {
               Name: "Example Movie",
               Type: "Movie",
               ProductionYear: 2020,
+              ProviderIds: { Tmdb: "12345", Tvdb: "6789", Imdb: "tt12345" },
               ImageTags: { Primary: "poster-tag" },
             },
             { Id: "bad", Name: "Ignored", Type: "Audio" },
@@ -211,6 +212,9 @@ describe("library", () => {
       name: "Example Movie",
       type: "Movie",
       year: 2020,
+      tmdbId: 12345,
+      tvdbId: 6789,
+      imdbId: "tt12345",
       imageUrl: "/api/library/images/movie-1?tag=poster-tag",
     });
     await app.close();
@@ -761,3 +765,350 @@ describe("create requests", () => {
   });
 });
 
+
+describe("activity", () => {
+  it("aggregates active Sonarr and Radarr downloads", async () => {
+    installFetch((url) => {
+      if (url.includes("sonarr.test") && url.includes("/api/v3/queue")) {
+        return jsonResponse({
+          records: [
+            {
+              id: 101,
+              title: "Example.Show.S01.1080p",
+              status: "downloading",
+              trackedDownloadStatus: "ok",
+              trackedDownloadState: "downloading",
+              size: 1000,
+              sizeleft: 250,
+              seriesId: 42,
+              seasonNumber: 1,
+              downloadClient: "qBittorrent",
+              protocol: "torrent",
+              quality: { quality: { name: "HD-1080p" } },
+            },
+            {
+              id: 102,
+              status: "completed",
+              trackedDownloadState: "imported",
+              seriesId: 42,
+            },
+          ],
+        });
+      }
+      if (url.includes("sonarr.test") && url.endsWith("/api/v3/series/42")) {
+        return jsonResponse({
+          id: 42,
+          title: "Example Show",
+          year: 2024,
+          tvdbId: 1234,
+          network: "Example TV",
+          images: [{ coverType: "poster", url: "/MediaCoverProxy/abc/poster.jpg" }],
+        });
+      }
+      if (url.includes("radarr.test") && url.includes("/api/v3/queue")) {
+        return jsonResponse({
+          records: [
+            {
+              id: 201,
+              title: "Example.Movie.2022.1080p",
+              status: "queued",
+              trackedDownloadState: "downloading",
+              size: 0,
+              sizeleft: 0,
+              movieId: 7,
+              downloadClient: "SABnzbd",
+              protocol: "usenet",
+            },
+          ],
+        });
+      }
+      if (url.includes("radarr.test") && url.endsWith("/api/v3/movie/7")) {
+        return jsonResponse({
+          id: 7,
+          title: "Example Movie",
+          year: 2022,
+          tmdbId: 9876,
+          images: [{ coverType: "poster", url: "/MediaCoverProxy/def/poster.jpg" }],
+        });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildServer(makeConfig());
+    const response = await app.inject({ method: "GET", url: "/api/activity" });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(body.services).toMatchObject([
+      { id: "sonarr", state: "ok", count: 1 },
+      { id: "radarr", state: "ok", count: 1 },
+    ]);
+    expect(body.total).toBe(2);
+    expect(body.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: "series:1234",
+          service: "sonarr",
+          kind: "series",
+          title: "Example Show",
+          progress: 75,
+          queueCount: 1,
+          seasons: [1],
+        }),
+        expect.objectContaining({
+          key: "movie:9876",
+          service: "radarr",
+          kind: "movie",
+          title: "Example Movie",
+          status: "queued",
+          progress: 0,
+        }),
+      ]),
+    );
+    await app.close();
+  });
+
+  it("keeps the other service when one queue is unreachable", async () => {
+    installFetch((url) => {
+      if (url.includes("radarr.test")) {
+        throw new Error("connection refused");
+      }
+      if (url.includes("sonarr.test") && url.includes("/api/v3/queue")) {
+        return jsonResponse({ records: [] });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildServer(makeConfig());
+    const response = await app.inject({ method: "GET", url: "/api/activity" });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(body.services[0]).toMatchObject({ id: "sonarr", state: "ok", count: 0 });
+    expect(body.services[1]).toMatchObject({ id: "radarr", state: "unreachable" });
+    expect(body.items).toEqual([]);
+    await app.close();
+  });
+
+  it("reports unconfigured queues without calling upstream", async () => {
+    const mock = installFetch(() => {
+      throw new Error("fetch should not be called");
+    });
+
+    const app = await buildServer(
+      makeConfig({
+        sonarr: { id: "sonarr", name: "Sonarr", url: "http://sonarr.test:8989", apiKey: undefined },
+        radarr: { id: "radarr", name: "Radarr", url: "http://radarr.test:7878", apiKey: undefined },
+      }),
+    );
+    const response = await app.inject({ method: "GET", url: "/api/activity" });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(body.services[0]).toMatchObject({ id: "sonarr", state: "unconfigured" });
+    expect(body.services[1]).toMatchObject({ id: "radarr", state: "unconfigured" });
+    expect(mock).not.toHaveBeenCalled();
+    await app.close();
+  });
+});
+
+describe("show detail", () => {
+  const jellyfinConfig = makeConfig({
+    jellyfin: {
+      id: "jellyfin",
+      name: "Jellyfin",
+      url: "http://jellyfin.test:8096",
+      apiKey: "jellyfin-key",
+    },
+  });
+
+  it("unions Jellyfin episodes with Sonarr downloads", async () => {
+    installFetch((url) => {
+      if (url.includes("jellyfin.test") && url.includes("/Items/series-1?")) {
+        return jsonResponse({
+          Id: "series-1",
+          Name: "Example Show",
+          Type: "Series",
+          ProductionYear: 2024,
+          ProviderIds: { Tvdb: "1234" },
+          ImageTags: { Primary: "poster-tag" },
+        });
+      }
+      if (url.includes("jellyfin.test") && url.includes("/Shows/series-1/Seasons")) {
+        return jsonResponse({
+          Items: [{ Id: "season-1", Name: "Season 1", IndexNumber: 1 }],
+        });
+      }
+      if (url.includes("jellyfin.test") && url.includes("/Shows/series-1/Episodes")) {
+        return jsonResponse({
+          Items: [
+            {
+              Id: "episode-1",
+              Name: "Pilot",
+              ParentIndexNumber: 1,
+              IndexNumber: 1,
+            },
+          ],
+        });
+      }
+      if (url.includes("sonarr.test") && url.endsWith("/api/v3/series")) {
+        return jsonResponse([
+          {
+            id: 42,
+            title: "Example Show",
+            year: 2024,
+            tvdbId: 1234,
+            network: "Example TV",
+            images: [{ coverType: "poster", url: "/MediaCoverProxy/abc/poster.jpg" }],
+          },
+        ]);
+      }
+      if (url.includes("sonarr.test") && url.includes("/api/v3/episode?seriesId=42")) {
+        return jsonResponse([
+          {
+            id: 501,
+            seriesId: 42,
+            seasonNumber: 1,
+            episodeNumber: 2,
+            title: "Second",
+            airDateUtc: "2024-01-02T00:00:00Z",
+            hasFile: false,
+            monitored: true,
+          },
+        ]);
+      }
+      if (url.includes("sonarr.test") && url.includes("/api/v3/queue")) {
+        return jsonResponse({
+          records: [
+            {
+              id: 10,
+              status: "downloading",
+              trackedDownloadState: "downloading",
+              size: 1000,
+              sizeleft: 200,
+              seriesId: 42,
+              episodeId: 501,
+              seasonNumber: 1,
+              downloadClient: "qBittorrent",
+              protocol: "torrent",
+            },
+          ],
+        });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildServer(jellyfinConfig);
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/library/shows/jellyfin/series-1",
+    });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(body).toMatchObject({
+      source: "jellyfin",
+      state: "ok",
+      series: { title: "Example Show", tvdbId: 1234 },
+      defaultSeason: 1,
+    });
+    expect(body.episodes).toHaveLength(2);
+    expect(body.episodes[0]).toMatchObject({
+      key: "s01e01",
+      availability: "jellyfin",
+      title: "Pilot",
+    });
+    expect(body.episodes[1]).toMatchObject({
+      key: "s01e02",
+      availability: "missing",
+      download: { status: "downloading", progress: 80 },
+    });
+    await app.close();
+  });
+
+  it("returns 404 for a missing Jellyfin show", async () => {
+    installFetch(() => jsonResponse({ error: "not found" }, 400));
+
+    const app = await buildServer(jellyfinConfig);
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/library/shows/jellyfin/missing-show",
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json().error.code).toBe("show_not_found");
+    await app.close();
+  });
+
+  it("builds a Sonarr-only show with season-pack downloads", async () => {
+    installFetch((url) => {
+      if (url.includes("sonarr.test") && url.endsWith("/api/v3/series/42")) {
+        return jsonResponse({
+          id: 42,
+          title: "Example Show",
+          year: 2024,
+          tvdbId: 1234,
+          images: [{ coverType: "poster", url: "/MediaCoverProxy/abc/poster.jpg" }],
+        });
+      }
+      if (url.includes("sonarr.test") && url.includes("/api/v3/episode?seriesId=42")) {
+        return jsonResponse([
+          {
+            id: 501,
+            seriesId: 42,
+            seasonNumber: 1,
+            episodeNumber: 1,
+            title: "First",
+            airDateUtc: "2024-01-01T00:00:00Z",
+            hasFile: false,
+          },
+          {
+            id: 502,
+            seriesId: 42,
+            seasonNumber: 1,
+            episodeNumber: 2,
+            title: "Second",
+            airDateUtc: "2024-01-02T00:00:00Z",
+            hasFile: false,
+          },
+        ]);
+      }
+      if (url.includes("sonarr.test") && url.includes("/api/v3/queue")) {
+        return jsonResponse({
+          records: [
+            {
+              id: 10,
+              status: "queued",
+              trackedDownloadState: "downloading",
+              size: 1000,
+              sizeleft: 500,
+              seriesId: 42,
+              seasonNumber: 1,
+            },
+          ],
+        });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildServer(makeConfig());
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/library/shows/sonarr/42",
+    });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(body).toMatchObject({
+      source: "sonarr",
+      state: "ok",
+      series: { title: "Example Show" },
+      defaultSeason: 1,
+    });
+    expect(body.episodes).toHaveLength(2);
+    expect(body.episodes.every((episode: { download?: { seasonPack?: boolean } }) =>
+      episode.download?.seasonPack === true,
+    )).toBe(true);
+    await app.close();
+  });
+});

@@ -1,9 +1,12 @@
 import type {
+  ActivityResponse,
   CreateRequestInput,
   CreateRequestResponse,
   LibraryResponse,
   RequestOptionsResponse,
   SearchResponse,
+  ShowDetailResponse,
+  ShowSource,
   StatusResponse,
 } from "./types";
 
@@ -63,6 +66,17 @@ export function fetchRequestOptions(): Promise<RequestOptionsResponse> {
 export function fetchSearch(query: string): Promise<SearchResponse> {
   const params = new URLSearchParams({ q: query });
   return getJson<SearchResponse>(`/api/search?${params.toString()}`);
+}
+
+export function fetchActivity(): Promise<ActivityResponse> {
+  return getJson<ActivityResponse>("/api/activity");
+}
+
+export function fetchShow(
+  source: ShowSource,
+  id: string,
+): Promise<ShowDetailResponse> {
+  return getJson<ShowDetailResponse>(`/api/library/shows/${source}/${encodeURIComponent(id)}`);
 }
 
 export function createRequest(input: CreateRequestInput): Promise<CreateRequestResponse> {

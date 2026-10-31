@@ -94,10 +94,10 @@ host. Keys churn does not manage are preserved on rerun, so hand edits survive.
 ## Web dashboard
 
 `server/backend` and `server/frontend` hold an optional dashboard for the
-Jellyfin library, the health of Jellyfin, Sonarr and Radarr, and searching and
-requesting new media. It is a stateless BFF: it reads the service APIs, stores
-no database, and the browser only talks to the backend. It binds to
-`127.0.0.1` by default.
+Jellyfin library, the health of Jellyfin, Sonarr and Radarr, and searching,
+requesting and tracking new media. It has three pages — Services, Library and
+Search. It is a stateless BFF: it reads the service APIs, stores no database,
+and the browser only talks to the backend. It binds to `127.0.0.1` by default.
 
 ```bash
 cd server
@@ -121,10 +121,15 @@ npm start          # Fastify serves the SPA at http://127.0.0.1:4000
 
 Search across Radarr and Sonarr from the dashboard and request a movie or show
 with one click. Requests use saved defaults for quality profile, root folder
-and TV monitoring, and start a download search immediately. See
-`server/README.md` for configuration and container notes. Development is
-planned in this order: library/status dashboard, search and media requests
-(done), download/activity queue, then Jellyfin playback controls.
+and TV monitoring, and start a download search immediately.
+
+The Library page merges titles already in Jellyfin with active Sonarr/Radarr
+downloads. Movies show progress and ETA on their card. Shows open a season and
+episode view with per-episode availability and download progress, including
+season-pack handling. See `server/README.md` for configuration and container
+notes. Development is planned in this order: library/status dashboard, search
+and media requests (done), active downloads in Library (done), download history
+and queue actions, then Jellyfin playback controls.
 
 ## Running a stack
 

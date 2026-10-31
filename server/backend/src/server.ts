@@ -6,11 +6,13 @@ import Fastify, { type FastifyInstance } from "fastify";
 
 import type { AppConfig } from "./config.js";
 import { ApiError, UpstreamError } from "./errors.js";
+import { registerActivityRoutes } from "./routes/activity.js";
 import { registerHealthRoutes } from "./routes/health.js";
 import { registerLibraryRoutes } from "./routes/library.js";
 import { registerRequestRoutes } from "./routes/requests.js";
 import { registerSearchRoutes } from "./routes/search.js";
 import { registerServiceRoutes } from "./routes/services.js";
+import { registerShowRoutes } from "./routes/shows.js";
 import { registerStatusRoutes } from "./routes/status.js";
 
 interface BuildServerOptions {
@@ -45,6 +47,8 @@ export async function buildServer(
   registerLibraryRoutes(app, config);
   registerSearchRoutes(app, config);
   registerRequestRoutes(app, config);
+  registerActivityRoutes(app, config);
+  registerShowRoutes(app, config);
   registerServiceRoutes(app, config);
 
   const hasFrontend = existsSync(path.join(config.frontendDist, "index.html"));

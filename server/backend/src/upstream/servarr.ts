@@ -68,6 +68,56 @@ export interface ServarrMovieResource extends ServarrLookupBase {
   };
 }
 
+export interface ServarrQueueStatusMessage {
+  title?: string;
+  messages?: string[];
+}
+
+export interface ServarrQueueRecord {
+  id?: number;
+  title?: string;
+  status?: string;
+  trackedDownloadStatus?: string;
+  trackedDownloadState?: string;
+  size?: number;
+  sizeleft?: number;
+  timeleft?: string;
+  estimatedCompletionTime?: string;
+  protocol?: string;
+  downloadClient?: string;
+  indexer?: string;
+  seriesId?: number;
+  episodeId?: number;
+  seasonNumber?: number;
+  movieId?: number;
+  quality?: {
+    quality?: {
+      name?: string;
+    };
+  };
+  statusMessages?: ServarrQueueStatusMessage[];
+}
+
+export interface ServarrQueueResponse {
+  page?: number;
+  pageSize?: number;
+  totalRecords?: number;
+  records?: ServarrQueueRecord[];
+}
+
+export interface ServarrEpisode {
+  id?: number;
+  seriesId?: number;
+  seasonNumber?: number;
+  episodeNumber?: number;
+  title?: string;
+  overview?: string;
+  airDateUtc?: string;
+  hasFile?: boolean;
+  monitored?: boolean;
+  episodeFileId?: number;
+}
+
 export interface ServarrMediaCover {
   body: Buffer;
   contentType: string;
@@ -113,6 +163,28 @@ export function createArrClient(service: ArrServiceId, config: ServiceConfig, ti
 
     async getRootFolders(): Promise<ServarrRootFolder[]> {
       return get<ServarrRootFolder[]>("/api/v3/rootfolder");
+    },
+
+    async getQueue(): Promise<ServarrQueueRecord[]> {
+      const query = new URLSearchParams({ page: "1", pageSize: "1000" });
+      if (service === "sonarr") {
+        query.set("includeUnknownSeriesItems", "true");
+      }
+      const response = await get<ServarrQueueResponse>(`/api/v3/queue?${query.toString()}`);
+      return response.records ?? [];
+    },
+
+    async getSeries(id: number): Promise<ServarrSeriesResource> {
+      return get<ServarrSeriesResource>(`/api/v3/series/${id}`);
+    },
+
+    async getMovie(id: number): Promise<ServarrMovieResource> {
+      return get<ServarrMovieResource>(`/api/v3/movie/${id}`);
+    },
+
+    async getEpisodes(seriesId: number): Promise<ServarrEpisode[]> {
+      const query = new URLSearchParams({ seriesId: String(seriesId) });
+      return get<ServarrEpisode[]>(`/api/v3/episode?${query.toString()}`);
     },
 
     async addSeries(payload: Record<string, unknown>): Promise<ServarrSeriesResource> {

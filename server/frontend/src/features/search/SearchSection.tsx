@@ -80,6 +80,7 @@ export function SearchSection() {
       }
       void queryClient.invalidateQueries({ queryKey: ["search"] });
       void queryClient.invalidateQueries({ queryKey: ["status"] });
+      void queryClient.invalidateQueries({ queryKey: ["activity"] });
     },
     onError: (error) => {
       toast.error(error.message);

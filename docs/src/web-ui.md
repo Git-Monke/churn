@@ -1,6 +1,8 @@
 # Web dashboard
 
-The dashboard is a TypeScript app under `server/` with two workspaces:
+The dashboard is a TypeScript app under `server/` with two workspaces. It has
+three pages — Services, Library and Search — selected by hash routes
+(`#/services`, `#/library`, `#/search`):
 
 ```
 server/backend/    Fastify API, also serves frontend/dist
@@ -66,8 +68,10 @@ reuse a valid existing key.
 | --- | --- |
 | `GET /api/health` | Backend liveness |
 | `GET /api/status` | Service health, version and latency |
-| `GET /api/library` | Jellyfin movies and series |
+| `GET /api/library` | Jellyfin movies and series with provider ids |
 | `GET /api/library/images/:itemId` | Poster proxy |
+| `GET /api/library/shows/:source/:id` | Show seasons, episodes and download overlays |
+| `GET /api/activity` | Active Sonarr/Radarr queue grouped by movie/show |
 | `GET /api/search?q=<term>` | Sonarr/Radarr lookup with library-state markers |
 | `GET /api/search/images/:service` | Proxied arr media cover |
 | `GET /api/requests/options` | Quality profiles, root folders and defaults |
@@ -98,12 +102,39 @@ then adds the title. Sonarr receives the selected monitoring scope; Radarr adds
 with `released` minimum availability. When one app is unavailable, search and
 request options still work for the other.
 
+## Library and activity
+
+`GET /api/activity` reads both arr v3 queues in parallel and keeps only active
+records: queued, downloading, importing, or waiting on import. Failed and already
+imported records are hidden. Records are grouped by movie or show with
+aggregated progress, ETA, size, download client, protocol, quality and warning
+messages. Posters come from arr metadata through the existing backend image
+proxy.
+
+Library merges `/api/library` with `/api/activity`:
+
+- movies and shows already in Jellyfin and active in an arr are matched by
+  `tmdbId` / `tvdbId` and shown once;
+- unmatched downloads appear as downloading-only cards;
+- active downloads come first;
+- a failed arr shows a per-service alert without hiding Jellyfin or the other
+  arr.
+
+Movies show progress on the card. Shows link to
+`#/library/show/<source>/<id>`, backed by
+`GET /api/library/shows/:source/:id`. That route unions Jellyfin and Sonarr
+episodes by season/episode, marks availability (Jellyfin, in Sonarr, missing,
+upcoming), and overlays per-episode downloads. Sonarr season packs mark every
+episode in the season. Jellyfin shows are matched to Sonarr through
+`ProviderIds.Tvdb`; download-only shows use the Sonarr source directly.
+
 ## Roadmap
 
 1. Library + service status dashboard — done
 2. Search and media requests — done
-3. Download and activity queue — next
-4. Jellyfin playback/session controls
+3. Active downloads in Library — done
+4. Download history and queue actions — next
+5. Jellyfin playback/session controls
 
 ## Container note
 

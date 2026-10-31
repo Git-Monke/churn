@@ -1,41 +1,46 @@
-import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { CircleAlertIcon } from "lucide-react";
+import { useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { fetchLibrary, fetchStatus } from "@/api/client";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { fetchStatus } from "@/api/client";
 import { Toaster } from "@/components/ui/sonner";
 import { AppHeader } from "@/components/AppHeader";
-import { LibrarySection } from "@/features/library/LibrarySection";
-import { SearchSection } from "@/features/search/SearchSection";
-import { ServiceStatusGrid } from "@/features/status/ServiceStatusGrid";
+import { useHashRoute } from "@/hooks/use-hash-route";
+import { LibraryPage } from "@/pages/LibraryPage";
+import { SearchPage } from "@/pages/SearchPage";
+import { ServicesPage } from "@/pages/ServicesPage";
+import { ShowPage } from "@/pages/ShowPage";
 
 export default function App() {
+  const route = useHashRoute();
+  const queryClient = useQueryClient();
+  const [refreshing, setRefreshing] = useState(false);
   const statusQuery = useQuery({
     queryKey: ["status"],
     queryFn: fetchStatus,
     refetchInterval: 30_000,
   });
-  const libraryQuery = useQuery({
-    queryKey: ["library"],
-    queryFn: fetchLibrary,
-    refetchInterval: 60_000,
-  });
 
-  const refreshing = statusQuery.isFetching || libraryQuery.isFetching;
   const jellyfinUrl = useMemo(
     () => statusQuery.data?.services.find((service) => service.id === "jellyfin")?.url,
     [statusQuery.data],
   );
 
   async function refresh() {
-    const results = await Promise.allSettled([statusQuery.refetch(), libraryQuery.refetch()]);
-    const failed = results.some((result) => result.status === "rejected");
-    if (failed) {
-      toast.error("Some data could not be refreshed");
-    } else {
-      toast.success("Dashboard refreshed");
+    setRefreshing(true);
+    try {
+      await queryClient.refetchQueries({ type: "active" });
+      const failed = queryClient
+        .getQueryCache()
+        .findAll({ type: "active" })
+        .some((query) => query.state.status === "error");
+      if (failed) {
+        toast.error("Some data could not be refreshed");
+      } else {
+        toast.success("Dashboard refreshed");
+      }
+    } finally {
+      setRefreshing(false);
     }
   }
 
@@ -43,33 +48,24 @@ export default function App() {
     <>
       <div className="mx-auto flex min-h-dvh w-full max-w-7xl flex-col gap-8 px-4 py-8 sm:px-6 lg:px-8">
         <AppHeader
+          route={route}
           checkedAt={statusQuery.data?.checkedAt}
           refreshing={refreshing}
           onRefresh={() => void refresh()}
         />
 
-        {statusQuery.error && statusQuery.data ? (
-          <Alert variant="destructive">
-            <CircleAlertIcon />
-            <AlertTitle>Service status is stale</AlertTitle>
-            <AlertDescription>{statusQuery.error.message}</AlertDescription>
-          </Alert>
+        {route.page === "services" ? (
+          <ServicesPage
+            status={statusQuery.data}
+            loading={statusQuery.isLoading}
+            error={statusQuery.error}
+          />
         ) : null}
-
-        <ServiceStatusGrid
-          services={statusQuery.data?.services}
-          loading={statusQuery.isLoading}
-          error={statusQuery.error}
-        />
-
-        <SearchSection />
-
-        <LibrarySection
-          library={libraryQuery.data}
-          loading={libraryQuery.isLoading}
-          error={libraryQuery.error}
-          jellyfinUrl={jellyfinUrl}
-        />
+        {route.page === "library" ? <LibraryPage jellyfinUrl={jellyfinUrl} /> : null}
+        {route.page === "show" ? (
+          <ShowPage key={`${route.source}:${route.id}`} source={route.source} id={route.id} />
+        ) : null}
+        {route.page === "search" ? <SearchPage /> : null}
       </div>
       <Toaster theme="dark" richColors />
     </>
