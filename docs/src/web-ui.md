@@ -68,17 +68,41 @@ reuse a valid existing key.
 | `GET /api/status` | Service health, version and latency |
 | `GET /api/library` | Jellyfin movies and series |
 | `GET /api/library/images/:itemId` | Poster proxy |
+| `GET /api/search?q=<term>` | Sonarr/Radarr lookup with library-state markers |
+| `GET /api/search/images/:service` | Proxied arr media cover |
+| `GET /api/requests/options` | Quality profiles, root folders and defaults |
+| `POST /api/requests` | Add a movie or series and optionally start a search |
 | `GET /api/services/:id/open` | Redirect to a native service UI |
 
 Errors use `{ "error": { "code": "...", "message": "..." } }`. The library route
 returns HTTP 200 with an empty list and a setup state when Jellyfin is not ready;
 unexpected backend failures are 5xx.
 
+## Search and requests
+
+Searching runs a debounced query against Sonarr and Radarr at the same time. Each
+result carries its metadata ids, rating, runtime, certification and a
+backend-proxied poster. Titles already in the arr library are marked
+**Requested**; this is based on Sonarr `tvdbId` and Radarr `tmdbId` matches, not
+the Jellyfin library.
+
+**Request options** persists quality profile, root folder, TV monitoring and
+search-on-add in `localStorage`. Defaults prefer the `HD - 720p/1080p` profile,
+fall back to `HD-1080p` and then the first profile, use the first accessible root
+folder, monitor all seasons and start searching immediately. The Request button
+uses these settings directly.
+
+On `POST /api/requests` the backend re-fetches canonical metadata by id, checks
+for duplicates, validates the profile and root folder against the live arr APIs,
+then adds the title. Sonarr receives the selected monitoring scope; Radarr adds
+with `released` minimum availability. When one app is unavailable, search and
+request options still work for the other.
+
 ## Roadmap
 
-1. Library + service status dashboard
-2. Search and request media through Sonarr/Radarr
-3. Download and activity queue
+1. Library + service status dashboard — done
+2. Search and media requests — done
+3. Download and activity queue — next
 4. Jellyfin playback/session controls
 
 ## Container note

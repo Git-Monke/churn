@@ -1,4 +1,11 @@
-import type { LibraryResponse, StatusResponse } from "./types";
+import type {
+  CreateRequestInput,
+  CreateRequestResponse,
+  LibraryResponse,
+  RequestOptionsResponse,
+  SearchResponse,
+  StatusResponse,
+} from "./types";
 
 export class ApiClientError extends Error {
   readonly status: number;
@@ -12,9 +19,10 @@ export class ApiClientError extends Error {
   }
 }
 
-async function getJson<T>(path: string): Promise<T> {
+async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
-    headers: { accept: "application/json" },
+    ...init,
+    headers: { accept: "application/json", ...init?.headers },
   });
   const body: unknown = await response.json().catch(() => null);
   if (!response.ok) {
@@ -28,12 +36,37 @@ async function getJson<T>(path: string): Promise<T> {
   return body as T;
 }
 
+function getJson<T>(path: string): Promise<T> {
+  return requestJson<T>(path);
+}
+
+function postJson<T>(path: string, body: unknown): Promise<T> {
+  return requestJson<T>(path, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
 export function fetchStatus(): Promise<StatusResponse> {
   return getJson<StatusResponse>("/api/status");
 }
 
 export function fetchLibrary(): Promise<LibraryResponse> {
   return getJson<LibraryResponse>("/api/library");
+}
+
+export function fetchRequestOptions(): Promise<RequestOptionsResponse> {
+  return getJson<RequestOptionsResponse>("/api/requests/options");
+}
+
+export function fetchSearch(query: string): Promise<SearchResponse> {
+  const params = new URLSearchParams({ q: query });
+  return getJson<SearchResponse>(`/api/search?${params.toString()}`);
+}
+
+export function createRequest(input: CreateRequestInput): Promise<CreateRequestResponse> {
+  return postJson<CreateRequestResponse>("/api/requests", input);
 }
 
 function isErrorEnvelope(value: unknown): value is { error: { code?: string; message?: string } } {

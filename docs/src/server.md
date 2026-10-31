@@ -52,9 +52,11 @@ same machine.
 ## Dashboard
 
 The optional TypeScript app in `server/backend` and `server/frontend` serves a
-single dashboard for the Jellyfin library and the health of Jellyfin, Sonarr and
-Radarr. It binds to `127.0.0.1` and the browser only calls the backend; upstream
-keys and URLs stay server-side.
+single dashboard for the Jellyfin library, the health of Jellyfin, Sonarr and
+Radarr, and searching and requesting new media. Requests are added through the
+Sonarr/Radarr APIs so the existing Prowlarr and qBittorrent pipeline starts the
+download. The app binds to `127.0.0.1` and the browser only calls the backend;
+upstream keys and URLs stay server-side.
 
 ```bash
 cd server
@@ -68,6 +70,6 @@ creates an API key named `churn`, and writes it to `server/.env` as
 needed; the password is not stored. Sonarr and Radarr API keys are read from
 `server/config/*/config.xml` unless overridden.
 
-The planned order is: library/status dashboard, search and media requests,
-download/activity queue, then Jellyfin playback controls. See
+The planned order is: library/status dashboard, search and media requests
+(done), download/activity queue, then Jellyfin playback controls. See
 [Web dashboard](web-ui.md) for the current API and configuration.

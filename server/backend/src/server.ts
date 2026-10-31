@@ -8,6 +8,8 @@ import type { AppConfig } from "./config.js";
 import { ApiError, UpstreamError } from "./errors.js";
 import { registerHealthRoutes } from "./routes/health.js";
 import { registerLibraryRoutes } from "./routes/library.js";
+import { registerRequestRoutes } from "./routes/requests.js";
+import { registerSearchRoutes } from "./routes/search.js";
 import { registerServiceRoutes } from "./routes/services.js";
 import { registerStatusRoutes } from "./routes/status.js";
 
@@ -41,6 +43,8 @@ export async function buildServer(
   registerHealthRoutes(app);
   registerStatusRoutes(app, config);
   registerLibraryRoutes(app, config);
+  registerSearchRoutes(app, config);
+  registerRequestRoutes(app, config);
   registerServiceRoutes(app, config);
 
   const hasFrontend = existsSync(path.join(config.frontendDist, "index.html"));

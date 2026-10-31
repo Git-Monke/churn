@@ -8,6 +8,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Toaster } from "@/components/ui/sonner";
 import { AppHeader } from "@/components/AppHeader";
 import { LibrarySection } from "@/features/library/LibrarySection";
+import { SearchSection } from "@/features/search/SearchSection";
 import { ServiceStatusGrid } from "@/features/status/ServiceStatusGrid";
 
 export default function App() {
@@ -60,6 +61,8 @@ export default function App() {
           loading={statusQuery.isLoading}
           error={statusQuery.error}
         />
+
+        <SearchSection />
 
         <LibrarySection
           library={libraryQuery.data}

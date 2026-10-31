@@ -1,7 +1,7 @@
 # Churn server dashboard
 
-A small TypeScript app that puts the Jellyfin library and the health of
-Jellyfin, Sonarr and Radarr in one place.
+A small TypeScript app that puts the Jellyfin library, the health of Jellyfin,
+Sonarr and Radarr, and search/requests for new media in one place.
 
 ```
 server/
@@ -95,9 +95,32 @@ put it in `server/.env`, then restart the backend.
 | `GET /api/status` | Jellyfin/Sonarr/Radarr health, version and latency |
 | `GET /api/library` | Jellyfin movies and series with backend-owned poster URLs |
 | `GET /api/library/images/:itemId` | Poster proxy; no Jellyfin key reaches the browser |
+| `GET /api/search?q=<term>` | Sonarr/Radarr lookup with library-state markers |
+| `GET /api/search/images/:service` | Proxied arr media cover |
+| `GET /api/requests/options` | Quality profiles, root folders and request defaults |
+| `POST /api/requests` | Add a movie or series and optionally start a search |
 | `GET /api/services/:id/open` | Redirect to a service's native UI |
 
 Errors use `{ "error": { "code": "...", "message": "..." } }`.
+
+## Search and requests
+
+The Search section queries Sonarr and Radarr together with a debounced search.
+Results already present in either app are marked **Requested** and cannot be
+added twice. Posters are proxied through the backend, so the browser never sees
+an arr URL or API key.
+
+**Request options** stores your preferred quality profile, root folder, TV
+monitoring scope and search-on-add setting in `localStorage`. The defaults are
+`HD - 720p/1080p`, the first accessible root folder, all seasons, and search on
+add; they fall back to `HD-1080p` and then the first available profile. The
+Request button uses those settings directly. The backend re-fetches metadata
+from the arr by id, validates the selected profile and folder against the live
+API, checks for duplicates, then adds the title. Sonarr gets the chosen
+monitoring scope; Radarr adds with a `released` minimum availability.
+
+Search stays usable when one app is down: the other app's results are still
+returned and an alert explains the unavailable service.
 
 ## Development
 
@@ -113,9 +136,9 @@ required.
 
 ## Roadmap
 
-1. **Library + service status dashboard** — this version
-2. Search + request media through Sonarr/Radarr lookups
-3. Download/activity queue
+1. **Library + service status dashboard** — done
+2. **Search + media requests** — done
+3. Download/activity queue — next
 4. Jellyfin playback/session controls
 
 ## Container later

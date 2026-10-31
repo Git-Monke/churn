@@ -1,0 +1,177 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  arrMonitorName,
+  interleaveResults,
+  isAllowedMediaCoverPath,
+  mapMovieResource,
+  mapSeriesResource,
+  mediaCoverUrl,
+  monitorSeasons,
+  pickDefaultQualityProfile,
+  pickDefaultRootFolder,
+} from "../src/search.js";
+import type { SearchResult } from "../src/types.js";
+
+describe("search result mapping", () => {
+  it("maps Sonarr series metadata and a backend poster URL", () => {
+    const result = mapSeriesResource(
+      {
+        title: "Severance",
+        year: 2022,
+        overview: "A show.",
+        certification: "TV-MA",
+        runtime: 49,
+        genres: ["Drama"],
+        network: "Apple TV",
+        tvdbId: 371980,
+        tmdbId: 95396,
+        imdbId: "tt11280740",
+        ratings: { value: 8.6 },
+        seasons: [
+          { seasonNumber: 0, monitored: false },
+          { seasonNumber: 1, monitored: true },
+        ],
+        images: [
+          { coverType: "banner", url: "/MediaCoverProxy/hash/banner.jpg" },
+          { coverType: "poster", url: "/MediaCoverProxy/hash/poster.jpg" },
+        ],
+      },
+      false,
+    );
+
+    expect(result).toMatchObject({
+      key: "series:371980",
+      kind: "series",
+      service: "sonarr",
+      title: "Severance",
+      year: 2022,
+      rating: 8.6,
+      runtimeMinutes: 49,
+      network: "Apple TV",
+      tvdbId: 371980,
+      tmdbId: 95396,
+      inLibrary: false,
+      imageUrl:
+        "/api/search/images/sonarr?path=%2FMediaCoverProxy%2Fhash%2Fposter.jpg",
+    });
+    expect(result?.seasons).toEqual([
+      { seasonNumber: 0, monitored: false },
+      { seasonNumber: 1, monitored: true },
+    ]);
+  });
+
+  it("maps Radarr movies and prefers the IMDb rating", () => {
+    const result = mapMovieResource(
+      {
+        title: "Dune",
+        year: 2021,
+        tmdbId: 438631,
+        imdbId: "tt1160419",
+        studio: "Legendary Pictures",
+        ratings: { imdb: { value: 8 }, tmdb: { value: 7.8 } },
+        images: [{ coverType: "poster", url: "/MediaCoverProxy/abc/poster.jpg" }],
+      },
+      true,
+    );
+
+    expect(result).toMatchObject({
+      key: "movie:438631",
+      kind: "movie",
+      service: "radarr",
+      rating: 8,
+      network: "Legendary Pictures",
+      inLibrary: true,
+    });
+  });
+
+  it("drops results without the id needed to request them", () => {
+    expect(mapSeriesResource({ title: "No id" }, false)).toBeNull();
+    expect(mapMovieResource({ title: "No id" }, false)).toBeNull();
+    expect(mapSeriesResource({ tvdbId: 1 }, false)).toBeNull();
+  });
+
+  it("only maps allowlisted media-cover paths", () => {
+    expect(
+      mediaCoverUrl("radarr", [{ coverType: "poster", url: "/MediaCoverProxy/abc/poster.webp" }]),
+    ).toBe("/api/search/images/radarr?path=%2FMediaCoverProxy%2Fabc%2Fposter.webp");
+    expect(
+      mediaCoverUrl("radarr", [{ coverType: "poster", url: "https://evil.test/poster.jpg" }]),
+    ).toBeUndefined();
+    expect(isAllowedMediaCoverPath("/MediaCoverProxy/abc/poster.jpg?x=1")).toBe(false);
+    expect(isAllowedMediaCoverPath("/MediaCoverProxy/abc/poster.svg")).toBe(false);
+  });
+});
+
+describe("request defaults", () => {
+  const profiles = [
+    { id: 1, name: "Any" },
+    { id: 4, name: "HD-1080p" },
+    { id: 5, name: "Ultra-HD" },
+    { id: 6, name: "HD - 720p/1080p" },
+  ];
+
+  it("prefers the shared 720p/1080p profile", () => {
+    expect(pickDefaultQualityProfile(profiles)?.id).toBe(6);
+  });
+
+  it("falls back to 1080p and then the first profile", () => {
+    expect(pickDefaultQualityProfile(profiles.filter((p) => p.id !== 6))?.id).toBe(4);
+    expect(pickDefaultQualityProfile([{ id: 1, name: "Any" }])?.id).toBe(1);
+    expect(pickDefaultQualityProfile([])).toBeUndefined();
+  });
+
+  it("picks the first accessible root folder", () => {
+    expect(
+      pickDefaultRootFolder([
+        { path: "/inaccessible", accessible: false },
+        { path: "/media/tv", accessible: true },
+      ])?.path,
+    ).toBe("/media/tv");
+    expect(pickDefaultRootFolder([{ path: "/only", accessible: false }])?.path).toBe("/only");
+  });
+
+  it("maps monitoring scopes to Sonarr season flags", () => {
+    const seasons = [
+      { seasonNumber: 0, monitored: false },
+      { seasonNumber: 1, monitored: false },
+      { seasonNumber: 2, monitored: false },
+    ];
+    expect(monitorSeasons(seasons, "all")).toEqual([
+      { seasonNumber: 0, monitored: true },
+      { seasonNumber: 1, monitored: true },
+      { seasonNumber: 2, monitored: true },
+    ]);
+    expect(monitorSeasons(seasons, "firstSeason")).toEqual([
+      { seasonNumber: 0, monitored: false },
+      { seasonNumber: 1, monitored: true },
+      { seasonNumber: 2, monitored: false },
+    ]);
+    expect(monitorSeasons(seasons, "future")?.every((season) => !season.monitored)).toBe(true);
+    expect(monitorSeasons(undefined, "all")).toBeUndefined();
+    expect(arrMonitorName("future")).toBe("future");
+  });
+});
+
+describe("interleaveResults", () => {
+  it("merges result groups by upstream rank", () => {
+    const movie = (key: string): SearchResult => ({
+      key,
+      kind: "movie",
+      service: "radarr",
+      title: key,
+      inLibrary: false,
+    });
+    const series = (key: string): SearchResult => ({
+      key,
+      kind: "series",
+      service: "sonarr",
+      title: key,
+      inLibrary: false,
+    });
+
+    expect(
+      interleaveResults([[series("s1"), series("s2")], [movie("m1")]]).map((item) => item.key),
+    ).toEqual(["s1", "m1", "s2"]);
+  });
+});
