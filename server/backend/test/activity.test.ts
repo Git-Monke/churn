@@ -7,6 +7,7 @@ import {
   isActiveQueueRecord,
   isSeasonPack,
   queueRecordProgress,
+  queueRecordSeasons,
   queueRecordStatus,
 } from "../src/activity.js";
 import type {
@@ -81,6 +82,29 @@ describe("isSeasonPack", () => {
   });
 });
 
+describe("queueRecordSeasons", () => {
+  it("expands multi-season release titles", () => {
+    expect(queueRecordSeasons(record({ title: "Show.S01-03.1080p", seasonNumber: 1 }))).toEqual([
+      1, 2, 3,
+    ]);
+    expect(queueRecordSeasons(record({ title: "Show.S01-S03", seasonNumber: 1 }))).toEqual([
+      1, 2, 3,
+    ]);
+    expect(queueRecordSeasons(record({ title: "Show.Season 1-3", seasonNumber: 1 }))).toEqual([
+      1, 2, 3,
+    ]);
+  });
+
+  it("falls back to Sonarr's season and ignores episode ranges", () => {
+    expect(queueRecordSeasons(record({ title: "Show.S01E01-E03", seasonNumber: 1 }))).toEqual([
+      1,
+    ]);
+    expect(queueRecordSeasons(record({ title: "Show.S02", seasonNumber: 2 }))).toEqual([2]);
+    expect(queueRecordSeasons(record({ seasonNumber: 4 }))).toEqual([4]);
+    expect(queueRecordSeasons(record())).toEqual([]);
+  });
+});
+
 describe("aggregateQueueRecords", () => {
   it("combines bytes, clients, protocols, seasons and messages", () => {
     const aggregate = aggregateQueueRecords([
@@ -108,6 +132,35 @@ describe("aggregateQueueRecords", () => {
     expect(aggregate.statusMessages).toEqual(["Stalled", "No peers"]);
   });
 
+  it("counts a season pack's shared download once and expands its seasons", () => {
+    const aggregate = aggregateQueueRecords([
+      record({
+        id: 1,
+        downloadId: "ABC",
+        title: "Show.S01-03",
+        seasonNumber: 1,
+        episodeId: 11,
+        size: 1000,
+        sizeleft: 500,
+      }),
+      record({
+        id: 2,
+        downloadId: "ABC",
+        title: "Show.S01-03",
+        seasonNumber: 1,
+        episodeId: 12,
+        size: 1000,
+        sizeleft: 500,
+      }),
+    ]);
+
+    expect(aggregate.queueCount).toBe(2);
+    expect(aggregate.progress).toBe(50);
+    expect(aggregate.sizeBytes).toBe(1000);
+    expect(aggregate.sizeLeftBytes).toBe(500);
+    expect(aggregate.seasons).toEqual([1, 2, 3]);
+  });
+
   it("returns zero progress when no record reports a size", () => {
     const aggregate = aggregateQueueRecords([
       record({ size: 0, sizeleft: 0, status: "queued" }),
@@ -129,7 +182,7 @@ describe("activity item mapping", () => {
       imdbId: "tt1234",
       runtime: 45,
       ratings: { value: 8.2 },
-      images: [{ coverType: "poster", url: "/MediaCoverProxy/abc/poster.jpg" }],
+      images: [{ coverType: "poster", url: "/MediaCoverProxy/abc/poster.jpg", remoteUrl: "https://image.tmdb.org/t/p/original/abc-poster.jpg" }],
     };
 
     const item = buildSeriesActivityItem(
@@ -149,7 +202,7 @@ describe("activity item mapping", () => {
       queueCount: 2,
       seasons: [1, 2],
       progress: 80,
-      imageUrl: "/api/search/images/sonarr?path=%2FMediaCoverProxy%2Fabc%2Fposter.jpg",
+      imageUrl: "/api/search/images/sonarr?url=https%3A%2F%2Fimage.tmdb.org%2Ft%2Fp%2Foriginal%2Fabc-poster.jpg",
     });
   });
 
@@ -162,7 +215,7 @@ describe("activity item mapping", () => {
       imdbId: "tt9876",
       studio: "Example Studio",
       runtime: 110,
-      images: [{ coverType: "poster", url: "/MediaCoverProxy/def/poster.jpg" }],
+      images: [{ coverType: "poster", url: "/MediaCoverProxy/def/poster.jpg", remoteUrl: "https://image.tmdb.org/t/p/original/def-poster.jpg" }],
     };
 
     const item = buildMovieActivityItem(7, [record()], movie);
@@ -173,7 +226,7 @@ describe("activity item mapping", () => {
       kind: "movie",
       title: "Example Movie",
       movieId: 7,
-      imageUrl: "/api/search/images/radarr?path=%2FMediaCoverProxy%2Fdef%2Fposter.jpg",
+      imageUrl: "/api/search/images/radarr?url=https%3A%2F%2Fimage.tmdb.org%2Ft%2Fp%2Foriginal%2Fdef-poster.jpg",
     });
   });
 });

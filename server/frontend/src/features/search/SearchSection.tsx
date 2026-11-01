@@ -10,6 +10,7 @@ import {
 } from "@/api/client";
 import type {
   CreateRequestInput,
+  RequestMonitor,
   SearchResponse,
   SearchResult,
   SearchServiceState,
@@ -32,11 +33,25 @@ import {
   SearchResultGrid,
   SearchResultGridSkeleton,
 } from "@/features/search/SearchResultGrid";
+import { ReleasePickerDialog } from "@/features/show/ReleasePickerDialog";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useRequestDefaults } from "@/features/search/use-request-defaults";
 
+interface RequestMutationVariables {
+  input: CreateRequestInput;
+  result: SearchResult;
+}
+
+interface PendingReleaseSelection {
+  seriesId: number;
+  seasonNumber: number;
+  title: string;
+}
+
 export function SearchSection() {
   const [query, setQuery] = useState("");
+  const [releaseSelection, setReleaseSelection] =
+    useState<PendingReleaseSelection | null>(null);
   const debounced = useDebouncedValue(query, 350);
   const term = debounced.trim();
   const searchEnabled = term.length >= 2;
@@ -58,13 +73,27 @@ export function SearchSection() {
   });
 
   const requestMutation = useMutation({
-    mutationFn: createRequest,
+    mutationFn: ({ input }: RequestMutationVariables) => createRequest(input),
     onSuccess: (data, variables) => {
-      const key = requestKey(variables);
+      const key = requestKey(variables.input);
+      const releaseAction =
+        data.service === "sonarr" && data.id !== undefined
+          ? {
+              label: "Choose release",
+              onClick: () => {
+                window.location.hash = `#/library/show/sonarr/${data.id}`;
+              },
+            }
+          : undefined;
       if (data.status === "added") {
-        toast.success(`Requested ${formatTitle(data.title, data.year)}`);
+        toast.success(`Requested ${formatTitle(data.title, data.year)}`, {
+          duration: data.service === "sonarr" ? 12_000 : undefined,
+        });
       } else {
-        toast.info(`${formatTitle(data.title, data.year)} is already requested`);
+        toast.info(`${formatTitle(data.title, data.year)} is already requested`, {
+          action: releaseAction,
+          duration: data.service === "sonarr" ? 12_000 : undefined,
+        });
       }
       if (key) {
         queryClient.setQueriesData<SearchResponse>({ queryKey: ["search"] }, (current) =>
@@ -81,6 +110,21 @@ export function SearchSection() {
       void queryClient.invalidateQueries({ queryKey: ["search"] });
       void queryClient.invalidateQueries({ queryKey: ["status"] });
       void queryClient.invalidateQueries({ queryKey: ["activity"] });
+      void queryClient.invalidateQueries({ queryKey: ["requested-library"] });
+
+      if (data.status === "added" && data.service === "sonarr" && data.id !== undefined) {
+        const monitor = variables.input.options?.monitor ?? "all";
+        if (monitor !== "none" && monitor !== "future") {
+          const seasonNumber = releaseSeason(variables.result, monitor);
+          if (seasonNumber !== undefined) {
+            setReleaseSelection({
+              seriesId: data.id,
+              seasonNumber,
+              title: data.title,
+            });
+          }
+        }
+      }
     },
     onError: (error) => {
       toast.error(error.message);
@@ -89,7 +133,7 @@ export function SearchSection() {
 
   const requestingKey =
     requestMutation.isPending && requestMutation.variables
-      ? requestKey(requestMutation.variables)
+      ? requestKey(requestMutation.variables.input)
       : null;
 
   function handleRequest(result: SearchResult) {
@@ -139,7 +183,7 @@ export function SearchSection() {
       input.tvdbId = result.tvdbId;
     }
 
-    requestMutation.mutate(input);
+    requestMutation.mutate({ input, result });
   }
 
   const searchData = searchQuery.data;
@@ -225,6 +269,18 @@ export function SearchSection() {
           </EmptyHeader>
         </Empty>
       ) : null}
+
+      <ReleasePickerDialog
+        open={releaseSelection !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setReleaseSelection(null);
+          }
+        }}
+        seriesId={releaseSelection?.seriesId}
+        seasonNumber={releaseSelection?.seasonNumber}
+        showTitle={releaseSelection?.title}
+      />
     </section>
   );
 }
@@ -270,4 +326,24 @@ function requestKey(input: CreateRequestInput): string | null {
 
 function formatTitle(title: string, year?: number): string {
   return year ? `${title} (${year})` : title;
+}
+
+function releaseSeason(
+  result: SearchResult,
+  monitor: RequestMonitor,
+): number | undefined {
+  const seasons = [
+    ...new Set(
+      (result.seasons ?? [])
+        .map((season) => season.seasonNumber)
+        .filter((season) => Number.isInteger(season) && season >= 0),
+    ),
+  ].sort((left, right) => left - right);
+
+  if (monitor === "firstSeason" && seasons.includes(1)) {
+    return 1;
+  }
+
+  const regular = seasons.filter((season) => season > 0);
+  return regular[0] ?? seasons[0] ?? 1;
 }

@@ -67,6 +67,43 @@ export function isSeasonPack(record: ServarrQueueRecord): boolean {
   return Number.isInteger(record.seasonNumber) && record.episodeId === undefined;
 }
 
+/**
+ * Seasons represented by a queue record. Sonarr can attach every episode of a
+ * multi-season pack to one season in the API, but the release title still says
+ * which seasons the download covers (for example `S01-03`).
+ */
+export function queueRecordSeasons(record: ServarrQueueRecord): number[] {
+  const fromTitle = seasonsFromTitle(record.title);
+  if (fromTitle.length > 0) {
+    return fromTitle;
+  }
+  return Number.isInteger(record.seasonNumber) ? [record.seasonNumber as number] : [];
+}
+
+function seasonsFromTitle(title: string | undefined): number[] {
+  if (!title) {
+    return [];
+  }
+  const match = title.match(
+    /(?:^|[^A-Za-z0-9])(?:S|Season)\s*0*(\d{1,3})\s*[-–]\s*(?:S|Season)?\s*0*(\d{1,3})(?![A-Za-z0-9])/i,
+  );
+  if (!match) {
+    return [];
+  }
+  const start = Number.parseInt(match[1] ?? "", 10);
+  const end = Number.parseInt(match[2] ?? "", 10);
+  if (
+    !Number.isInteger(start) ||
+    !Number.isInteger(end) ||
+    start < 0 ||
+    end < start ||
+    end - start > 50
+  ) {
+    return [];
+  }
+  return Array.from({ length: end - start + 1 }, (_, index) => start + index);
+}
+
 export function queueRecordProgress(record: ServarrQueueRecord): number {
   const size = finite(record.size);
   const sizeLeft = finite(record.sizeleft);
@@ -97,7 +134,8 @@ export function queueRecordStatus(record: ServarrQueueRecord): ActivityStatus {
 
 export function aggregateQueueRecords(records: ServarrQueueRecord[]): ActivityAggregate {
   const queueCount = records.length;
-  const sizes = records
+  const downloads = uniqueQueueDownloads(records);
+  const sizes = downloads
     .map((record) => ({ size: finite(record.size), sizeLeft: finite(record.sizeleft) }))
     .filter(
       (entry): entry is { size: number; sizeLeft: number } =>
@@ -109,9 +147,10 @@ export function aggregateQueueRecords(records: ServarrQueueRecord[]): ActivityAg
   const progress =
     totalSize > 0
       ? clampProgress(((totalSize - totalLeft) / totalSize) * 100)
-      : records.length > 0
+      : downloads.length > 0
         ? clampProgress(
-            records.reduce((sum, record) => sum + queueRecordProgress(record), 0) / records.length,
+            downloads.reduce((sum, record) => sum + queueRecordProgress(record), 0) /
+              downloads.length,
           )
         : 0;
 
@@ -149,7 +188,7 @@ export function aggregateQueueRecords(records: ServarrQueueRecord[]): ActivityAg
     aggregate.quality = quality;
   }
 
-  const seasons = uniqueNumbers(records.map((record) => record.seasonNumber));
+  const seasons = uniqueNumbers(records.flatMap((record) => queueRecordSeasons(record)));
   if (seasons.length > 0) {
     aggregate.seasons = seasons;
   }
@@ -303,6 +342,29 @@ function statusMessages(records: ServarrQueueRecord[]): string[] | undefined {
   );
   const unique = uniqueStrings(messages);
   return unique.length > 0 ? unique : undefined;
+}
+
+/**
+ * Sonarr queues one record per episode for a season pack, all sharing the same
+ * download id. Count the underlying download once when totalling bytes.
+ */
+function uniqueQueueDownloads(records: ServarrQueueRecord[]): ServarrQueueRecord[] {
+  const seen = new Set<string>();
+  const downloads: ServarrQueueRecord[] = [];
+  for (const record of records) {
+    const key =
+      record.downloadId !== undefined
+        ? `download:${record.downloadId}`
+        : record.id !== undefined
+          ? `record:${record.id}`
+          : `record:${record.title ?? ""}:${record.size ?? ""}:${record.sizeleft ?? ""}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    downloads.push(record);
+  }
+  return downloads;
 }
 
 function uniqueStrings(values: Array<string | undefined>): string[] {

@@ -4,7 +4,9 @@ import type { AppConfig, ServiceConfig } from "../config.js";
 import { ApiError, UpstreamError } from "../errors.js";
 import {
   interleaveResults,
-  isAllowedMediaCoverPath,
+  isAllowedArtworkUrl,
+  isMovieAvailable,
+  isSeriesAvailable,
   mapMovieResource,
   mapSeriesResource,
 } from "../search.js";
@@ -35,23 +37,16 @@ export function registerSearchRoutes(app: FastifyInstance, config: AppConfig): v
     return response;
   });
 
-  app.get<{ Params: { service: string }; Querystring: { path?: unknown } }>(
+  app.get<{ Params: { service: string }; Querystring: { url?: unknown } }>(
     "/api/search/images/:service",
     async (request, reply) => {
       const service = parseImageService(request.params.service);
-      const path = parseImagePath(request.query.path);
+      const url = parseImageUrl(request.query.url);
       const serviceConfig = config.services[service];
-      if (!serviceConfig.apiKey) {
-        throw new ApiError(
-          503,
-          `${service}_unconfigured`,
-          `Set ${service.toUpperCase()}_API_KEY or keep server/config/${service}/config.xml`,
-        );
-      }
 
       const client = createArrClient(service, serviceConfig, config.requestTimeoutMs);
       try {
-        const image = await client.getMediaCover(path);
+        const image = await client.getRemoteImage(url);
         if (!image) {
           throw new ApiError(404, "image_not_found", "Image not found");
         }
@@ -92,9 +87,13 @@ async function searchSonarr(
     return failedSearch("sonarr", stateForError(lookup.reason), errorMessage(lookup.reason));
   }
 
-  const existingIds =
+  const libraryByTvdbId =
     library.status === "fulfilled"
-      ? new Set(library.value.map((series) => series.tvdbId).filter(isNumber))
+      ? new Map(
+          library.value
+            .filter((series) => series.tvdbId !== undefined)
+            .map((series) => [series.tvdbId, series] as const),
+        )
       : null;
   const detail =
     library.status === "rejected"
@@ -102,16 +101,19 @@ async function searchSonarr(
       : undefined;
 
   const results = lookup.value
-    .map((series) =>
-      mapSeriesResource(
+    .map((series) => {
+      const existing =
+        series.tvdbId !== undefined ? libraryByTvdbId?.get(series.tvdbId) : undefined;
+      return mapSeriesResource(
         series,
-        existingIds
-          ? series.tvdbId !== undefined && existingIds.has(series.tvdbId)
+        libraryByTvdbId
+          ? existing !== undefined
           : series.id !== undefined && series.id > 0
             ? true
             : null,
-      ),
-    )
+        existing ? isSeriesAvailable(existing) : libraryByTvdbId ? false : undefined,
+      );
+    })
     .filter((result): result is SearchResult => result !== null);
 
   return { results, status: { id: "sonarr", state: "ok", count: results.length, detail } };
@@ -136,9 +138,13 @@ async function searchRadarr(
     return failedSearch("radarr", stateForError(lookup.reason), errorMessage(lookup.reason));
   }
 
-  const existingIds =
+  const libraryByTmdbId =
     library.status === "fulfilled"
-      ? new Set(library.value.map((movie) => movie.tmdbId).filter(isNumber))
+      ? new Map(
+          library.value
+            .filter((movie) => movie.tmdbId !== undefined)
+            .map((movie) => [movie.tmdbId, movie] as const),
+        )
       : null;
   const detail =
     library.status === "rejected"
@@ -146,16 +152,19 @@ async function searchRadarr(
       : undefined;
 
   const results = lookup.value
-    .map((movie) =>
-      mapMovieResource(
+    .map((movie) => {
+      const existing =
+        movie.tmdbId !== undefined ? libraryByTmdbId?.get(movie.tmdbId) : undefined;
+      return mapMovieResource(
         movie,
-        existingIds
-          ? movie.tmdbId !== undefined && existingIds.has(movie.tmdbId)
+        libraryByTmdbId
+          ? existing !== undefined
           : movie.id !== undefined && movie.id > 0
             ? true
             : null,
-      ),
-    )
+        existing ? isMovieAvailable(existing) : libraryByTmdbId ? false : undefined,
+      );
+    })
     .filter((result): result is SearchResult => result !== null);
 
   return { results, status: { id: "radarr", state: "ok", count: results.length, detail } };
@@ -187,9 +196,6 @@ function unconfiguredDetail(id: "sonarr" | "radarr"): string {
   return `API key not found; set ${id.toUpperCase()}_API_KEY or keep server/config/${id}/config.xml`;
 }
 
-function isNumber(value: number | undefined): value is number {
-  return typeof value === "number";
-}
 
 function parseImageService(value: string): ArrServiceId {
   if (value !== "sonarr" && value !== "radarr") {
@@ -198,9 +204,9 @@ function parseImageService(value: string): ArrServiceId {
   return value;
 }
 
-function parseImagePath(value: unknown): string {
-  if (typeof value !== "string" || !isAllowedMediaCoverPath(value)) {
-    throw new ApiError(400, "invalid_path", "Invalid image path");
+function parseImageUrl(value: unknown): string {
+  if (typeof value !== "string" || !isAllowedArtworkUrl(value)) {
+    throw new ApiError(400, "invalid_url", "Invalid image URL");
   }
   return value;
 }

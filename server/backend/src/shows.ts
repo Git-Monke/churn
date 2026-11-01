@@ -10,6 +10,7 @@ import type {
 import {
   isSeasonPack,
   queueRecordProgress,
+  queueRecordSeasons,
   queueRecordStatus,
 } from "./activity.js";
 import type { JellyfinItem } from "./upstream/jellyfin.js";
@@ -157,18 +158,20 @@ function downloadOverlay(
   };
 
   for (const record of queueRecords) {
-    if (record.episodeId !== undefined) {
+    const recordSeasons = queueRecordSeasons(record);
+    const multiSeason = recordSeasons.length > 1;
+    if (record.episodeId !== undefined && !multiSeason) {
       const episode = episodeById.get(record.episodeId);
       if (episode) {
         consider(episode.key, { record, seasonPack: false });
         continue;
       }
     }
-    if (isSeasonPack(record) && Number.isInteger(record.seasonNumber)) {
-      const seasonNumber = record.seasonNumber as number;
+    if (recordSeasons.length > 0) {
+      const covered = new Set(recordSeasons);
       for (const candidate of candidates) {
-        if (candidate.seasonNumber === seasonNumber) {
-          consider(candidate.key, { record, seasonPack: true });
+        if (covered.has(candidate.seasonNumber)) {
+          consider(candidate.key, { record, seasonPack: multiSeason || isSeasonPack(record) });
         }
       }
     }

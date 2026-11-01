@@ -18,7 +18,7 @@ export interface RequestDefaults {
   radarr: ServiceRequestDefaults;
 }
 
-const STORAGE_KEY = "churn.requestDefaults.v1";
+const STORAGE_KEY = "churn.requestDefaults.v2";
 const DEFAULT_STATE: RequestDefaults = {
   sonarr: { monitor: "all", searchOnAdd: true },
   radarr: { searchOnAdd: true },

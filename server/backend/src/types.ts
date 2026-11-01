@@ -42,6 +42,40 @@ export interface LibraryResponse {
   detail?: string;
 }
 
+/** A title tracked by Sonarr/Radarr, whether or not it has downloaded yet. */
+export interface RequestedLibraryItem {
+  key: string;
+  service: "sonarr" | "radarr";
+  kind: "movie" | "series";
+  arrId: number;
+  title: string;
+  year?: number;
+  overview?: string;
+  network?: string;
+  rating?: number;
+  runtimeMinutes?: number;
+  imageUrl?: string;
+  tmdbId?: number;
+  tvdbId?: number;
+  imdbId?: string;
+  /** True when the arr has the movie file or every series episode. */
+  available: boolean;
+}
+
+export interface RequestedLibraryServiceState {
+  id: "sonarr" | "radarr";
+  state: ArrServiceState;
+  detail?: string;
+  count: number;
+}
+
+export interface RequestedLibraryResponse {
+  checkedAt: string;
+  services: RequestedLibraryServiceState[];
+  items: RequestedLibraryItem[];
+  total: number;
+}
+
 export type RequestKind = "movie" | "series";
 export type RequestMonitor = "all" | "firstSeason" | "future" | "none";
 export type ArrServiceState = "ok" | "unconfigured" | "unauthorized" | "unreachable";
@@ -63,6 +97,8 @@ export interface SearchResult {
   imdbId?: string;
   imageUrl?: string;
   inLibrary: boolean | null;
+  /** True when the arr has the movie file or every series episode. */
+  available?: boolean;
   seasons?: Array<{ seasonNumber: number; monitored: boolean }>;
 }
 
@@ -125,6 +161,50 @@ export interface ActivityResponse {
   items: ActivityItem[];
   total: number;
   detail?: string;
+}
+
+export interface ShowRelease {
+  /** Opaque id for grabbing this release without exposing its GUID/magnet URL. */
+  id: string;
+  title: string;
+  indexer?: string;
+  sizeBytes: number;
+  quality?: string;
+  seasonLabel: string;
+  episodeLabel?: string;
+  multiSeason: boolean;
+  approved: boolean;
+  canGrab: boolean;
+  recommended: boolean;
+  rejections: string[];
+  mappedEpisodeCount: number;
+  protocol?: "torrent" | "usenet";
+  seeders?: number;
+  leechers?: number;
+  ageHours?: number;
+  publishDate?: string;
+  /** Season search that produced this release, used to look it up again on grab. */
+  searchSeasonNumber?: number;
+}
+
+export interface ShowReleasesResponse {
+  seriesId: number;
+  seasonNumber: number;
+  episodeNumber?: number;
+  checkedAt: string;
+  releases: ShowRelease[];
+}
+
+export interface GrabShowReleaseInput {
+  seasonNumber: number;
+  episodeNumber?: number;
+  searchSeasonNumber?: number;
+  releaseId: string;
+}
+
+export interface GrabShowReleaseResponse {
+  status: "grabbed";
+  title: string;
 }
 
 export interface ArrQualityProfile {

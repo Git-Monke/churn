@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   arrMonitorName,
   interleaveResults,
-  isAllowedMediaCoverPath,
+  isAllowedArtworkUrl,
   mapMovieResource,
   mapSeriesResource,
   mediaCoverUrl,
@@ -33,8 +33,8 @@ describe("search result mapping", () => {
           { seasonNumber: 1, monitored: true },
         ],
         images: [
-          { coverType: "banner", url: "/MediaCoverProxy/hash/banner.jpg" },
-          { coverType: "poster", url: "/MediaCoverProxy/hash/poster.jpg" },
+          { coverType: "banner", url: "/MediaCoverProxy/hash/banner.jpg", remoteUrl: "https://image.tmdb.org/t/p/original/hash-banner.jpg" },
+          { coverType: "poster", url: "/MediaCoverProxy/hash/poster.jpg", remoteUrl: "https://image.tmdb.org/t/p/original/hash-poster.jpg" },
         ],
       },
       false,
@@ -53,7 +53,7 @@ describe("search result mapping", () => {
       tmdbId: 95396,
       inLibrary: false,
       imageUrl:
-        "/api/search/images/sonarr?path=%2FMediaCoverProxy%2Fhash%2Fposter.jpg",
+        "/api/search/images/sonarr?url=https%3A%2F%2Fimage.tmdb.org%2Ft%2Fp%2Foriginal%2Fhash-poster.jpg",
     });
     expect(result?.seasons).toEqual([
       { seasonNumber: 0, monitored: false },
@@ -70,7 +70,8 @@ describe("search result mapping", () => {
         imdbId: "tt1160419",
         studio: "Legendary Pictures",
         ratings: { imdb: { value: 8 }, tmdb: { value: 7.8 } },
-        images: [{ coverType: "poster", url: "/MediaCoverProxy/abc/poster.jpg" }],
+        hasFile: true,
+        images: [{ coverType: "poster", url: "/MediaCoverProxy/abc/poster.jpg", remoteUrl: "https://image.tmdb.org/t/p/original/abc-poster.jpg" }],
       },
       true,
     );
@@ -82,6 +83,7 @@ describe("search result mapping", () => {
       rating: 8,
       network: "Legendary Pictures",
       inLibrary: true,
+      available: true,
     });
   });
 
@@ -91,15 +93,20 @@ describe("search result mapping", () => {
     expect(mapSeriesResource({ tvdbId: 1 }, false)).toBeNull();
   });
 
-  it("only maps allowlisted media-cover paths", () => {
+  it("only maps allowlisted artwork URLs", () => {
     expect(
-      mediaCoverUrl("radarr", [{ coverType: "poster", url: "/MediaCoverProxy/abc/poster.webp" }]),
-    ).toBe("/api/search/images/radarr?path=%2FMediaCoverProxy%2Fabc%2Fposter.webp");
+      mediaCoverUrl("radarr", [{ coverType: "poster", remoteUrl: "https://image.tmdb.org/t/p/original/abc-poster.webp" }]),
+    ).toBe("/api/search/images/radarr?url=https%3A%2F%2Fimage.tmdb.org%2Ft%2Fp%2Foriginal%2Fabc-poster.webp");
     expect(
-      mediaCoverUrl("radarr", [{ coverType: "poster", url: "https://evil.test/poster.jpg" }]),
+      mediaCoverUrl("radarr", [{ coverType: "poster", remoteUrl: "https://evil.test/poster.jpg" }]),
     ).toBeUndefined();
-    expect(isAllowedMediaCoverPath("/MediaCoverProxy/abc/poster.jpg?x=1")).toBe(false);
-    expect(isAllowedMediaCoverPath("/MediaCoverProxy/abc/poster.svg")).toBe(false);
+    // The UI-only MediaCoverProxy path is no longer used for posters.
+    expect(
+      mediaCoverUrl("radarr", [{ coverType: "poster", url: "/MediaCoverProxy/abc/poster.jpg" }]),
+    ).toBeUndefined();
+    expect(isAllowedArtworkUrl("http://image.tmdb.org/t/p/original/poster.jpg")).toBe(false);
+    expect(isAllowedArtworkUrl("https://image.tmdb.org/t/p/original/poster.svg")).toBe(false);
+    expect(isAllowedArtworkUrl("https://127.0.0.1/poster.jpg")).toBe(false);
   });
 });
 
@@ -113,10 +120,30 @@ describe("request defaults", () => {
 
   it("prefers the shared 720p/1080p profile", () => {
     expect(pickDefaultQualityProfile(profiles)?.id).toBe(6);
+    expect(
+      pickDefaultQualityProfile([
+        { id: 1, name: "Any" },
+        { id: 5, name: "Ultra-HD" },
+        { id: 7, name: "HD-720p/1080p" },
+      ])?.id,
+    ).toBe(7);
   });
 
-  it("falls back to 1080p and then the first profile", () => {
+  it("falls back to 1080p, 720p, and avoids 4K by default", () => {
     expect(pickDefaultQualityProfile(profiles.filter((p) => p.id !== 6))?.id).toBe(4);
+    expect(
+      pickDefaultQualityProfile([
+        { id: 1, name: "Any" },
+        { id: 3, name: "HD-720p" },
+        { id: 5, name: "Ultra-HD" },
+      ])?.id,
+    ).toBe(3);
+    expect(
+      pickDefaultQualityProfile([
+        { id: 1, name: "Any" },
+        { id: 5, name: "Ultra-HD" },
+      ])?.id,
+    ).toBe(1);
     expect(pickDefaultQualityProfile([{ id: 1, name: "Any" }])?.id).toBe(1);
     expect(pickDefaultQualityProfile([])).toBeUndefined();
   });

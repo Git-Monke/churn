@@ -9,7 +9,7 @@ const series: ShowSeriesSummary = {
   title: "Example Show",
   year: 2024,
   tvdbId: 1234,
-  imageUrl: "/api/search/images/sonarr?path=%2FMediaCoverProxy%2Fabc%2Fposter.jpg",
+  imageUrl: "/api/search/images/sonarr?url=https%3A%2F%2Fimage.tmdb.org%2Ft%2Fp%2Foriginal%2Fabc-poster.jpg",
 };
 
 function jellyfinEpisode(
@@ -134,6 +134,47 @@ describe("buildShowDetail", () => {
       sonarrEpisodes: [sonarrEpisode(1, 1, 1, { hasFile: true })],
     });
     expect(detail.episodes[0]?.availability).toBe("sonarr");
+  });
+
+  it("applies a multi-season pack to every covered season", () => {
+    const detail = buildShowDetail({
+      source: "sonarr",
+      series,
+      sonarrEpisodes: [
+        sonarrEpisode(1, 1, 1),
+        sonarrEpisode(2, 1, 2),
+        sonarrEpisode(3, 2, 1),
+        sonarrEpisode(4, 3, 1),
+        sonarrEpisode(5, 4, 1),
+      ],
+      queueRecords: [
+        queueRecord({
+          title: "Example.Show.S01-03",
+          episodeId: 1,
+          seasonNumber: 1,
+        }),
+        queueRecord({
+          id: 2,
+          title: "Example.Show.S01-03",
+          episodeId: 2,
+          seasonNumber: 1,
+        }),
+      ],
+    });
+
+    expect(detail.episodes.filter((episode) => episode.download)).toHaveLength(4);
+    expect(detail.episodes[4]?.download).toBeUndefined();
+    expect(detail.seasons).toEqual([
+      expect.objectContaining({ seasonNumber: 1, downloadingCount: 2 }),
+      expect.objectContaining({ seasonNumber: 2, downloadingCount: 1 }),
+      expect.objectContaining({ seasonNumber: 3, downloadingCount: 1 }),
+      expect.objectContaining({ seasonNumber: 4, downloadingCount: 0 }),
+    ]);
+    expect(
+      detail.episodes
+        .filter((episode) => episode.download)
+        .every((episode) => episode.download?.seasonPack === true),
+    ).toBe(true);
   });
 
   it("prefers the first Jellyfin season, then the first downloading season", () => {

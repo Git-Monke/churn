@@ -2,8 +2,8 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { CircleAlertIcon, FilmIcon, SearchIcon } from "lucide-react";
 
-import { fetchActivity, fetchLibrary } from "@/api/client";
-import type { ActivityServiceState } from "@/api/types";
+import { fetchActivity, fetchLibrary, fetchRequestedLibrary } from "@/api/client";
+import type { ActivityServiceState, RequestedLibraryServiceState } from "@/api/types";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -31,6 +31,11 @@ export function LibraryPage({ jellyfinUrl }: { jellyfinUrl?: string }) {
     queryFn: fetchLibrary,
     refetchInterval: 60_000,
   });
+  const requestedQuery = useQuery({
+    queryKey: ["requested-library"],
+    queryFn: fetchRequestedLibrary,
+    refetchInterval: 30_000,
+  });
   const activityQuery = useQuery({
     queryKey: ["activity"],
     queryFn: fetchActivity,
@@ -41,29 +46,40 @@ export function LibraryPage({ jellyfinUrl }: { jellyfinUrl?: string }) {
     () =>
       mergeLibraryEntries(
         libraryQuery.data?.state === "ok" ? libraryQuery.data.items : [],
+        requestedQuery.data?.items ?? [],
         activityQuery.data?.items ?? [],
       ),
-    [activityQuery.data, libraryQuery.data],
+    [activityQuery.data, libraryQuery.data, requestedQuery.data],
   );
   const filtered = useMemo(
     () => (filter === "all" ? entries : entries.filter((entry) => entry.type === filter)),
     [entries, filter],
   );
   const activeCount = entries.filter((entry) => entry.activity).length;
-  const loading = (libraryQuery.isLoading || activityQuery.isLoading) && entries.length === 0;
+  const loading =
+    (libraryQuery.isLoading || requestedQuery.isLoading || activityQuery.isLoading) &&
+    entries.length === 0;
   const activityNotices = activityQuery.data?.services.filter(
     (service) => service.state !== "ok" || service.detail,
+  );
+  const requestedNotices = requestedQuery.data?.services.filter(
+    (service) =>
+      service.state !== "ok" &&
+      service.state !== "unconfigured" &&
+      !activityNotices?.some((activityService) => activityService.id === service.id),
   );
   const libraryOk = libraryQuery.data?.state === "ok";
   const activitySettled =
     activityQuery.data?.services.every((service) => service.state === "ok") ?? false;
+  const requestedSettled =
+    requestedQuery.data?.services.every((service) => service.state === "ok") ?? false;
 
   return (
     <section className="flex flex-col gap-4">
       <div className="flex flex-col gap-1">
         <div className="flex flex-wrap items-center gap-2">
           <h2 className="font-heading text-xl font-semibold tracking-tight">Library</h2>
-          {libraryOk ? (
+          {entries.length > 0 ? (
             <span className="text-sm text-muted-foreground">
               {entries.length} {entries.length === 1 ? "title" : "titles"}
             </span>
@@ -75,7 +91,7 @@ export function LibraryPage({ jellyfinUrl }: { jellyfinUrl?: string }) {
           ) : null}
         </div>
         <p className="text-sm text-muted-foreground">
-          Movies and shows in Jellyfin, plus titles downloading right now.
+          Movies and shows in Jellyfin, requested titles, plus downloads in progress.
         </p>
       </div>
 
@@ -86,6 +102,13 @@ export function LibraryPage({ jellyfinUrl }: { jellyfinUrl?: string }) {
           <AlertDescription>{libraryQuery.error.message}</AlertDescription>
         </Alert>
       ) : null}
+      {requestedQuery.error && !requestedQuery.data ? (
+        <Alert variant="destructive">
+          <CircleAlertIcon />
+          <AlertTitle>Could not load requested titles</AlertTitle>
+          <AlertDescription>{requestedQuery.error.message}</AlertDescription>
+        </Alert>
+      ) : null}
       {activityQuery.error && !activityQuery.data ? (
         <Alert variant="destructive">
           <CircleAlertIcon />
@@ -94,6 +117,9 @@ export function LibraryPage({ jellyfinUrl }: { jellyfinUrl?: string }) {
         </Alert>
       ) : null}
 
+      {requestedNotices?.map((service) => (
+        <RequestedServiceNotice key={service.id} service={service} />
+      ))}
       {activityNotices?.map((service) => (
         <ActivityServiceNotice key={service.id} service={service} />
       ))}
@@ -135,10 +161,24 @@ export function LibraryPage({ jellyfinUrl }: { jellyfinUrl?: string }) {
       entries.length === 0 &&
       libraryOk &&
       activityQuery.data &&
-      activitySettled ? (
+      activitySettled &&
+      requestedSettled ? (
         <EmptyLibrary />
       ) : null}
     </section>
+  );
+}
+
+function RequestedServiceNotice({ service }: { service: RequestedLibraryServiceState }) {
+  const name = service.id === "sonarr" ? "Sonarr" : "Radarr";
+  return (
+    <Alert variant="destructive">
+      <CircleAlertIcon />
+      <AlertTitle>{name} requested titles are unavailable</AlertTitle>
+      <AlertDescription>
+        {service.detail ?? `Check that ${name} is running and its API key is configured.`}
+      </AlertDescription>
+    </Alert>
   );
 }
 

@@ -245,6 +245,116 @@ describe("library", () => {
   });
 });
 
+describe("requested library", () => {
+  it("returns titles tracked by Sonarr and Radarr without requiring Jellyfin", async () => {
+    installFetch((url) => {
+      if (url.includes("sonarr.test") && url.endsWith("/api/v3/series")) {
+        return jsonResponse([
+          {
+            id: 42,
+            title: "Example Show",
+            year: 2024,
+            tvdbId: 1234,
+            tmdbId: 4321,
+            network: "Example TV",
+            statistics: {
+              episodeFileCount: 10,
+              totalEpisodeCount: 10,
+              percentOfEpisodes: 100,
+            },
+            images: [
+              {
+                coverType: "poster",
+                remoteUrl: "https://image.tmdb.org/t/p/original/show.jpg",
+              },
+            ],
+          },
+        ]);
+      }
+      if (url.includes("radarr.test") && url.endsWith("/api/v3/movie")) {
+        return jsonResponse([
+          {
+            id: 7,
+            title: "Example Movie",
+            year: 2020,
+            tmdbId: 5678,
+            hasFile: true,
+            images: [
+              {
+                coverType: "poster",
+                remoteUrl: "https://image.tmdb.org/t/p/original/movie.jpg",
+              },
+            ],
+          },
+        ]);
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildServer(appConfig);
+    const response = await app.inject({ method: "GET", url: "/api/library/requested" });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(body.total).toBe(2);
+    expect(body.services).toEqual([
+      { id: "sonarr", state: "ok", count: 1 },
+      { id: "radarr", state: "ok", count: 1 },
+    ]);
+    expect(body.items[0]).toMatchObject({
+      key: "series:1234",
+      service: "sonarr",
+      kind: "series",
+      arrId: 42,
+      title: "Example Show",
+      year: 2024,
+      tvdbId: 1234,
+      tmdbId: 4321,
+      available: true,
+      imageUrl:
+        "/api/search/images/sonarr?url=https%3A%2F%2Fimage.tmdb.org%2Ft%2Fp%2Foriginal%2Fshow.jpg",
+    });
+    expect(body.items[1]).toMatchObject({
+      key: "movie:5678",
+      service: "radarr",
+      kind: "movie",
+      arrId: 7,
+      title: "Example Movie",
+      year: 2020,
+      tmdbId: 5678,
+      available: true,
+      imageUrl:
+        "/api/search/images/radarr?url=https%3A%2F%2Fimage.tmdb.org%2Ft%2Fp%2Foriginal%2Fmovie.jpg",
+    });
+    await app.close();
+  });
+
+  it("keeps the reachable arr when the other one is unavailable", async () => {
+    installFetch((url) => {
+      if (url.includes("sonarr.test")) {
+        return jsonResponse({}, 401);
+      }
+      if (url.includes("radarr.test") && url.endsWith("/api/v3/movie")) {
+        return jsonResponse([
+          { id: 7, title: "Example Movie", year: 2020, tmdbId: 5678 },
+        ]);
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildServer(appConfig);
+    const response = await app.inject({ method: "GET", url: "/api/library/requested" });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(body.services[0]).toMatchObject({ id: "sonarr", state: "unauthorized" });
+    expect(body.services[1]).toMatchObject({ id: "radarr", state: "ok", count: 1 });
+    expect(body.items).toHaveLength(1);
+    expect(body.items[0]).toMatchObject({ key: "movie:5678", service: "radarr" });
+    await app.close();
+  });
+});
+
 describe("library images", () => {
   it("proxies the image with cache headers", async () => {
     const config = makeConfig({
@@ -362,7 +472,7 @@ const seriesLookup = {
     { seasonNumber: 0, monitored: false },
     { seasonNumber: 1, monitored: true },
   ],
-  images: [{ coverType: "poster", url: "/MediaCoverProxy/abc/poster.jpg" }],
+  images: [{ coverType: "poster", url: "/MediaCoverProxy/abc/poster.jpg", remoteUrl: "https://image.tmdb.org/t/p/original/abc-poster.jpg" }],
 };
 
 const movieLookup = {
@@ -371,7 +481,7 @@ const movieLookup = {
   tmdbId: 438631,
   imdbId: "tt1160419",
   ratings: { imdb: { value: 8 } },
-  images: [{ coverType: "poster", url: "/MediaCoverProxy/def/poster.jpg" }],
+  images: [{ coverType: "poster", url: "/MediaCoverProxy/def/poster.jpg", remoteUrl: "https://image.tmdb.org/t/p/original/def-poster.jpg" }],
 };
 
 function readBody(init?: RequestInit): Record<string, unknown> {
@@ -453,16 +563,64 @@ describe("search", () => {
     expect(response.statusCode).toBe(200);
     expect(body.query).toBe("dune");
     expect(body.results).toHaveLength(2);
-    expect(body.results[0]).toMatchObject({ key: "series:371980", inLibrary: true });
+    expect(body.results[0]).toMatchObject({
+      key: "series:371980",
+      inLibrary: true,
+      available: false,
+    });
     expect(body.results[1]).toMatchObject({
       key: "movie:438631",
       inLibrary: false,
-      imageUrl: "/api/search/images/radarr?path=%2FMediaCoverProxy%2Fdef%2Fposter.jpg",
+      available: false,
+      imageUrl: "/api/search/images/radarr?url=https%3A%2F%2Fimage.tmdb.org%2Ft%2Fp%2Foriginal%2Fdef-poster.jpg",
     });
     expect(body.services).toEqual([
       { id: "sonarr", state: "ok", count: 1, detail: undefined },
       { id: "radarr", state: "ok", count: 1, detail: undefined },
     ]);
+    await app.close();
+  });
+
+  it("marks downloaded arr titles as available", async () => {
+    installFetch((url) => {
+      if (url.includes("sonarr.test")) {
+        if (url.includes("/series/lookup")) return jsonResponse([seriesLookup]);
+        if (url.endsWith("/api/v3/series")) {
+          return jsonResponse([
+            {
+              tvdbId: 371980,
+              statistics: {
+                episodeFileCount: 9,
+                totalEpisodeCount: 9,
+                percentOfEpisodes: 100,
+              },
+            },
+          ]);
+        }
+      }
+      if (url.includes("radarr.test")) {
+        if (url.includes("/movie/lookup")) return jsonResponse([movieLookup]);
+        if (url.endsWith("/api/v3/movie")) {
+          return jsonResponse([{ tmdbId: 438631, hasFile: true }]);
+        }
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildServer(makeConfig());
+    const response = await app.inject({ method: "GET", url: "/api/search?q=dune" });
+    const body = response.json();
+
+    expect(body.results[0]).toMatchObject({
+      key: "series:371980",
+      inLibrary: true,
+      available: true,
+    });
+    expect(body.results[1]).toMatchObject({
+      key: "movie:438631",
+      inLibrary: true,
+      available: true,
+    });
     await app.close();
   });
 
@@ -517,11 +675,9 @@ describe("search", () => {
 });
 
 describe("search images", () => {
-  it("proxies an allowlisted arr media cover", async () => {
+  it("proxies an allowlisted artwork URL", async () => {
     const mock = installFetch((url) => {
-      expect(url).toBe(
-        "http://sonarr.test:8989/MediaCoverProxy/abc/poster.jpg",
-      );
+      expect(url).toBe("https://image.tmdb.org/t/p/original/abc-poster.jpg");
       return new Response(new Uint8Array([9, 8, 7]), {
         status: 200,
         headers: { "content-type": "image/jpeg" },
@@ -531,7 +687,7 @@ describe("search images", () => {
     const app = await buildServer(makeConfig());
     const response = await app.inject({
       method: "GET",
-      url: "/api/search/images/sonarr?path=%2FMediaCoverProxy%2Fabc%2Fposter.jpg",
+      url: "/api/search/images/sonarr?url=https%3A%2F%2Fimage.tmdb.org%2Ft%2Fp%2Foriginal%2Fabc-poster.jpg",
     });
 
     expect(response.statusCode).toBe(200);
@@ -542,26 +698,27 @@ describe("search images", () => {
     await app.close();
   });
 
-  it("rejects unknown services and non-allowlisted paths", async () => {
+  it("rejects unknown services and non-allowlisted URLs", async () => {
     const app = await buildServer(makeConfig());
     const unknown = await app.inject({
       method: "GET",
-      url: "/api/search/images/jellyfin?path=%2FMediaCoverProxy%2Fabc%2Fposter.jpg",
+      url: "/api/search/images/jellyfin?url=https%3A%2F%2Fimage.tmdb.org%2Ft%2Fp%2Foriginal%2Fabc-poster.jpg",
     });
     expect(unknown.statusCode).toBe(404);
 
-    const badPath = await app.inject({
-      method: "GET",
-      url: "/api/search/images/sonarr?path=https%3A%2F%2Fevil.test%2Fposter.jpg",
-    });
-    expect(badPath.statusCode).toBe(400);
-    expect(badPath.json().error.code).toBe("invalid_path");
-
-    const traversal = await app.inject({
-      method: "GET",
-      url: "/api/search/images/sonarr?path=%2FMediaCoverProxy%2F..%2Fposter.jpg",
-    });
-    expect(traversal.statusCode).toBe(400);
+    for (const url of [
+      "https://evil.test/poster.jpg",
+      "http://image.tmdb.org/t/p/original/poster.jpg",
+      "https://127.0.0.1/poster.jpg",
+      "/MediaCoverProxy/abc/poster.jpg",
+    ]) {
+      const bad = await app.inject({
+        method: "GET",
+        url: `/api/search/images/sonarr?url=${encodeURIComponent(url)}`,
+      });
+      expect(bad.statusCode).toBe(400);
+      expect(bad.json().error.code).toBe("invalid_url");
+    }
     await app.close();
   });
 
@@ -570,7 +727,7 @@ describe("search images", () => {
     const app = await buildServer(makeConfig());
     const response = await app.inject({
       method: "GET",
-      url: "/api/search/images/sonarr?path=%2FMediaCoverProxy%2Fabc%2Fposter.jpg",
+      url: "/api/search/images/sonarr?url=https%3A%2F%2Fimage.tmdb.org%2Ft%2Fp%2Foriginal%2Fabc-poster.jpg",
     });
     expect(response.statusCode).toBe(404);
     await app.close();
@@ -802,7 +959,7 @@ describe("activity", () => {
           year: 2024,
           tvdbId: 1234,
           network: "Example TV",
-          images: [{ coverType: "poster", url: "/MediaCoverProxy/abc/poster.jpg" }],
+          images: [{ coverType: "poster", url: "/MediaCoverProxy/abc/poster.jpg", remoteUrl: "https://image.tmdb.org/t/p/original/abc-poster.jpg" }],
         });
       }
       if (url.includes("radarr.test") && url.includes("/api/v3/queue")) {
@@ -828,7 +985,7 @@ describe("activity", () => {
           title: "Example Movie",
           year: 2022,
           tmdbId: 9876,
-          images: [{ coverType: "poster", url: "/MediaCoverProxy/def/poster.jpg" }],
+          images: [{ coverType: "poster", url: "/MediaCoverProxy/def/poster.jpg", remoteUrl: "https://image.tmdb.org/t/p/original/def-poster.jpg" }],
         });
       }
       throw new Error(`unexpected URL ${url}`);
@@ -959,7 +1116,7 @@ describe("show detail", () => {
             year: 2024,
             tvdbId: 1234,
             network: "Example TV",
-            images: [{ coverType: "poster", url: "/MediaCoverProxy/abc/poster.jpg" }],
+            images: [{ coverType: "poster", url: "/MediaCoverProxy/abc/poster.jpg", remoteUrl: "https://image.tmdb.org/t/p/original/abc-poster.jpg" }],
           },
         ]);
       }
@@ -1048,7 +1205,7 @@ describe("show detail", () => {
           title: "Example Show",
           year: 2024,
           tvdbId: 1234,
-          images: [{ coverType: "poster", url: "/MediaCoverProxy/abc/poster.jpg" }],
+          images: [{ coverType: "poster", url: "/MediaCoverProxy/abc/poster.jpg", remoteUrl: "https://image.tmdb.org/t/p/original/abc-poster.jpg" }],
         });
       }
       if (url.includes("sonarr.test") && url.includes("/api/v3/episode?seriesId=42")) {
@@ -1109,6 +1266,363 @@ describe("show detail", () => {
     expect(body.episodes.every((episode: { download?: { seasonPack?: boolean } }) =>
       episode.download?.seasonPack === true,
     )).toBe(true);
+    await app.close();
+  });
+});
+
+describe("show releases", () => {
+  const seasonReleases = [
+    {
+      guid: "magnet:?xt=urn:btih:single",
+      indexerId: 1,
+      indexer: "EZTV",
+      title: "Example.Show.S01E01.1080p",
+      size: 2_000_000_000,
+      quality: { quality: { id: 3, name: "WEBDL-1080p" } },
+      seasonNumber: 1,
+      approved: true,
+      rejected: false,
+      downloadAllowed: true,
+      rejections: [],
+      mappedEpisodeInfo: [{ id: 501, seasonNumber: 1, episodeNumber: 1 }],
+      languages: [{ id: 1, name: "English" }],
+      protocol: "torrent",
+      seeders: 12,
+    },
+    {
+      guid: "magnet:?xt=urn:btih:pack",
+      indexerId: 2,
+      indexer: "The Pirate Bay",
+      title: "Example.Show.S01-03",
+      size: 14_000_000_000,
+      quality: { quality: { id: 0, name: "Unknown" } },
+      seasonNumber: 1,
+      approved: false,
+      rejected: true,
+      downloadAllowed: true,
+      rejections: ["Multi-season releases are not supported", "Unknown is not wanted in profile"],
+      mappedEpisodeInfo: [
+        { id: 501, seasonNumber: 1, episodeNumber: 1 },
+        { id: 502, seasonNumber: 1, episodeNumber: 2 },
+      ],
+      languages: [{ id: 1, name: "English" }],
+      protocol: "torrent",
+      seeders: 16,
+    },
+  ];
+
+  it("lists season releases without exposing upstream ids or URLs", async () => {
+    installFetch((url) => {
+      if (url.includes("sonarr.test") && url.includes("/api/v3/release?seriesId=42&seasonNumber=1")) {
+        return jsonResponse(seasonReleases);
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildServer(makeConfig());
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/library/shows/sonarr/42/releases?season=1",
+    });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(body).toMatchObject({ seriesId: 42, seasonNumber: 1 });
+    expect(body.releases).toHaveLength(2);
+    expect(body.releases[1]).toMatchObject({
+      title: "Example.Show.S01-03",
+      multiSeason: true,
+      seasonLabel: "Seasons 1\u20133",
+      canGrab: true,
+      recommended: false,
+      mappedEpisodeCount: 2,
+    });
+    expect(body.releases[0]).toMatchObject({
+      title: "Example.Show.S01E01.1080p",
+      approved: true,
+      canGrab: true,
+      recommended: true,
+      sizeBytes: 2_000_000_000,
+    });
+    expect(body.releases[0].id).toMatch(/^[a-f0-9]{24}$/);
+    expect(JSON.stringify(body)).not.toContain("magnet:");
+    expect(body.releases[0]).not.toHaveProperty("guid");
+    expect(body.releases[0]).not.toHaveProperty("indexerId");
+    await app.close();
+  });
+
+  it("grabs an overridden multi-season pack using mapped episode ids", async () => {
+    let posted: Record<string, unknown> | undefined;
+    installFetch((url, init) => {
+      if (url.includes("sonarr.test") && url.includes("/api/v3/release?seriesId=42&seasonNumber=1")) {
+        return jsonResponse(seasonReleases);
+      }
+      if (url.includes("sonarr.test") && url.endsWith("/api/v3/release") && init?.method === "POST") {
+        posted = readBody(init);
+        return jsonResponse({ ...seasonReleases[1], id: 1 });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildServer(makeConfig());
+    const list = await app.inject({
+      method: "GET",
+      url: "/api/library/shows/sonarr/42/releases?season=1",
+    });
+    const pack = list.json().releases.find(
+      (item: { title: string }) => item.title === "Example.Show.S01-03",
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/library/shows/sonarr/42/releases/grab",
+      payload: { seasonNumber: 1, releaseId: pack.id },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ status: "grabbed", title: "Example.Show.S01-03" });
+    expect(posted).toMatchObject({
+      guid: "magnet:?xt=urn:btih:pack",
+      indexerId: 2,
+      seriesId: 42,
+      shouldOverride: true,
+      episodeIds: [501, 502],
+      quality: { quality: { id: 0, name: "Unknown" } },
+      languages: [{ id: 1, name: "English" }],
+    });
+    await app.close();
+  });
+
+  it("searches a single episode by episode id", async () => {
+    const requestedUrls: string[] = [];
+    installFetch((url) => {
+      requestedUrls.push(url);
+      if (url.includes("sonarr.test") && url.endsWith("/api/v3/episode?seriesId=42")) {
+        return jsonResponse([
+          { id: 501, seasonNumber: 1, episodeNumber: 1 },
+          { id: 502, seasonNumber: 1, episodeNumber: 2 },
+        ]);
+      }
+      if (url.includes("sonarr.test") && url.includes("/api/v3/release?seriesId=42&episodeId=501")) {
+        return jsonResponse([
+          seasonReleases[0],
+          {
+            ...seasonReleases[0],
+            guid: "magnet:?xt=urn:btih:other",
+            title: "Example.Show.S01E02.1080p",
+            episodeNumbers: [2],
+            mappedEpisodeInfo: [{ id: 502, seasonNumber: 1, episodeNumber: 2 }],
+          },
+        ]);
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildServer(makeConfig());
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/library/shows/sonarr/42/releases?season=1&episode=1",
+    });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(body).toMatchObject({ seriesId: 42, seasonNumber: 1, episodeNumber: 1 });
+    expect(body.releases).toHaveLength(1);
+    expect(body.releases[0]).toMatchObject({
+      title: "Example.Show.S01E01.1080p",
+      episodeLabel: "S01E01",
+      canGrab: true,
+    });
+    expect(requestedUrls.some((url) => url.includes("episodeId=501"))).toBe(true);
+    await app.close();
+  });
+
+  it("searches every season and keeps packs that cover the requested season", async () => {
+    const searched: number[] = [];
+    installFetch((url) => {
+      if (url.includes("sonarr.test") && url.endsWith("/api/v3/series/42")) {
+        return jsonResponse({
+          id: 42,
+          title: "Example Show",
+          seasons: [
+            { seasonNumber: 1, monitored: true },
+            { seasonNumber: 2, monitored: true },
+          ],
+        });
+      }
+      if (url.includes("sonarr.test") && url.includes("/api/v3/release?seriesId=42&seasonNumber=1")) {
+        searched.push(1);
+        return jsonResponse(seasonReleases);
+      }
+      if (url.includes("sonarr.test") && url.includes("/api/v3/release?seriesId=42&seasonNumber=2")) {
+        searched.push(2);
+        return jsonResponse([
+          {
+            ...seasonReleases[0],
+            guid: "magnet:?xt=urn:btih:other-season",
+            title: "Example.Show.S02.1080p",
+            seasonNumber: 2,
+            mappedEpisodeInfo: [{ id: 601, seasonNumber: 2, episodeNumber: 1 }],
+          },
+        ]);
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildServer(makeConfig());
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/library/shows/sonarr/42/releases?season=2&scope=all",
+    });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(searched.sort()).toEqual([1, 2]);
+    expect(body.releases.map((release: { title: string }) => release.title)).toEqual([
+      "Example.Show.S02.1080p",
+      "Example.Show.S01-03",
+    ]);
+    expect(body.releases[1]).toMatchObject({
+      title: "Example.Show.S01-03",
+      searchSeasonNumber: 1,
+      seasonLabel: "Seasons 1\u20133",
+    });
+    await app.close();
+  });
+
+  it("grabs a single episode release using the episode lookup", async () => {
+    const episodeRelease = {
+      ...seasonReleases[0],
+      approved: false,
+      rejected: true,
+      downloadAllowed: false,
+      rejections: ["Not enough seeders: 0. Minimum seeders: 1"],
+    };
+    let posted: Record<string, unknown> | undefined;
+    installFetch((url, init) => {
+      if (url.includes("sonarr.test") && url.endsWith("/api/v3/episode?seriesId=42")) {
+        return jsonResponse([{ id: 501, seasonNumber: 1, episodeNumber: 1 }]);
+      }
+      if (url.includes("sonarr.test") && url.includes("/api/v3/release?seriesId=42&episodeId=501")) {
+        return jsonResponse([episodeRelease]);
+      }
+      if (url.includes("sonarr.test") && url.endsWith("/api/v3/release") && init?.method === "POST") {
+        posted = readBody(init);
+        return jsonResponse({ id: 1 });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildServer(makeConfig());
+    const list = await app.inject({
+      method: "GET",
+      url: "/api/library/shows/sonarr/42/releases?season=1&episode=1",
+    });
+    const release = list.json().releases[0];
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/library/shows/sonarr/42/releases/grab",
+      payload: { seasonNumber: 1, episodeNumber: 1, releaseId: release.id },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(posted).toMatchObject({
+      guid: "magnet:?xt=urn:btih:single",
+      indexerId: 1,
+      seriesId: 42,
+      shouldOverride: true,
+      episodeIds: [501],
+    });
+    await app.close();
+  });
+
+  it("uses the matching search season when grabbing an all-seasons result", async () => {
+    let posted: Record<string, unknown> | undefined;
+    installFetch((url, init) => {
+      if (url.includes("sonarr.test") && url.endsWith("/api/v3/series/42")) {
+        return jsonResponse({
+          id: 42,
+          seasons: [{ seasonNumber: 1, monitored: true }],
+        });
+      }
+      if (url.includes("sonarr.test") && url.includes("/api/v3/release?seriesId=42&seasonNumber=1")) {
+        return jsonResponse(seasonReleases);
+      }
+      if (url.includes("sonarr.test") && url.includes("/api/v3/release?seriesId=42&seasonNumber=2")) {
+        return jsonResponse([]);
+      }
+      if (url.includes("sonarr.test") && url.endsWith("/api/v3/release") && init?.method === "POST") {
+        posted = readBody(init);
+        return jsonResponse({ id: 1 });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildServer(makeConfig());
+    const list = await app.inject({
+      method: "GET",
+      url: "/api/library/shows/sonarr/42/releases?season=2&scope=all",
+    });
+    const pack = list.json().releases.find(
+      (item: { title: string }) => item.title === "Example.Show.S01-03",
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/library/shows/sonarr/42/releases/grab",
+      payload: {
+        seasonNumber: 2,
+        searchSeasonNumber: pack.searchSeasonNumber,
+        releaseId: pack.id,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(posted).toMatchObject({
+      guid: "magnet:?xt=urn:btih:pack",
+      indexerId: 2,
+      seriesId: 42,
+      shouldOverride: true,
+      episodeIds: [501, 502],
+    });
+    await app.close();
+  });
+
+  it("rejects unmapped or stale releases", async () => {
+    installFetch((url) => {
+      if (url.includes("sonarr.test") && url.includes("/api/v3/release?seriesId=42&seasonNumber=1")) {
+        return jsonResponse([
+          {
+            ...seasonReleases[1],
+            mappedEpisodeInfo: [],
+          },
+        ]);
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildServer(makeConfig());
+    const list = await app.inject({
+      method: "GET",
+      url: "/api/library/shows/sonarr/42/releases?season=1",
+    });
+    const pack = list.json().releases[0];
+
+    const unmapped = await app.inject({
+      method: "POST",
+      url: "/api/library/shows/sonarr/42/releases/grab",
+      payload: { seasonNumber: 1, releaseId: pack.id },
+    });
+    expect(unmapped.statusCode).toBe(409);
+    expect(unmapped.json().error.code).toBe("release_unmapped");
+
+    const stale = await app.inject({
+      method: "POST",
+      url: "/api/library/shows/sonarr/42/releases/grab",
+      payload: { seasonNumber: 1, releaseId: "0".repeat(24) },
+    });
+    expect(stale.statusCode).toBe(404);
+    expect(stale.json().error.code).toBe("release_not_found");
     await app.close();
   });
 });

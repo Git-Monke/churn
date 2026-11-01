@@ -38,6 +38,13 @@ export interface ServarrSeason {
   monitored: boolean;
 }
 
+export interface ServarrSeriesStatistics {
+  episodeFileCount?: number;
+  episodeCount?: number;
+  totalEpisodeCount?: number;
+  percentOfEpisodes?: number;
+}
+
 export interface ServarrLookupBase {
   id?: number;
   title?: string;
@@ -57,11 +64,13 @@ export interface ServarrSeriesResource extends ServarrLookupBase {
   tmdbId?: number;
   seasons?: ServarrSeason[];
   ratings?: ServarrRating;
+  statistics?: ServarrSeriesStatistics;
 }
 
 export interface ServarrMovieResource extends ServarrLookupBase {
   studio?: string;
   tmdbId?: number;
+  hasFile?: boolean;
   ratings?: {
     imdb?: ServarrRating;
     tmdb?: ServarrRating;
@@ -75,6 +84,7 @@ export interface ServarrQueueStatusMessage {
 
 export interface ServarrQueueRecord {
   id?: number;
+  downloadId?: string;
   title?: string;
   status?: string;
   trackedDownloadStatus?: string;
@@ -105,6 +115,66 @@ export interface ServarrQueueResponse {
   records?: ServarrQueueRecord[];
 }
 
+export interface ServarrReleaseQuality {
+  id?: number;
+  name?: string;
+  source?: string;
+  resolution?: number;
+}
+
+export interface ServarrReleaseQualityModel {
+  quality?: ServarrReleaseQuality;
+  revision?: {
+    version?: number;
+    real?: number;
+    isRepack?: boolean;
+  };
+}
+
+export interface ServarrLanguage {
+  id?: number;
+  name?: string;
+}
+
+export interface ServarrReleaseEpisode {
+  id?: number;
+  seasonNumber?: number;
+  episodeNumber?: number;
+  absoluteEpisodeNumber?: number;
+  title?: string;
+}
+
+/** A release returned by Sonarr's interactive season/episode search. */
+export interface ServarrRelease {
+  guid?: string;
+  indexerId?: number;
+  indexer?: string;
+  title?: string;
+  size?: number;
+  quality?: ServarrReleaseQualityModel;
+  qualityWeight?: number;
+  releaseWeight?: number;
+  seasonNumber?: number;
+  seasonNumbers?: number[];
+  episodeNumbers?: number[];
+  mappedSeasonNumber?: number;
+  mappedEpisodeNumbers?: number[];
+  mappedEpisodeInfo?: ServarrReleaseEpisode[];
+  approved?: boolean;
+  rejected?: boolean;
+  temporarilyRejected?: boolean;
+  downloadAllowed?: boolean;
+  rejections?: string[];
+  protocol?: string;
+  seeders?: number;
+  leechers?: number;
+  ageHours?: number;
+  publishDate?: string;
+  infoUrl?: string;
+  fullSeason?: boolean;
+  languages?: ServarrLanguage[];
+}
+
 export interface ServarrEpisode {
   id?: number;
   seriesId?: number;
@@ -122,6 +192,9 @@ export interface ServarrMediaCover {
   body: Buffer;
   contentType: string;
 }
+
+/** Posters and fanart are a few hundred KB; anything huge is not artwork. */
+const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
 
 export function createArrClient(service: ArrServiceId, config: ServiceConfig, timeoutMs: number) {
   const authHeaders = (): Record<string, string> => {
@@ -187,6 +260,31 @@ export function createArrClient(service: ArrServiceId, config: ServiceConfig, ti
       return get<ServarrEpisode[]>(`/api/v3/episode?${query.toString()}`);
     },
 
+    async getSeasonReleases(seriesId: number, seasonNumber: number): Promise<ServarrRelease[]> {
+      const query = new URLSearchParams({
+        seriesId: String(seriesId),
+        seasonNumber: String(seasonNumber),
+      });
+      return get<ServarrRelease[]>(`/api/v3/release?${query.toString()}`);
+    },
+
+    async getEpisodeReleases(seriesId: number, episodeId: number): Promise<ServarrRelease[]> {
+      const query = new URLSearchParams({
+        seriesId: String(seriesId),
+        episodeId: String(episodeId),
+      });
+      return get<ServarrRelease[]>(`/api/v3/release?${query.toString()}`);
+    },
+
+    async grabRelease(payload: Record<string, unknown>): Promise<unknown> {
+      return postJson<unknown>(
+        service,
+        `${config.url}/api/v3/release`,
+        payload,
+        { timeoutMs, headers: authHeaders() },
+      );
+    },
+
     async addSeries(payload: Record<string, unknown>): Promise<ServarrSeriesResource> {
       return postJson<ServarrSeriesResource>(
         service,
@@ -205,36 +303,42 @@ export function createArrClient(service: ArrServiceId, config: ServiceConfig, ti
       );
     },
 
-    async getMediaCover(path: string): Promise<ServarrMediaCover | null> {
+    /**
+     * Fetch artwork from a public CDN URL (not the session-protected
+     * `/MediaCoverProxy/...` path on the app itself).
+     */
+    async getRemoteImage(url: string): Promise<ServarrMediaCover | null> {
       const response = await fetchWithTimeout(
         service,
-        `${config.url}${path}`,
-        { headers: { ...authHeaders(), accept: "image/*" } },
+        url,
+        { headers: { accept: "image/*" } },
         timeoutMs,
       );
       if (response.status === 404) {
         return null;
       }
       if (!response.ok) {
-        if (response.status === 401 || response.status === 403) {
-          throw new UpstreamError(
-            service,
-            "unauthorized",
-            `${service} rejected the API key`,
-            response.status,
-          );
-        }
         throw new UpstreamError(
           service,
           "http",
-          `${service} returned HTTP ${response.status}`,
+          `${service} artwork returned HTTP ${response.status}`,
           response.status,
         );
       }
-      return {
-        body: Buffer.from(await response.arrayBuffer()),
-        contentType: response.headers.get("content-type") ?? "image/jpeg",
-      };
+      const contentType = response.headers.get("content-type") ?? "";
+      if (!contentType.startsWith("image/")) {
+        throw new UpstreamError(
+          service,
+          "http",
+          `${service} artwork was not an image`,
+          response.status,
+        );
+      }
+      const body = Buffer.from(await response.arrayBuffer());
+      if (body.byteLength > MAX_IMAGE_BYTES) {
+        throw new UpstreamError(service, "http", `${service} artwork was too large`, 413);
+      }
+      return { body, contentType };
     },
   };
 }

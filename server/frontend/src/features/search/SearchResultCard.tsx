@@ -27,7 +27,8 @@ export function SearchResultCard({
   requestDisabled,
   seriesMonitor,
 }: SearchResultCardProps) {
-  const requested = result.inLibrary === true;
+  const available = result.available === true;
+  const requested = !available && result.inLibrary === true;
 
   return (
     <Card className="gap-0 py-0">
@@ -88,7 +89,12 @@ export function SearchResultCard({
       </CardContent>
 
       <CardFooter className="mt-auto py-2">
-        {requested ? (
+        {available ? (
+          <Button variant="secondary" size="sm" disabled className="w-full">
+            <CheckIcon data-icon="inline-start" />
+            Available
+          </Button>
+        ) : requested ? (
           <Button variant="secondary" size="sm" disabled className="w-full">
             <CheckIcon data-icon="inline-start" />
             Requested

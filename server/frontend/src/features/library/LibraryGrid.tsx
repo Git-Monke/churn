@@ -1,6 +1,6 @@
 import { ChevronRightIcon, FilmIcon, TvIcon } from "lucide-react";
 
-import type { ActivityItem, LibraryItem } from "@/api/types";
+import type { ActivityItem, LibraryItem, RequestedLibraryItem } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -33,10 +33,10 @@ export function LibraryGridSkeleton() {
 }
 
 function LibraryCard({ entry }: { entry: LibraryEntry }) {
-  const { library, activity, type } = entry;
+  const { library, requested, activity, type } = entry;
   const title = entryTitle(entry) || "Untitled";
-  const year = library?.year ?? activity?.year;
-  const imageUrl = library?.imageUrl ?? activity?.imageUrl;
+  const year = library?.year ?? requested?.year ?? activity?.year;
+  const imageUrl = library?.imageUrl ?? requested?.imageUrl ?? activity?.imageUrl;
   const href = type === "Series" ? showHref(entry) : undefined;
 
   const card = (
@@ -63,9 +63,13 @@ function LibraryCard({ entry }: { entry: LibraryEntry }) {
           </div>
         )}
         <div className="absolute left-2 top-2 flex flex-wrap gap-1">
-          {entry.status !== "downloading" ? (
+          {library || requested?.available ? (
             <Badge variant="outline" className="bg-background/85 backdrop-blur">
               Available
+            </Badge>
+          ) : requested ? (
+            <Badge variant="secondary" className="bg-secondary/90 text-secondary-foreground backdrop-blur">
+              Requested
             </Badge>
           ) : null}
           {activity ? <ActivityBadge activity={activity} /> : null}
@@ -88,7 +92,7 @@ function LibraryCard({ entry }: { entry: LibraryEntry }) {
           ) : null}
         </div>
 
-        <MetadataLine library={library} activity={activity} />
+        <MetadataLine library={library} requested={requested} activity={activity} />
 
         {activity ? (
           <div className="flex flex-col gap-1.5">
@@ -123,6 +127,9 @@ function LibraryCard({ entry }: { entry: LibraryEntry }) {
 function showHref(entry: LibraryEntry): string | undefined {
   if (entry.library) {
     return `#/library/show/jellyfin/${encodeURIComponent(entry.library.id)}`;
+  }
+  if (entry.requested?.kind === "series") {
+    return `#/library/show/sonarr/${entry.requested.arrId}`;
   }
   if (entry.activity?.seriesId !== undefined) {
     return `#/library/show/sonarr/${entry.activity.seriesId}`;
@@ -167,15 +174,18 @@ function activityLabel(activity: ActivityItem): string {
 
 function MetadataLine({
   library,
+  requested,
   activity,
 }: {
   library?: LibraryItem;
+  requested?: RequestedLibraryItem;
   activity?: ActivityItem;
 }) {
-  const rating = library?.rating ?? activity?.rating;
+  const rating = library?.rating ?? requested?.rating ?? activity?.rating;
   const officialRating = library?.officialRating;
-  const runtime = library?.runtimeMinutes ?? activity?.runtimeMinutes;
-  const network = activity?.network;
+  const runtime =
+    library?.runtimeMinutes ?? requested?.runtimeMinutes ?? activity?.runtimeMinutes;
+  const network = requested?.network ?? activity?.network;
 
   return (
     <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -213,11 +223,18 @@ function downloadEta(activity: ActivityItem): string {
 }
 
 function seasonHint(seasons: number[]): string {
-  if (seasons.length === 1) {
-    const season = seasons[0];
+  const sorted = [...new Set(seasons)].sort((left, right) => left - right);
+  if (sorted.length === 1) {
+    const season = sorted[0];
     return season === 0 ? "Specials" : `Season ${season}`;
   }
-  return `Seasons ${seasons.join(", ")}`;
+  const contiguous = sorted.every((season, index) => {
+    const previous = sorted[index - 1];
+    return index === 0 || (previous !== undefined && season === previous + 1);
+  });
+  return contiguous
+    ? `Seasons ${sorted[0]}–${sorted[sorted.length - 1]}`
+    : `Seasons ${sorted.join(", ")}`;
 }
 
 function formatEta(value: string): string {

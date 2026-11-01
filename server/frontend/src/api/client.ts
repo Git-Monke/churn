@@ -2,10 +2,14 @@ import type {
   ActivityResponse,
   CreateRequestInput,
   CreateRequestResponse,
+  GrabShowReleaseInput,
+  GrabShowReleaseResponse,
   LibraryResponse,
+  RequestedLibraryResponse,
   RequestOptionsResponse,
   SearchResponse,
   ShowDetailResponse,
+  ShowReleasesResponse,
   ShowSource,
   StatusResponse,
 } from "./types";
@@ -59,6 +63,10 @@ export function fetchLibrary(): Promise<LibraryResponse> {
   return getJson<LibraryResponse>("/api/library");
 }
 
+export function fetchRequestedLibrary(): Promise<RequestedLibraryResponse> {
+  return getJson<RequestedLibraryResponse>("/api/library/requested");
+}
+
 export function fetchRequestOptions(): Promise<RequestOptionsResponse> {
   return getJson<RequestOptionsResponse>("/api/requests/options");
 }
@@ -77,6 +85,35 @@ export function fetchShow(
   id: string,
 ): Promise<ShowDetailResponse> {
   return getJson<ShowDetailResponse>(`/api/library/shows/${source}/${encodeURIComponent(id)}`);
+}
+
+export function fetchShowReleases(
+  source: ShowSource,
+  id: string,
+  seasonNumber: number,
+  options: { episodeNumber?: number; allSeasons?: boolean } = {},
+): Promise<ShowReleasesResponse> {
+  const params = new URLSearchParams({ season: String(seasonNumber) });
+  if (options.episodeNumber !== undefined) {
+    params.set("episode", String(options.episodeNumber));
+  }
+  if (options.allSeasons) {
+    params.set("scope", "all");
+  }
+  return getJson<ShowReleasesResponse>(
+    `/api/library/shows/${source}/${encodeURIComponent(id)}/releases?${params.toString()}`,
+  );
+}
+
+export function grabShowRelease(
+  source: ShowSource,
+  id: string,
+  input: GrabShowReleaseInput,
+): Promise<GrabShowReleaseResponse> {
+  return postJson<GrabShowReleaseResponse>(
+    `/api/library/shows/${source}/${encodeURIComponent(id)}/releases/grab`,
+    input,
+  );
 }
 
 export function createRequest(input: CreateRequestInput): Promise<CreateRequestResponse> {

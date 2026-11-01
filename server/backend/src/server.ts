@@ -10,6 +10,7 @@ import { registerActivityRoutes } from "./routes/activity.js";
 import { registerHealthRoutes } from "./routes/health.js";
 import { registerLibraryRoutes } from "./routes/library.js";
 import { registerRequestRoutes } from "./routes/requests.js";
+import { registerRequestedLibraryRoutes } from "./routes/requested.js";
 import { registerSearchRoutes } from "./routes/search.js";
 import { registerServiceRoutes } from "./routes/services.js";
 import { registerShowRoutes } from "./routes/shows.js";
@@ -45,6 +46,7 @@ export async function buildServer(
   registerHealthRoutes(app);
   registerStatusRoutes(app, config);
   registerLibraryRoutes(app, config);
+  registerRequestedLibraryRoutes(app, config);
   registerSearchRoutes(app, config);
   registerRequestRoutes(app, config);
   registerActivityRoutes(app, config);

@@ -11,29 +11,52 @@ import type {
   ServarrSeriesResource,
 } from "./upstream/servarr.js";
 
-const MEDIA_COVER_PATH = /^\/MediaCoverProxy\/[A-Za-z0-9]+\/[A-Za-z0-9._-]+\.(?:jpg|jpeg|png|webp)$/i;
+// Sonarr and Radarr advertise artwork as `/MediaCoverProxy/...` URLs, but those
+// are tied to the web UI session and answer 401 even with a valid API key. The
+// same posters are published as public `remoteUrl`s, so the backend proxies
+// those and allowlists the hosts to keep the proxy from becoming an SSRF vector.
+const ARTWORK_HOSTS = new Set([
+  "artworks.thetvdb.com",
+  "banners.thetvdb.com",
+  "www.thetvdb.com",
+  "image.tmdb.org",
+  "assets.fanart.tv",
+]);
 
-const PREFERRED_QUALITY_PROFILES = ["hd - 720p/1080p", "hd-1080p"];
+const IMAGE_EXTENSION = /\.(?:jpg|jpeg|png|webp)$/i;
 
-export function isAllowedMediaCoverPath(value: string): boolean {
-  return MEDIA_COVER_PATH.test(value);
+
+/** True when `value` is an https URL on an allowlisted artwork CDN. */
+export function isAllowedArtworkUrl(value: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  return (
+    url.protocol === "https:" &&
+    ARTWORK_HOSTS.has(url.hostname.toLowerCase()) &&
+    IMAGE_EXTENSION.test(url.pathname)
+  );
 }
 
-/** Map an arr media-cover path to a backend-owned image URL. */
+/** Map an arr artwork URL to a backend-owned image URL. */
 export function mediaCoverUrl(
   service: "sonarr" | "radarr",
   images: ServarrSeriesResource["images"],
 ): string | undefined {
-  const poster = images?.find((image) => image.coverType === "poster" && image.url);
-  if (!poster?.url || !isAllowedMediaCoverPath(poster.url)) {
+  const poster = images?.find((image) => image.coverType === "poster" && image.remoteUrl);
+  if (!poster?.remoteUrl || !isAllowedArtworkUrl(poster.remoteUrl)) {
     return undefined;
   }
-  return `/api/search/images/${service}?path=${encodeURIComponent(poster.url)}`;
+  return `/api/search/images/${service}?url=${encodeURIComponent(poster.remoteUrl)}`;
 }
 
 export function mapSeriesResource(
   resource: ServarrSeriesResource,
   inLibrary: boolean | null,
+  available?: boolean,
 ): SearchResult | null {
   if (!resource.title?.trim() || !resource.tvdbId) {
     return null;
@@ -62,6 +85,7 @@ export function mapSeriesResource(
     imdbId: resource.imdbId,
     imageUrl: mediaCoverUrl("sonarr", resource.images),
     inLibrary,
+    available: available ?? (inLibrary === true ? isSeriesAvailable(resource) : undefined),
     seasons,
   };
 }
@@ -69,6 +93,7 @@ export function mapSeriesResource(
 export function mapMovieResource(
   resource: ServarrMovieResource,
   inLibrary: boolean | null,
+  available?: boolean,
 ): SearchResult | null {
   if (!resource.title?.trim() || !resource.tmdbId) {
     return null;
@@ -89,20 +114,59 @@ export function mapMovieResource(
     imdbId: resource.imdbId,
     imageUrl: mediaCoverUrl("radarr", resource.images),
     inLibrary,
+    available: available ?? (inLibrary === true ? Boolean(resource.hasFile) : undefined),
   };
 }
 
-/** Prefer the shared 720p/1080p profile, then 1080p, then the first profile. */
+/** True when Sonarr has files for every episode it knows about. */
+export function isSeriesAvailable(series: ServarrSeriesResource): boolean {
+  const statistics = series.statistics;
+  return Boolean(
+    statistics &&
+      statistics.totalEpisodeCount !== undefined &&
+      statistics.totalEpisodeCount > 0 &&
+      (statistics.episodeFileCount ?? 0) >= statistics.totalEpisodeCount,
+  );
+}
+
+/** True when Radarr has imported a file for the movie. */
+export function isMovieAvailable(movie: ServarrMovieResource): boolean {
+  return Boolean(movie.hasFile);
+}
+
+/**
+ * Prefer a shared 720p/1080p profile, then 1080p, then 720p. Avoid picking a
+ * 4K/Ultra-HD profile by default when a smaller profile is available.
+ */
 export function pickDefaultQualityProfile(
   profiles: ServarrQualityProfile[],
 ): ServarrQualityProfile | undefined {
-  for (const preferred of PREFERRED_QUALITY_PROFILES) {
-    const match = profiles.find((profile) => normalizeProfileName(profile.name) === preferred);
-    if (match) {
-      return match;
-    }
+  return profiles
+    .map((profile, index) => ({
+      profile,
+      index,
+      score: qualityProfileScore(profile.name),
+    }))
+    .sort((left, right) => right.score - left.score || left.index - right.index)[0]?.profile;
+}
+
+function qualityProfileScore(name: string): number {
+  const normalized = normalizeProfileName(name);
+  if (/(?:^|\W)(?:2160p?|4k|uhd|ultra)(?:\W|$)/.test(normalized)) {
+    return -1;
   }
-  return profiles[0];
+  const has720 = /(?:^|\W)720p?(?:\W|$)/.test(normalized);
+  const has1080 = /(?:^|\W)1080p?(?:\W|$)/.test(normalized);
+  if (has720 && has1080) {
+    return 3;
+  }
+  if (has1080) {
+    return 2;
+  }
+  if (has720) {
+    return 1;
+  }
+  return 0;
 }
 
 export function pickDefaultRootFolder(

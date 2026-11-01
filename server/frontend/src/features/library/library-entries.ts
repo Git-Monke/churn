@@ -1,17 +1,19 @@
-import type { ActivityItem, LibraryItem } from "@/api/types";
+import type { ActivityItem, LibraryItem, RequestedLibraryItem } from "@/api/types";
 
-export type LibraryEntryStatus = "available" | "downloading" | "both";
+export type LibraryEntryStatus = "available" | "requested" | "downloading" | "both";
 
 export interface LibraryEntry {
   key: string;
   type: LibraryItem["type"];
   library?: LibraryItem;
+  requested?: RequestedLibraryItem;
   activity?: ActivityItem;
   status: LibraryEntryStatus;
 }
 
 export function mergeLibraryEntries(
   libraryItems: LibraryItem[],
+  requestedItems: RequestedLibraryItem[],
   activityItems: ActivityItem[],
 ): LibraryEntry[] {
   const entries = new Map<string, LibraryEntry>();
@@ -26,11 +28,27 @@ export function mergeLibraryEntries(
     });
   }
 
+  for (const requested of requestedItems) {
+    const existing = entries.get(requested.key);
+    const type = requested.kind === "movie" ? "Movie" : "Series";
+    if (existing) {
+      existing.requested = requested;
+      entryStatus(existing);
+      continue;
+    }
+    entries.set(requested.key, {
+      key: requested.key,
+      type,
+      requested,
+      status: requested.available ? "available" : "requested",
+    });
+  }
+
   for (const activity of activityItems) {
     const existing = entries.get(activity.key);
     if (existing) {
       existing.activity = activity;
-      existing.status = "both";
+      entryStatus(existing);
       continue;
     }
     entries.set(activity.key, {
@@ -42,17 +60,38 @@ export function mergeLibraryEntries(
   }
 
   return [...entries.values()].sort((left, right) => {
-    const leftActive = left.activity ? 0 : 1;
-    const rightActive = right.activity ? 0 : 1;
-    if (leftActive !== rightActive) {
-      return leftActive - rightActive;
+    const leftRank = entryRank(left);
+    const rightRank = entryRank(right);
+    if (leftRank !== rightRank) {
+      return leftRank - rightRank;
     }
     return entryTitle(left).localeCompare(entryTitle(right));
   });
 }
 
 export function entryTitle(entry: LibraryEntry): string {
-  return entry.library?.name ?? entry.activity?.title ?? "";
+  return entry.library?.name ?? entry.requested?.title ?? entry.activity?.title ?? "";
+}
+
+function entryRank(entry: LibraryEntry): number {
+  if (entry.activity) {
+    return 0;
+  }
+  if (entry.library) {
+    return 1;
+  }
+  return 2;
+}
+
+function entryStatus(entry: LibraryEntry): void {
+  const available = Boolean(entry.library || entry.requested?.available);
+  if (entry.activity) {
+    entry.status = available || entry.requested ? "both" : "downloading";
+  } else if (available) {
+    entry.status = "available";
+  } else {
+    entry.status = "requested";
+  }
 }
 
 function libraryKey(item: LibraryItem): string {

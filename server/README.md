@@ -95,7 +95,10 @@ put it in `server/.env`, then restart the backend.
 | `GET /api/status` | Jellyfin/Sonarr/Radarr health, version and latency |
 | `GET /api/library` | Jellyfin movies and series with backend-owned poster URLs and provider ids |
 | `GET /api/library/images/:itemId` | Poster proxy; no Jellyfin key reaches the browser |
+| `GET /api/library/requested` | Sonarr/Radarr library titles, including requested items not yet downloaded |
 | `GET /api/library/shows/:source/:id` | Jellyfin/Sonarr show detail with seasons, episodes and download overlays |
+| `GET /api/library/shows/:source/:id/releases?season=N` | Sonarr season release search, including rejected and multi-season packs |
+| `POST /api/library/shows/:source/:id/releases/grab` | Grab a selected release, overriding automatic restrictions when Sonarr can map it |
 | `GET /api/activity` | Active Sonarr/Radarr queue grouped by movie/show |
 | `GET /api/search?q=<term>` | Sonarr/Radarr lookup with library-state markers |
 | `GET /api/search/images/:service` | Proxied arr media cover |
@@ -108,15 +111,16 @@ Errors use `{ "error": { "code": "...", "message": "..." } }`.
 ## Search and requests
 
 The Search section queries Sonarr and Radarr together with a debounced search.
-Results already present in either app are marked **Requested** and cannot be
+Results already present in either app are marked **Available** when the arr has
+the movie file or every series episode, otherwise **Requested**. Neither can be
 added twice. Posters are proxied through the backend, so the browser never sees
 an arr URL or API key.
 
 **Request options** stores your preferred quality profile, root folder, TV
 monitoring scope and search-on-add setting in `localStorage`. The defaults are
 `HD - 720p/1080p`, the first accessible root folder, all seasons, and search on
-add; they fall back to `HD-1080p` and then the first available profile. The
-Request button uses those settings directly. The backend re-fetches metadata
+add; they fall back to `HD-1080p`, then `HD-720p`, and avoid 4K/Ultra-HD when a
+smaller profile exists. The Request button uses those settings directly. The backend re-fetches metadata
 from the arr by id, validates the selected profile and folder against the live
 API, checks for duplicates, then adds the title. Sonarr gets the chosen
 monitoring scope; Radarr adds with a `released` minimum availability.
@@ -136,10 +140,13 @@ movie or show, with aggregated progress, ETA, size, download client, protocol,
 quality and warnings. Arr metadata supplies display titles and posters, proxied
 through the same backend image routes as search.
 
-The Library page merges `/api/library` with `/api/activity`:
+The Library page merges `/api/library`, `/api/library/requested` and `/api/activity`:
 
 - duplicates are matched by Radarr `tmdbId` or Sonarr `tvdbId` and shown once;
 - unmatched active downloads appear as their own cards;
+- Sonarr/Radarr titles that have downloaded but not reached Jellyfin appear as
+  **Available** cards;
+- tracked titles with no downloaded file yet appear as **Requested** cards;
 - active downloads sort before available titles;
 - a broken arr only shows an alert for that service and does not hide Jellyfin
   or the other arr.
@@ -148,8 +155,32 @@ Movies stay at card level. Clicking a show opens
 `/api/library/shows/:source/:id`, which unions Jellyfin and Sonarr episodes by
 season/episode. Per-episode downloads and Sonarr season packs are overlaid on
 the episode list, and Jellyfin shows are matched to Sonarr through Jellyfin
-`ProviderIds.Tvdb`. A show that exists only in Sonarr still opens a Sonarr-backed
-detail page.
+`ProviderIds.Tvdb`.
+
+Multi-season packs such as `S01-03` are recognised from the release title, so
+their download progress appears on every covered season even when Sonarr only
+reports one season in its queue. Shared queue records are counted once when
+totalling download size.
+
+For Sonarr-backed shows, **Choose release** runs a season search and lists every
+release Sonarr returned, including rejected releases and multi-season packs. The
+**All seasons** action searches the show's other seasons and merges any
+multi-season packs that cover the selected season, which catches packs Sonarr
+files under their first season (for example `S01-05`). The list shows size,
+quality, indexer, seeders, season coverage and rejection reasons; the smallest
+mapped multi-season pack is marked recommended when no release is automatically
+eligible.
+
+Missing individual episodes also get their own **Choose release** action. That
+uses Sonarr's episode-id search instead of its season search, so single-episode
+releases are available even when no season pack exists. After requesting a
+series, churn opens the picker immediately for the first monitored season so you
+can choose a release while Sonarr's automatic search runs in the background. If
+no releases are found, the picker stays open with retry and all-seasons actions.
+Grabbing a rejected release overrides Sonarr's decision engine using the episode
+ids Sonarr mapped. Upstream GUIDs, magnet URLs and indexer ids stay on the
+backend. A show that exists only in Sonarr still opens a Sonarr-backed detail
+page.
 
 ## Development
 

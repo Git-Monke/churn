@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   ChevronLeftIcon,
   CircleAlertIcon,
+  DownloadIcon,
   FilmIcon,
   TriangleAlertIcon,
 } from "lucide-react";
@@ -35,6 +36,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ReleasePicker } from "@/features/show/ReleasePicker";
+import { ReleasePickerDialog } from "@/features/show/ReleasePickerDialog";
 import type { ShowSource } from "@/hooks/use-hash-route";
 
 export function ShowPage({ source, id }: { source: ShowSource; id: string }) {
@@ -44,6 +47,8 @@ export function ShowPage({ source, id }: { source: ShowSource; id: string }) {
     refetchInterval: 10_000,
   });
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
+  const [releasesOpen, setReleasesOpen] = useState(false);
+  const [releaseEpisode, setReleaseEpisode] = useState<ShowEpisode | null>(null);
 
   useEffect(() => {
     const data = showQuery.data;
@@ -70,6 +75,17 @@ export function ShowPage({ source, id }: { source: ShowSource; id: string }) {
       (episode) => episode.seasonNumber === selectedSeason,
     );
   }, [selectedSeason, showQuery.data]);
+
+  const seasonHasDownload = episodes.some((episode) => episode.download !== undefined);
+  const seasonHasFile = episodes.some(
+    (episode) => episode.availability === "jellyfin" || episode.availability === "sonarr",
+  );
+  const showReleasePrompt =
+    showQuery.data?.source === "sonarr" &&
+    selectedSeason !== null &&
+    episodes.some((episode) => episode.availability === "missing") &&
+    !seasonHasDownload &&
+    !seasonHasFile;
 
   return (
     <div className="flex flex-col gap-6">
@@ -136,12 +152,67 @@ export function ShowPage({ source, id }: { source: ShowSource; id: string }) {
                     ))}
                   </SelectContent>
                 </Select>
+                {showQuery.data.source === "sonarr" && selectedSeason !== null ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setReleasesOpen((open) => !open)}
+                  >
+                    <DownloadIcon data-icon="inline-start" />
+                    {releasesOpen ? "Hide releases" : "Choose release"}
+                  </Button>
+                ) : null}
               </div>
+
+              {showQuery.data.source === "sonarr" &&
+              releasesOpen &&
+              selectedSeason !== null ? (
+                <ReleasePicker seriesId={Number(id)} seasonNumber={selectedSeason} />
+              ) : null}
+
+              <ReleasePickerDialog
+                open={releaseEpisode !== null}
+                onOpenChange={(open) => {
+                  if (!open) {
+                    setReleaseEpisode(null);
+                  }
+                }}
+                seriesId={Number(id)}
+                seasonNumber={releaseEpisode?.seasonNumber}
+                episodeNumber={releaseEpisode?.episodeNumber}
+                showTitle={showQuery.data.series.title}
+              />
+
+              {showReleasePrompt ? (
+                <Alert>
+                  <TriangleAlertIcon />
+                  <AlertTitle>No automatic download for this season</AlertTitle>
+                  <AlertDescription>
+                    Sonarr has no eligible release it can grab automatically. Compare single-season
+                    releases and multi-season packs by size, then pick one yourself.
+                  </AlertDescription>
+                  <AlertAction>
+                    <Button variant="outline" size="sm" onClick={() => setReleasesOpen(true)}>
+                      Browse releases
+                    </Button>
+                  </AlertAction>
+                </Alert>
+              ) : null}
 
               {episodes.length > 0 ? (
                 <div className="flex flex-col gap-3">
                   {episodes.map((episode) => (
-                    <EpisodeRow key={episode.key} episode={episode} />
+                    <EpisodeRow
+                      key={episode.key}
+                      episode={episode}
+                      onChooseRelease={
+                        showQuery.data?.source === "sonarr" &&
+                        episode.download === undefined &&
+                        episode.availability === "missing"
+                          ? () => setReleaseEpisode(episode)
+                          : undefined
+                      }
+                    />
                   ))}
                 </div>
               ) : (
@@ -213,7 +284,13 @@ function ShowHeader({ series, source }: { series: ShowSeriesSummary; source: Sho
   );
 }
 
-function EpisodeRow({ episode }: { episode: ShowEpisode }) {
+function EpisodeRow({
+  episode,
+  onChooseRelease,
+}: {
+  episode: ShowEpisode;
+  onChooseRelease?: () => void;
+}) {
   const download = episode.download;
   return (
     <Card className="gap-0 py-0">
@@ -237,6 +314,17 @@ function EpisodeRow({ episode }: { episode: ShowEpisode }) {
             <h3 className="font-medium">{episode.title}</h3>
             <AvailabilityBadge availability={episode.availability} />
             {download ? <DownloadBadge download={download} /> : null}
+            {onChooseRelease ? (
+              <Button
+                className="ml-auto"
+                variant="outline"
+                size="sm"
+                onClick={onChooseRelease}
+              >
+                <DownloadIcon data-icon="inline-start" />
+                Choose release
+              </Button>
+            ) : null}
           </div>
 
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
