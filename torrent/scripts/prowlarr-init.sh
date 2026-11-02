@@ -10,7 +10,8 @@
 #   * enables a few public indexers (EZTV, YTS, The Pirate Bay) so searches
 #     work immediately,
 #   * registers Sonarr and Radarr as Prowlarr applications (so Prowlarr pushes
-#     its indexers to them),
+#     its indexers to them) and keeps their sync categories free of adult
+#     6000-series categories,
 #   * registers FlareSolverr as a Prowlarr indexer proxy and tags the managed
 #     indexers so Cloudflare-protected sites such as EZTV work, and
 #   * registers qBittorrent in Sonarr and Radarr using the `tv`/`movies`
@@ -99,6 +100,39 @@ json_object_for_name() {
 # four-space property indentation instead of any indented "id" line.
 json_id_from_object() {
     sed -n 's/^    "id"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\),\{0,1\}[[:space:]]*$/\1/p' | head -n 1
+}
+
+# Read a top-level string or boolean from a single provider object.
+json_string_for_key() {
+    key=$1
+    sed -n 's/^  "'"$key"'"[[:space:]]*:[[:space:]]*"\(.*\)",*[[:space:]]*$/\1/p' | head -n 1
+}
+
+json_bool_for_key() {
+    key=$1
+    sed -n 's/^  "'"$key"'"[[:space:]]*:[[:space:]]*\([^,]*\),*[[:space:]]*$/\1/p' | head -n 1
+}
+
+# Read a top-level numeric array (for example `tags`), keeping it valid JSON.
+json_array_for_key() {
+    key=$1
+    awk -v key="$key" '
+        !in_array && index($0, "\"" key "\"") && index($0, "[") { in_array = 1 }
+        in_array {
+            line = $0
+            opening = index(line, "[")
+            if (opening > 0) {
+                line = substr(line, opening + 1)
+            }
+            while (match(line, /[0-9]+/)) {
+                value = substr(line, RSTART, RLENGTH)
+                values = (values == "" ? value : values "," value)
+                line = substr(line, RSTART + RLENGTH)
+            }
+            if (index(line, "]")) in_array = 0
+        }
+        END { printf "[%s]", values }
+    '
 }
 
 # Tags serialize as flat `{ "id": ..., "label": ... }` objects.
@@ -456,20 +490,42 @@ if [ -s "$radarr_config" ]; then
 fi
 
 register_sonarr_application() {
-    existing=$(curl -fsS -H "X-Api-Key: $api_key" "$prowlarr/api/v1/applications")
-    if printf '%s' "$existing" | grep -Eq '"implementation"[[:space:]]*:[[:space:]]*"Sonarr"'; then
-        echo "Sonarr is already registered with Prowlarr"
-        return 0
+    existing_id=$(curl -fsS -H "X-Api-Key: $api_key" "$prowlarr/api/v1/applications" \
+        | json_id_for_implementation Sonarr)
+    app_name=Sonarr
+    app_enable=true
+    app_tags='[]'
+    if [ -n "$existing_id" ]; then
+        existing=$(curl -fsS -H "X-Api-Key: $api_key" \
+            "$prowlarr/api/v1/applications/$existing_id")
+        existing_name=$(printf '%s\n' "$existing" | json_string_for_key name)
+        existing_enable=$(printf '%s\n' "$existing" | json_bool_for_key enable)
+        existing_tags=$(printf '%s\n' "$existing" | json_array_for_key tags)
+        [ -n "$existing_name" ] && app_name=$existing_name
+        case "$existing_enable" in
+            true|false) app_enable=$existing_enable ;;
+        esac
+        [ -n "$existing_tags" ] && app_tags=$existing_tags
+        method=PUT
+        target="$prowlarr/api/v1/applications/$existing_id"
+        id_field="\"id\": $existing_id,"
+        message="updated Sonarr's Prowlarr sync categories (adult categories excluded)"
+    else
+        method=POST
+        target="$prowlarr/api/v1/applications"
+        id_field=
+        message="registered Sonarr as a Prowlarr application (adult categories excluded)"
     fi
     payload=$(mktemp)
     cat >"$payload" <<EOF
 {
-  "enable": true,
+  $id_field
+  "enable": $app_enable,
   "syncLevel": "fullSync",
-  "name": "Sonarr",
+  "name": "$app_name",
   "implementation": "Sonarr",
   "configContract": "SonarrSettings",
-  "tags": [],
+  "tags": $app_tags,
   "fields": [
     { "name": "prowlarrUrl", "value": "$prowlarr_external" },
     { "name": "baseUrl", "value": "$sonarr_url" },
@@ -480,30 +536,52 @@ register_sonarr_application() {
   ]
 }
 EOF
-    curl -fsS -X POST \
+    curl -fsS -X "$method" \
         -H "X-Api-Key: $api_key" \
         -H "Content-Type: application/json" \
         --data-binary "@$payload" \
-        "$prowlarr/api/v1/applications" >/dev/null
+        "$target" >/dev/null
     rm -f "$payload"
-    echo "registered Sonarr as a Prowlarr application"
+    echo "$message"
 }
 
 register_radarr_application() {
-    existing=$(curl -fsS -H "X-Api-Key: $api_key" "$prowlarr/api/v1/applications")
-    if printf '%s' "$existing" | grep -Eq '"implementation"[[:space:]]*:[[:space:]]*"Radarr"'; then
-        echo "Radarr is already registered with Prowlarr"
-        return 0
+    existing_id=$(curl -fsS -H "X-Api-Key: $api_key" "$prowlarr/api/v1/applications" \
+        | json_id_for_implementation Radarr)
+    app_name=Radarr
+    app_enable=true
+    app_tags='[]'
+    if [ -n "$existing_id" ]; then
+        existing=$(curl -fsS -H "X-Api-Key: $api_key" \
+            "$prowlarr/api/v1/applications/$existing_id")
+        existing_name=$(printf '%s\n' "$existing" | json_string_for_key name)
+        existing_enable=$(printf '%s\n' "$existing" | json_bool_for_key enable)
+        existing_tags=$(printf '%s\n' "$existing" | json_array_for_key tags)
+        [ -n "$existing_name" ] && app_name=$existing_name
+        case "$existing_enable" in
+            true|false) app_enable=$existing_enable ;;
+        esac
+        [ -n "$existing_tags" ] && app_tags=$existing_tags
+        method=PUT
+        target="$prowlarr/api/v1/applications/$existing_id"
+        id_field="\"id\": $existing_id,"
+        message="updated Radarr's Prowlarr sync categories (adult categories excluded)"
+    else
+        method=POST
+        target="$prowlarr/api/v1/applications"
+        id_field=
+        message="registered Radarr as a Prowlarr application (adult categories excluded)"
     fi
     payload=$(mktemp)
     cat >"$payload" <<EOF
 {
-  "enable": true,
+  $id_field
+  "enable": $app_enable,
   "syncLevel": "fullSync",
-  "name": "Radarr",
+  "name": "$app_name",
   "implementation": "Radarr",
   "configContract": "RadarrSettings",
-  "tags": [],
+  "tags": $app_tags,
   "fields": [
     { "name": "prowlarrUrl", "value": "$prowlarr_external" },
     { "name": "baseUrl", "value": "$radarr_url" },
@@ -512,13 +590,13 @@ register_radarr_application() {
   ]
 }
 EOF
-    curl -fsS -X POST \
+    curl -fsS -X "$method" \
         -H "X-Api-Key: $api_key" \
         -H "Content-Type: application/json" \
         --data-binary "@$payload" \
-        "$prowlarr/api/v1/applications" >/dev/null
+        "$target" >/dev/null
     rm -f "$payload"
-    echo "registered Radarr as a Prowlarr application"
+    echo "$message"
 }
 
 # Sonarr/Radarr reach qBittorrent through the host, since qBittorrent only

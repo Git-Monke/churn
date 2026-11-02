@@ -55,7 +55,10 @@ other machines, bind the published port to `127.0.0.1:8080:8080` in
 qBittorrent categories, registers qBittorrent in Prowlarr, adds enabled public
 indexers, connects FlareSolverr, and links Sonarr and Radarr. It reads their API
 keys from `../server/config`, so the current setup expects both stacks on the
-same host.
+same host. The Sonarr/Radarr application sync categories only include normal TV
+and movie categories, excluding the adult XXX (`6000`-series) categories.
+Prowlarr's own Search page has no equivalent global filter. Filtering is by
+category, so miscategorised adult releases can still appear.
 
 The stack shares `${DATA_DIR}` with the server stack at `/data`, so completed
 downloads are visible to Sonarr, Radarr, and Jellyfin without path translation.

@@ -260,7 +260,8 @@ packs such as `S01-05` that Sonarr indexes under Season 1. When no release is
 automatic, the smallest mapped multi-season pack is recommended. Choosing a
 release sends it to Sonarr with an override, so a pack like `S01-03` can be used
 for season 1 when its size is acceptable. Upstream GUIDs and magnet URLs stay
-on the backend.
+on the backend. Sonarr and Radarr sync only normal TV/movie indexer categories,
+so adult XXX releases are excluded from this picker by default.
 
 Missing episodes have their own **Choose release** action. It searches by
 Sonarr episode id rather than by season, so individual episode releases show up

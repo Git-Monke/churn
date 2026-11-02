@@ -220,7 +220,8 @@ The wiring is automatic on first `docker compose up`:
    - registers FlareSolverr as a Prowlarr indexer proxy and tags the managed
      indexers so Cloudflare-protected sites such as EZTV work;
    - registers Sonarr and Radarr as Prowlarr applications, so Prowlarr pushes
-     its indexers to them;
+     its indexers to them, and keeps their sync categories limited to normal
+     TV/movie categories (adult XXX categories are excluded);
    - registers qBittorrent in Sonarr and Radarr with the `tv` and `movies`
      categories.
 3. Prowlarr and Sonarr/Radarr sit in different network namespaces, so they talk
@@ -264,6 +265,15 @@ Prowlarr's immediate connectivity test fails (for example, Cloudflare blocking
 EZTV); Prowlarr can then back off that indexer until it responds. Re-run the
 one-shot to re-apply the enabled state and proxy tag after changing an indexer
 in the UI.
+
+Prowlarr does not have a global "hide adult categories" setting. churn filters
+adult releases where it can do so reliably: the Sonarr and Radarr applications
+are synced with only TV and movie categories, never the `6000`-series XXX
+categories, and re-running `prowlarr-init` updates existing synced indexers to
+match. Prowlarr's own Search page can still return adult results when a search
+does not restrict categories; that is a Prowlarr limitation. The filter follows
+indexer categories, so an adult release a tracker files under TV or Movies can
+still slip through.
 
 FlareSolverr only runs when Prowlarr detects a Cloudflare challenge, so ordinary
 indexers do not pay the Chromium startup cost. Its network traffic shares
