@@ -24,6 +24,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 const TICKS_PER_SECOND = 10_000_000;
 const REPORT_INTERVAL_MS = 10_000;
 const RESUME_END_MARGIN_SECONDS = 30;
+// Advance further each time so the new segment request makes Jellyfin restart
+// its transcode past a damaged section instead of on the same bad keyframe.
+const RECOVERY_SKIP_SECONDS = [5, 15, 30];
+const RECOVERY_RETRY_MS = 12_000;
+const RECOVERY_FATAL_GRACE_MS = 1_500;
+
+type MediaIssue = "codec" | "stream";
 
 export function PlayPage({ id }: { id: string }) {
   const queryClient = useQueryClient();
@@ -42,7 +49,17 @@ export function PlayPage({ id }: { id: string }) {
   const stoppedRef = useRef(false);
   const resumeAppliedRef = useRef(false);
   const [resumed, setResumed] = useState(false);
-  const [mediaError, setMediaError] = useState(false);
+  const [mediaIssue, setMediaIssue] = useState<MediaIssue | null>(null);
+  const [recovering, setRecovering] = useState(false);
+  const [recovery, setRecovery] = useState<{
+    itemId: string;
+    targetTicks: number;
+    attempt: number;
+  } | null>(null);
+  const recoveryRef = useRef({ attempts: 0, lastTarget: 0 });
+  const recoveringRef = useRef(false);
+  const recoveryStartedAtRef = useRef(0);
+  const recoveryTimerRef = useRef<number | null>(null);
 
   itemRef.current = item;
 
@@ -89,14 +106,118 @@ export function PlayPage({ id }: { id: string }) {
   }, [reportProgress]);
 
   useEffect(() => {
+    recoveryRef.current = { attempts: 0, lastTarget: 0 };
+    recoveringRef.current = false;
+    recoveryStartedAtRef.current = 0;
+    setRecovery(null);
+    setRecovering(false);
+    setMediaIssue(null);
+    return () => clearRecoveryTimer();
+  }, [item?.id]);
+
+  function clearRecoveryTimer() {
+    if (recoveryTimerRef.current !== null) {
+      window.clearTimeout(recoveryTimerRef.current);
+      recoveryTimerRef.current = null;
+    }
+  }
+
+  const recoverStream = useCallback((resumeTicks?: number) => {
+    const current = itemRef.current;
+    if (!current) {
+      return;
+    }
+    if (current.playbackMethod !== "hls") {
+      setMediaIssue("codec");
+      setRecovering(false);
+      return;
+    }
+
+    const now = Date.now();
+    if (recoveringRef.current) {
+      // Ignore duplicate fatal events from the same failure, but allow the
+      // next attempt once the restarted load has had a moment to run.
+      if (now - recoveryStartedAtRef.current < RECOVERY_FATAL_GRACE_MS) {
+        return;
+      }
+      recoveringRef.current = false;
+      clearRecoveryTimer();
+    }
+
+    const video = videoRef.current;
+    const videoTicks =
+      video && Number.isFinite(video.currentTime) && video.currentTime > 0
+        ? Math.round(video.currentTime * TICKS_PER_SECOND)
+        : positionRef.current;
+    const state = recoveryRef.current;
+    if (state.attempts >= RECOVERY_SKIP_SECONDS.length) {
+      setRecovering(false);
+      setMediaIssue("stream");
+      return;
+    }
+
+    // A stalled player can sit on the last playable fragment, so move ahead of
+    // it. On repeated attempts the previous target also keeps the new segment
+    // request from landing on the same corrupt keyframe.
+    const baseTicks = Math.max(videoTicks, resumeTicks ?? 0, state.lastTarget);
+    const skipSeconds = RECOVERY_SKIP_SECONDS[state.attempts] ?? 30;
+    const durationTicks =
+      video && Number.isFinite(video.duration)
+        ? Math.round(video.duration * TICKS_PER_SECOND)
+        : current.runtimeTicks;
+    const wantedTicks = baseTicks + skipSeconds * TICKS_PER_SECOND;
+    const targetTicks =
+      durationTicks !== undefined && durationTicks > 0
+        ? Math.min(wantedTicks, Math.max(0, durationTicks - TICKS_PER_SECOND))
+        : wantedTicks;
+    state.attempts += 1;
+    state.lastTarget = targetTicks;
+    recoveryStartedAtRef.current = now;
+    recoveringRef.current = true;
+    positionRef.current = targetTicks;
+    setMediaIssue(null);
+    setRecovering(true);
+    // Recreate the HLS pipeline with an explicit start position. Reusing the
+    // existing instance after a fatal media error can leave the element at 0,
+    // so a fresh MediaSource is more reliable than startLoad() in place.
+    setRecovery({ itemId: current.id, targetTicks, attempt: state.attempts });
+
+    // If hls.js never emits another error and playback does not resume, keep
+    // trying automatically with the next offset.
+    clearRecoveryTimer();
+    recoveryTimerRef.current = window.setTimeout(() => {
+      recoveryTimerRef.current = null;
+      if (!recoveringRef.current) {
+        return;
+      }
+      recoveringRef.current = false;
+      recoverStream();
+    }, RECOVERY_RETRY_MS);
+  }, []);
+
+  useEffect(() => {
     const video = videoRef.current;
     if (!video || !item || item.playbackMethod !== "hls") {
       return;
     }
 
-    setMediaError(false);
+    const activeRecovery =
+      recovery?.itemId === item.id ? recovery : undefined;
+    const targetSeconds = activeRecovery
+      ? activeRecovery.targetTicks / TICKS_PER_SECOND
+      : undefined;
+
+    setMediaIssue(null);
+
     if (video.canPlayType("application/vnd.apple.mpegurl")) {
       video.src = item.streamUrl;
+      if (targetSeconds !== undefined) {
+        try {
+          video.currentTime = targetSeconds;
+        } catch {
+          // Not seekable until metadata is ready.
+        }
+      }
       return () => {
         video.removeAttribute("src");
         video.load();
@@ -105,29 +226,75 @@ export function PlayPage({ id }: { id: string }) {
 
     let cancelled = false;
     let hls: Hls | null = null;
+    let networkRetries = 0;
+    let mediaRetries = 0;
     void import("hls.js")
       .then(({ default: HlsConstructor }) => {
         if (cancelled) {
           return;
         }
         if (!HlsConstructor.isSupported()) {
-          setMediaError(true);
+          setRecovering(false);
+          setMediaIssue("stream");
           return;
         }
 
-        hls = new HlsConstructor();
+        hls = new HlsConstructor(
+          targetSeconds !== undefined
+            ? { startPosition: targetSeconds }
+            : undefined,
+        );
         hlsRef.current = hls;
         hls.loadSource(item.streamUrl);
         hls.attachMedia(video);
+        if (targetSeconds !== undefined) {
+          hls.on(HlsConstructor.Events.MANIFEST_PARSED, () => {
+            void video.play().catch(() => {
+              // The element may still be waiting for the first fragment.
+            });
+          });
+        }
         hls.on(HlsConstructor.Events.ERROR, (_event, data) => {
-          if (data.fatal) {
-            setMediaError(true);
+          if (!data.fatal) {
+            return;
           }
+
+          // Transient network failures and media element errors can often be
+          // retried in place before falling back to a new segment position.
+          if (
+            data.type === HlsConstructor.ErrorTypes.NETWORK_ERROR &&
+            networkRetries < 2
+          ) {
+            networkRetries += 1;
+            hls?.startLoad();
+            return;
+          }
+          if (
+            data.type === HlsConstructor.ErrorTypes.MEDIA_ERROR &&
+            data.details !== HlsConstructor.ErrorDetails.BUFFER_STALLED_ERROR &&
+            mediaRetries < 1
+          ) {
+            mediaRetries += 1;
+            hls?.recoverMediaError();
+            return;
+          }
+
+          if (data.type === HlsConstructor.ErrorTypes.MEDIA_ERROR) {
+            // The first in-place media recovery did not help. Reset the
+            // MediaSource again before seeking to a new segment position.
+            hls?.recoverMediaError();
+          }
+
+          const failingTicks =
+            typeof data.frag?.start === "number"
+              ? Math.round(data.frag.start * TICKS_PER_SECOND)
+              : undefined;
+          recoverStream(failingTicks);
         });
       })
       .catch(() => {
         if (!cancelled) {
-          setMediaError(true);
+          recoverStream();
         }
       });
 
@@ -138,7 +305,13 @@ export function PlayPage({ id }: { id: string }) {
         hlsRef.current = null;
       }
     };
-  }, [item?.id, item?.streamUrl, item?.playbackMethod]);
+  }, [
+    item?.id,
+    item?.streamUrl,
+    item?.playbackMethod,
+    recovery?.attempt,
+    recoverStream,
+  ]);
 
   useEffect(() => {
     const stopFromPageHide = () => {
@@ -207,6 +380,16 @@ export function PlayPage({ id }: { id: string }) {
     const video = videoRef.current;
     if (video) {
       positionRef.current = Math.round(video.currentTime * TICKS_PER_SECOND);
+      if (
+        !recoveringRef.current &&
+        recoveryRef.current.attempts > 0 &&
+        positionRef.current >
+          recoveryRef.current.lastTarget + 30 * TICKS_PER_SECOND
+      ) {
+        // Playback has been stable for a while; allow recovery at a later,
+        // unrelated damaged section.
+        recoveryRef.current.attempts = 0;
+      }
     }
   }
 
@@ -216,6 +399,51 @@ export function PlayPage({ id }: { id: string }) {
       positionRef.current = Math.round(video.currentTime * TICKS_PER_SECOND);
       reportProgress(true);
     }
+  }
+
+  function retryPlayback() {
+    recoveryRef.current.attempts = 0;
+    recoveringRef.current = false;
+    clearRecoveryTimer();
+    setMediaIssue(null);
+    recoverStream();
+  }
+
+  function handlePlaying() {
+    recoveringRef.current = false;
+    recoveryStartedAtRef.current = 0;
+    clearRecoveryTimer();
+    setRecovering(false);
+  }
+
+  function handleCanPlay() {
+    const video = videoRef.current;
+    if (!video || !recoveringRef.current) {
+      return;
+    }
+    const targetSeconds = recoveryRef.current.lastTarget / TICKS_PER_SECOND;
+    if (
+      Number.isFinite(video.duration) &&
+      Math.abs(video.currentTime - targetSeconds) > 2
+    ) {
+      try {
+        video.currentTime = targetSeconds;
+      } catch {
+        // The new MediaSource is not seekable yet; hls.js will retry.
+      }
+    }
+    void video.play().catch(() => {
+      // The controls remain available if autoplay is blocked.
+    });
+  }
+
+  function handleVideoError() {
+    const current = itemRef.current;
+    if (current?.playbackMethod === "hls") {
+      recoverStream();
+      return;
+    }
+    setMediaIssue("codec");
   }
 
   function handleEnded() {
@@ -318,24 +546,46 @@ export function PlayPage({ id }: { id: string }) {
         </Alert>
       ) : null}
 
-      {mediaError ? (
+      {recovering ? (
+        <Alert>
+          <TriangleAlertIcon />
+          <AlertTitle>Reconnecting playback</AlertTitle>
+          <AlertDescription>
+            The stream stopped responding. Churn is resuming a few seconds
+            ahead to skip the problem.
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
+      {mediaIssue ? (
         <Alert variant="destructive">
           <CircleAlertIcon />
-          <AlertTitle>This video could not play in the browser</AlertTitle>
+          <AlertTitle>
+            {mediaIssue === "codec"
+              ? "This video could not play in the browser"
+              : "Playback was interrupted"}
+          </AlertTitle>
           <AlertDescription>
-            The file may use a codec the browser cannot decode. Open Jellyfin to
-            watch it there.
+            {mediaIssue === "codec"
+              ? "The file may use a codec the browser cannot decode. Open Jellyfin to watch it there."
+              : "Jellyfin stopped sending video, which usually means part of the file is damaged. Retry from the last position, or open Jellyfin."}
           </AlertDescription>
           <AlertAction>
-            <Button asChild variant="outline" size="sm">
-              <a
-                href="/api/services/jellyfin/open"
-                target="_blank"
-                rel="noreferrer"
-              >
-                Open Jellyfin
-              </a>
-            </Button>
+            {mediaIssue === "stream" ? (
+              <Button variant="outline" size="sm" onClick={retryPlayback}>
+                Retry
+              </Button>
+            ) : (
+              <Button asChild variant="outline" size="sm">
+                <a
+                  href="/api/services/jellyfin/open"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Open Jellyfin
+                </a>
+              </Button>
+            )}
           </AlertAction>
         </Alert>
       ) : null}
@@ -354,7 +604,9 @@ export function PlayPage({ id }: { id: string }) {
           onPause={handlePause}
           onTimeUpdate={handleTimeUpdate}
           onEnded={handleEnded}
-          onError={() => setMediaError(true)}
+          onPlaying={handlePlaying}
+          onCanPlay={handleCanPlay}
+          onError={handleVideoError}
         />
       </Card>
 

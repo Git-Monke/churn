@@ -298,6 +298,14 @@ browser cannot decode (for example HEVC/AC3 in an MKV) use
 transcode with H.264 video and AAC stereo audio at the source resolution. The
 frontend plays HLS with `hls.js` and falls back to native HLS when available.
 
+If Jellyfin's transcode job stops because the source file has a damaged
+section, the player retries transient network and media errors in place. If the
+stream stays stuck, it recreates the HLS pipeline with an explicit start
+position a few seconds ahead; that segment request makes Jellyfin restart FFmpeg
+past the damaged keyframe. Retries skip further ahead (5s, 15s, then 30s) and
+continue automatically even if the player emits no further error. Only after
+those attempts does it show the interruption alert with a **Retry** action.
+
 The token stays out of the page DOM and API responses but is visible to browser
 devtools in redirect targets and Jellyfin HLS playlist/segment URLs; video bytes
 still come directly from Jellyfin. `JELLYFIN_PUBLIC_URL` defaults to the host's
@@ -305,7 +313,8 @@ LAN address (replacing a loopback or container host in `JELLYFIN_URL`, keeping
 scheme, port and base path), so playback works from other devices without
 configuration; set it when the public address is something else, such as a
 reverse-proxy name. The backend logs the effective value at startup. Playback
-failures show the media error alert with an **Open Jellyfin** fallback.
+failures show the media error alert with an **Open Jellyfin** fallback, except
+for an HLS interruption, which offers **Retry**.
 
 ## Roadmap
 

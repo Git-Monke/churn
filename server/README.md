@@ -358,6 +358,14 @@ Video bytes are not proxied through Churn. Playback is codec-aware:
   based on the source resolution and bitrate. The frontend plays it with
   `hls.js`, with native HLS as a fallback.
 
+If Jellyfin's transcode job stops because the source file has a damaged
+section, the player retries transient network and media errors in place. If the
+stream stays stuck, it recreates the HLS pipeline with an explicit start
+position a few seconds ahead; that segment request makes Jellyfin restart FFmpeg
+past the damaged keyframe. Retries skip further ahead (5s, 15s, then 30s) and
+continue automatically even if the player emits no further error. Only after
+those attempts does it show the interruption alert with a **Retry** action.
+
 The token never appears in the page DOM or API responses, but it is visible in
 browser devtools, redirect targets and Jellyfin HLS playlist/segment URLs. That
 is the accepted tradeoff for stream redirection; a backend proxy would be needed
@@ -371,7 +379,8 @@ playback works from other machines without configuration. Set the variable when
 the public address is neither loopback nor the detected LAN address (a reverse
 proxy, or a TLS name). Preview the effective value in the backend's startup log
 (`video streams resolve to …`). Playback failures show the media error alert
-with an **Open Jellyfin** fallback.
+with an **Open Jellyfin** fallback, except for an HLS interruption, which offers
+**Retry**.
 
 ## Development
 
