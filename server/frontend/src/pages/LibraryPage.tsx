@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowRightLeftIcon, CircleAlertIcon, FilmIcon, SearchIcon } from "lucide-react";
 
 import { fetchActivity, fetchLibrary, fetchRequestedLibrary } from "@/api/client";
@@ -25,21 +25,26 @@ import {
   mergeLibraryEntries,
   type LibraryEntry,
 } from "@/features/library/library-entries";
+import { useLibraryScanState } from "@/features/library/use-library-scan-state";
 
 type Filter = "all" | "Movie" | "Series";
 
 export function LibraryPage({ jellyfinUrl }: { jellyfinUrl?: string }) {
+  const queryClient = useQueryClient();
   const [filter, setFilter] = useState<Filter>("all");
   const [dismissedRepicks, setDismissedRepicks] = useState<number[]>([]);
+  const [scanActive, setScanActive] = useState(false);
+  const [activityActive, setActivityActive] = useState(false);
+  const previousActivityKeys = useRef<Set<string>>(new Set());
   const libraryQuery = useQuery({
     queryKey: ["library"],
     queryFn: fetchLibrary,
-    refetchInterval: 60_000,
+    refetchInterval: scanActive ? 2_000 : 60_000,
   });
   const requestedQuery = useQuery({
     queryKey: ["requested-library"],
     queryFn: fetchRequestedLibrary,
-    refetchInterval: 30_000,
+    refetchInterval: activityActive ? 5_000 : 30_000,
   });
   const activityQuery = useQuery({
     queryKey: ["activity"],
@@ -60,14 +65,39 @@ export function LibraryPage({ jellyfinUrl }: { jellyfinUrl?: string }) {
       ),
     [activityQuery.data, libraryQuery.data, requestedQuery.data],
   );
+  const displayEntries = useLibraryScanState(entries);
   const filtered = useMemo(
-    () => (filter === "all" ? entries : entries.filter((entry) => entry.type === filter)),
-    [entries, filter],
+    () =>
+      filter === "all"
+        ? displayEntries
+        : displayEntries.filter((entry) => entry.type === filter),
+    [displayEntries, filter],
   );
-  const activeCount = entries.filter((entry) => entry.activity).length;
+  const activeCount = displayEntries.filter((entry) => entry.activity).length;
   const loading =
     (libraryQuery.isLoading || requestedQuery.isLoading || activityQuery.isLoading) &&
-    entries.length === 0;
+    displayEntries.length === 0;
+
+  useEffect(() => {
+    setScanActive(displayEntries.some((entry) => entry.status === "scanning"));
+  }, [displayEntries]);
+
+  useEffect(() => {
+    setActivityActive((activityQuery.data?.items.length ?? 0) > 0);
+  }, [activityQuery.data]);
+
+  useEffect(() => {
+    const nextKeys = new Set(
+      activityQuery.data?.items.map((item) => item.key) ?? [],
+    );
+    const shrank = [...previousActivityKeys.current].some(
+      (key) => !nextKeys.has(key),
+    );
+    previousActivityKeys.current = nextKeys;
+    if (shrank) {
+      void queryClient.invalidateQueries({ queryKey: ["requested-library"] });
+    }
+  }, [activityQuery.data, queryClient]);
   const activityNotices = activityQuery.data?.services.filter(
     (service) => service.state !== "ok" || service.detail,
   );
@@ -91,9 +121,9 @@ export function LibraryPage({ jellyfinUrl }: { jellyfinUrl?: string }) {
       <div className="flex flex-col gap-1">
         <div className="flex flex-wrap items-center gap-2">
           <h2 className="font-heading text-xl font-semibold tracking-tight">Library</h2>
-          {entries.length > 0 ? (
+          {displayEntries.length > 0 ? (
             <span className="text-sm text-muted-foreground">
-              {entries.length} {entries.length === 1 ? "title" : "titles"}
+              {displayEntries.length} {displayEntries.length === 1 ? "title" : "titles"}
             </span>
           ) : null}
           {activeCount > 0 ? (
@@ -149,12 +179,12 @@ export function LibraryPage({ jellyfinUrl }: { jellyfinUrl?: string }) {
 
       {loading ? <LibraryGridSkeleton /> : null}
 
-      {!loading && entries.length > 0 ? (
+      {!loading && displayEntries.length > 0 ? (
         <Tabs value={filter} onValueChange={(value) => setLibraryFilter(value, setFilter)}>
           <TabsList>
-            <TabsTrigger value="all">All ({entries.length})</TabsTrigger>
-            <TabsTrigger value="Movie">{`Movies (${countType(entries, "Movie")})`}</TabsTrigger>
-            <TabsTrigger value="Series">{`Series (${countType(entries, "Series")})`}</TabsTrigger>
+            <TabsTrigger value="all">All ({displayEntries.length})</TabsTrigger>
+            <TabsTrigger value="Movie">{`Movies (${countType(displayEntries, "Movie")})`}</TabsTrigger>
+            <TabsTrigger value="Series">{`Series (${countType(displayEntries, "Series")})`}</TabsTrigger>
           </TabsList>
           <TabsContent value={filter}>
             {filtered.length > 0 ? (
@@ -177,7 +207,7 @@ export function LibraryPage({ jellyfinUrl }: { jellyfinUrl?: string }) {
       ) : null}
 
       {!loading &&
-      entries.length === 0 &&
+      displayEntries.length === 0 &&
       libraryOk &&
       activityQuery.data &&
       activitySettled &&

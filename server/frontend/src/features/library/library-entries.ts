@@ -1,6 +1,12 @@
 import type { ActivityItem, LibraryItem, RequestedLibraryItem } from "@/api/types";
 
-export type LibraryEntryStatus = "available" | "requested" | "downloading" | "both";
+export type LibraryEntryStatus =
+  | "available"
+  | "scanning"
+  | "scan_failed"
+  | "requested"
+  | "downloading"
+  | "both";
 
 export interface LibraryEntry {
   key: string;
@@ -36,12 +42,14 @@ export function mergeLibraryEntries(
       entryStatus(existing);
       continue;
     }
-    entries.set(requested.key, {
+    const entry: LibraryEntry = {
       key: requested.key,
       type,
       requested,
-      status: requested.available ? "available" : "requested",
-    });
+      status: "requested",
+    };
+    entryStatus(entry);
+    entries.set(requested.key, entry);
   }
 
   for (const activity of activityItems) {
@@ -84,7 +92,15 @@ function entryRank(entry: LibraryEntry): number {
 }
 
 function entryStatus(entry: LibraryEntry): void {
-  const available = Boolean(entry.library || entry.requested?.available);
+  const hasLibrary = Boolean(entry.library);
+  const requestedAvailable = Boolean(entry.requested?.available);
+
+  if (!hasLibrary && requestedAvailable) {
+    entry.status = "scanning";
+    return;
+  }
+
+  const available = hasLibrary || requestedAvailable;
   if (entry.activity) {
     entry.status = available || entry.requested ? "both" : "downloading";
   } else if (available) {

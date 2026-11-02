@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronRightIcon, FilmIcon, PlayIcon, Trash2Icon, TvIcon } from "lucide-react";
+import { ChevronRightIcon, FilmIcon, LoaderCircleIcon, PlayIcon, Trash2Icon, TvIcon } from "lucide-react";
 
 import type { ActivityItem, LibraryItem, RequestedLibraryItem } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
@@ -76,7 +76,19 @@ function LibraryCard({ entry }: { entry: LibraryEntry }) {
           </div>
         ) : null}
         <div className="absolute left-2 top-2 flex flex-wrap gap-1">
-          {library || requested?.available ? (
+          {entry.status === "scanning" ? (
+            <Badge variant="secondary" className="gap-1 bg-secondary/90 text-secondary-foreground backdrop-blur">
+              <LoaderCircleIcon className="size-3 animate-spin" />
+              Scanning
+            </Badge>
+          ) : entry.status === "scan_failed" ? (
+            <Badge
+              variant="destructive"
+              title="Jellyfin has not indexed this title yet"
+            >
+              Scan problem
+            </Badge>
+          ) : library || requested?.available ? (
             <Badge variant="outline" className="bg-background/85 backdrop-blur">
               Available
             </Badge>

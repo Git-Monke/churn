@@ -28,6 +28,8 @@ export interface QbittorrentTorrent {
   num_incomplete?: number;
   /** Unix timestamp qBittorrent added the torrent. */
   added_on?: number;
+  /** Unix timestamp the torrent finished downloading, 0 if incomplete. */
+  completion_on?: number;
 }
 
 /**

@@ -12,6 +12,7 @@ import {
 } from "./auth.js";
 import type { AppConfig } from "./config.js";
 import { ApiError, UpstreamError } from "./errors.js";
+import { createLibraryScanWatcher } from "./library-scan.js";
 import { createReleaseEventStore } from "./release-events.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerActivityRoutes } from "./routes/activity.js";
@@ -38,8 +39,11 @@ export async function buildServer(
   const sessionStore = createMemorySessionStore({ ttlMs: config.sessionTtlMs });
   const loginThrottle = createLoginThrottle();
   const releaseEvents = createReleaseEventStore();
+  const libraryScan = createLibraryScanWatcher(config);
+  libraryScan.start();
 
   app.addHook("onClose", async () => {
+    libraryScan.stop();
     sessionStore.close();
   });
 

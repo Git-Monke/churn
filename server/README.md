@@ -265,7 +265,9 @@ The Library page merges `/api/library`, `/api/library/requested` and `/api/activ
 - duplicates are matched by Radarr `tmdbId` or Sonarr `tvdbId` and shown once;
 - unmatched active downloads appear as their own cards;
 - Sonarr/Radarr titles that have downloaded but not reached Jellyfin appear as
-  **Available** cards;
+  **Scanning** cards;
+- if Jellyfin still has not indexed a completed title after 2 minutes, the card
+  shows **Scan problem** until the item appears;
 - tracked titles with no downloaded file yet appear as **Requested** cards;
 - active downloads sort before available titles;
 - a broken arr only shows an alert for that service and does not hide Jellyfin
@@ -278,6 +280,14 @@ with `deleteFiles=true`, and asks Jellyfin to refresh its library. This stops an
 in-progress download and clears the Radarr/Sonarr entry so the title can be
 requested again with a smaller quality profile. Deleting a completed title also
 deletes its media files.
+
+The backend also watches qBittorrent every second. When a torrent transitions to
+complete, or is first seen as recently completed (within 10 minutes), it asks
+Jellyfin to refresh its library. This runs even when no dashboard tab is open.
+While a Library card is **Scanning**, the page polls Jellyfin every 2 seconds so
+the card becomes playable as soon as the item is indexed. There is no separate
+manual scan endpoint; if Jellyfin indexes later, the card still recovers from
+the **Scan problem** state automatically.
 
 Movies stay at card level. Clicking a show opens
 `/api/library/shows/:source/:id`, which unions Jellyfin and Sonarr episodes by

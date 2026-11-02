@@ -3,6 +3,7 @@ import type { FastifyInstance } from "fastify";
 import type { AppConfig, ServiceConfig } from "../config.js";
 import { movieMetadata, seriesMetadata } from "../activity.js";
 import { ApiError, isUpstreamNotFound } from "../errors.js";
+import { refreshJellyfinLibrary } from "../library-scan.js";
 import type {
   CancelLibraryItemResponse,
   RequestedLibraryItem,
@@ -10,7 +11,6 @@ import type {
   RequestedLibraryServiceState,
 } from "../types.js";
 import { isMovieAvailable, isSeriesAvailable } from "../search.js";
-import { createJellyfinClient } from "../upstream/jellyfin.js";
 import {
   createArrClient,
   type ArrServiceId,
@@ -103,7 +103,12 @@ async function cancelRequestedTitle(
     throw error;
   }
 
-  await refreshJellyfinLibrary(config);
+  // Jellyfin scans best-effort; a failure must not make the cancel look failed.
+  try {
+    await refreshJellyfinLibrary(config);
+  } catch {
+    // The arr delete already succeeded; Jellyfin will notice on its next scan.
+  }
 
   return {
     status: "cancelled",
@@ -112,20 +117,6 @@ async function cancelRequestedTitle(
     id,
     queueRemoved: records.filter((record) => record.id !== undefined).length,
   };
-}
-
-/** Jellyfin scans best-effort; a failure must not make the cancel look failed. */
-async function refreshJellyfinLibrary(config: AppConfig): Promise<void> {
-  const service = config.services.jellyfin;
-  if (!service.apiKey) {
-    return;
-  }
-  try {
-    const client = createJellyfinClient(service, config.requestTimeoutMs);
-    await client.refreshLibrary();
-  } catch {
-    // The arr delete already succeeded; Jellyfin will notice on its next scan.
-  }
 }
 
 function parseArrService(value: string): ArrServiceId {
