@@ -1486,6 +1486,105 @@ describe("create requests", () => {
     await app.close();
   });
 
+  it("monitors every season of a multi-season pack before grabbing it", async () => {
+    const multiSeasonSeries = {
+      ...seriesLookup,
+      seasons: [
+        { seasonNumber: 0, monitored: false },
+        { seasonNumber: 1, monitored: true },
+        { seasonNumber: 2, monitored: false },
+        { seasonNumber: 3, monitored: false },
+      ],
+    };
+    const pack = {
+      guid: "severance-s01-03",
+      indexerId: 3,
+      indexer: "EZTV",
+      title: "Severance.S01-03.1080p.WEB-DL",
+      size: 30_000_000_000,
+      quality: { quality: { id: 7, name: "WEBDL-1080p" } },
+      approved: true,
+      rejected: false,
+      downloadAllowed: true,
+      rejections: [],
+      protocol: "torrent",
+      seeders: 50,
+      leechers: 2,
+      fullSeason: true,
+      // Sonarr often reports only the first season for a multi-season pack.
+      seasonNumber: 1,
+      seasonNumbers: [1],
+      mappedEpisodeInfo: [
+        { id: 101, seasonNumber: 1, episodeNumber: 1 },
+        { id: 201, seasonNumber: 2, episodeNumber: 1 },
+        { id: 301, seasonNumber: 3, episodeNumber: 1 },
+      ],
+    };
+    let updated: Record<string, unknown> | undefined;
+    let grabbed: Record<string, unknown> | undefined;
+    const calls: string[] = [];
+    installFetch((url, init) => {
+      calls.push(`${init?.method ?? "GET"} ${url}`);
+      if (url.includes("/series/lookup")) return jsonResponse([multiSeasonSeries]);
+      if (url.endsWith("/api/v3/series")) {
+        if (init?.method === "POST") {
+          return jsonResponse({ ...multiSeasonSeries, id: 11 });
+        }
+        return jsonResponse([]);
+      }
+      if (url.endsWith("/api/v3/series/11") && (!init?.method || init.method === "GET")) {
+        return jsonResponse({ ...multiSeasonSeries, id: 11 });
+      }
+      if (url.endsWith("/api/v3/series/11") && init?.method === "PUT") {
+        updated = readBody(init);
+        return jsonResponse(updated);
+      }
+      if (url.includes("/api/v3/release?seriesId=11&seasonNumber=1")) {
+        return jsonResponse([pack]);
+      }
+      if (url.endsWith("/api/v3/release") && init?.method === "POST") {
+        grabbed = readBody(init);
+        return jsonResponse({ id: 1 });
+      }
+      if (url.includes("/qualityprofile")) return jsonResponse(profiles);
+      if (url.includes("/rootfolder")) return jsonResponse(rootFolders);
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildAuthedServer(makeConfig());
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/requests",
+      payload: {
+        kind: "series",
+        tvdbId: 371980,
+        options: { monitor: "firstSeason" },
+      },
+    });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(body).toMatchObject({
+      status: "added",
+      service: "sonarr",
+      downloads: [{ title: "Severance.S01-03.1080p.WEB-DL", seasonNumber: 1 }],
+    });
+    expect(updated).toMatchObject({
+      seasons: [
+        { seasonNumber: 0, monitored: false },
+        { seasonNumber: 1, monitored: true },
+        { seasonNumber: 2, monitored: true },
+        { seasonNumber: 3, monitored: true },
+      ],
+    });
+    expect(grabbed).toMatchObject({ seriesId: 11, guid: "severance-s01-03" });
+    const updateIndex = calls.findIndex((call) => call.startsWith("PUT "));
+    const grabIndex = calls.findIndex((call) => call.includes("/api/v3/release") && call.startsWith("POST "));
+    expect(updateIndex).toBeGreaterThanOrEqual(0);
+    expect(grabIndex).toBeGreaterThan(updateIndex);
+    await app.close();
+  });
+
   it("is idempotent when the title is already in the library", async () => {
     const mock = installFetch((url, init) => {
       if (url.includes("/movie/lookup")) return jsonResponse([movieLookup]);
@@ -2057,6 +2156,75 @@ describe("show releases", () => {
       quality: { quality: { id: 0, name: "Unknown" } },
       languages: [{ id: 1, name: "English" }],
     });
+    await app.close();
+  });
+
+  it("monitors every season before manually grabbing a multi-season pack", async () => {
+    const pack = {
+      ...seasonReleases[1],
+      fullSeason: true,
+      seasonNumbers: [1],
+      title: "Example.Show.S01-03",
+    };
+    let updated: Record<string, unknown> | undefined;
+    let posted: Record<string, unknown> | undefined;
+    const calls: string[] = [];
+    installFetch((url, init) => {
+      calls.push(`${init?.method ?? "GET"} ${url}`);
+      if (url.includes("sonarr.test") && url.includes("/api/v3/release?seriesId=42&seasonNumber=1")) {
+        return jsonResponse([pack]);
+      }
+      if (url.includes("sonarr.test") && url.endsWith("/api/v3/series/42") && (!init?.method || init.method === "GET")) {
+        return jsonResponse({
+          id: 42,
+          title: "Example Show",
+          seasons: [
+            { seasonNumber: 1, monitored: true },
+            { seasonNumber: 2, monitored: false },
+            { seasonNumber: 3, monitored: false },
+          ],
+        });
+      }
+      if (url.includes("sonarr.test") && url.endsWith("/api/v3/series/42") && init?.method === "PUT") {
+        updated = readBody(init);
+        return jsonResponse(updated);
+      }
+      if (url.includes("sonarr.test") && url.endsWith("/api/v3/release") && init?.method === "POST") {
+        posted = readBody(init);
+        return jsonResponse({ id: 1 });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildAuthedServer(makeConfig());
+    const list = await app.inject({
+      method: "GET",
+      url: "/api/library/shows/sonarr/42/releases?season=1",
+    });
+    const release = list.json().releases.find(
+      (item: { title: string }) => item.title === "Example.Show.S01-03",
+    );
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/library/shows/sonarr/42/releases/grab",
+      payload: { seasonNumber: 1, releaseId: release.id },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(updated).toMatchObject({
+      seasons: [
+        { seasonNumber: 1, monitored: true },
+        { seasonNumber: 2, monitored: true },
+        { seasonNumber: 3, monitored: true },
+      ],
+    });
+    expect(posted).toMatchObject({ guid: pack.guid, seriesId: 42 });
+    const updateIndex = calls.findIndex((call) => call.startsWith("PUT "));
+    const grabIndex = calls.findIndex(
+      (call) => call.includes("/api/v3/release") && call.startsWith("POST "),
+    );
+    expect(updateIndex).toBeGreaterThanOrEqual(0);
+    expect(grabIndex).toBeGreaterThan(updateIndex);
     await app.close();
   });
 

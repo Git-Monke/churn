@@ -17,8 +17,10 @@ import type { ReleaseEventStore } from "../release-events.js";
 import {
   buildReleaseGrabPayload,
   mappedEpisodeIds,
+  monitorSeriesSeasons,
   releaseMatchesSeason,
   releaseNeedsOverride,
+  seasonPackSeasons,
 } from "../releases.js";
 import {
   DEFAULT_SWARM_POLICY,
@@ -376,9 +378,11 @@ async function addSeriesRequest(
 }
 
 /**
- * Prefer well-seeded season packs for every monitored season. Seasons without
- * a usable pack fall back to Sonarr's own `SeasonSearch`, which still picks
- * individual episodes. A whole-series `SeriesSearch` is the last resort.
+ * Prefer well-seeded season packs for every monitored season. When a pack
+ * covers several seasons, all of them are marked monitored before the grab so
+ * Sonarr imports the whole pack rather than just the requested season. Seasons
+ * without a usable pack fall back to Sonarr's own `SeasonSearch`, which still
+ * picks individual episodes. A whole-series `SeriesSearch` is the last resort.
  */
 async function smartPickSeasons(
   client: ReturnType<typeof createArrClient>,
@@ -389,31 +393,67 @@ async function smartPickSeasons(
   seasonNumbers: number[],
   resolved: ResolvedOptions,
 ): Promise<RequestDownload[]> {
-  if (seasonNumbers.length === 0) {
+  const uniqueSeasons = [...new Set(seasonNumbers)].sort((left, right) => left - right);
+  if (uniqueSeasons.length === 0) {
     return [];
   }
 
+  // Search every season first, then grab sequentially so two seasons cannot
+  // pick the same multi-season pack and download it twice.
+  const searched = await mapWithConcurrency(uniqueSeasons, 3, async (seasonNumber) => {
+    try {
+      return {
+        seasonNumber,
+        releases: await client.getSeasonReleases(seriesId, seasonNumber),
+      };
+    } catch {
+      return { seasonNumber, releases: undefined };
+    }
+  });
+
   const downloads: RequestDownload[] = [];
-  try {
-    await mapWithConcurrency(seasonNumbers, 3, async (seasonNumber) => {
-      let grabbed = false;
-      try {
-        const releases = await client.getSeasonReleases(seriesId, seasonNumber);
-        const packs = releases.filter(
-          (release) =>
-            isSeasonPack(release, seasonNumber) &&
-            releaseMatchesSeason(release, seasonNumber),
-        );
-        const pick = pickRelease(
-          packs.map((release) =>
-            showReleaseCandidate(release, mappedEpisodeIds(release).length),
-          ),
-          pickPolicy(resolved),
-        );
-        // A below-threshold pack is worse than letting Sonarr search episode by
-        // episode, which can find well-seeded single episodes instead.
-        if (pick && pick.reason !== "below_threshold") {
+  const claimedSeasons = new Set<number>();
+
+  for (const { seasonNumber, releases } of searched) {
+    if (claimedSeasons.has(seasonNumber)) {
+      continue;
+    }
+
+    let grabbed = false;
+    if (releases) {
+      const packs: Array<{ release: ServarrRelease; seasons: number[] }> = [];
+      for (const release of releases) {
+        if (!releaseMatchesSeason(release, seasonNumber)) {
+          continue;
+        }
+        const seasons = seasonPackSeasons(release, seasonNumber);
+        // Do not re-grab a season another pack in this request already covers.
+        if (!seasons || seasons.some((season) => claimedSeasons.has(season))) {
+          continue;
+        }
+        packs.push({ release, seasons });
+      }
+
+      const pick = pickRelease(
+        packs.map(({ release }) =>
+          showReleaseCandidate(release, mappedEpisodeIds(release).length),
+        ),
+        pickPolicy(resolved),
+      );
+      const chosen = pick
+        ? packs.find(({ release }) => release === pick.release)
+        : undefined;
+      // A below-threshold pack is worse than letting Sonarr search episode by
+      // episode, which can find well-seeded single episodes instead.
+      if (pick && chosen && pick.reason !== "below_threshold") {
+        try {
+          if (chosen.seasons.length > 1) {
+            await monitorSeriesSeasons(client, seriesId, chosen.seasons);
+          }
           await grabPickedRelease(client, pick, { seriesId });
+          for (const season of chosen.seasons) {
+            claimedSeasons.add(season);
+          }
           scheduleSwarmWatch({
             config,
             events,
@@ -422,43 +462,30 @@ async function smartPickSeasons(
             target: { seriesId },
             seasonNumber,
             release: pick.release,
-            candidates: packs,
+            candidates: packs.map(({ release }) => release),
             preferredTier: pickPolicy(resolved).preferredTier,
             minSeeders: resolved.minSeeders,
           });
           downloads.push(toRequestDownload(pick, seasonNumber));
           grabbed = true;
+        } catch {
+          grabbed = false;
         }
-      } catch {
-        grabbed = false;
       }
-      if (!grabbed) {
-        await runSearchCommand(client, {
-          name: "SeasonSearch",
-          seriesId,
-          seasonNumber,
-        });
-      }
-    });
-  } catch {
-    await runSearchCommand(client, { name: "SeriesSearch", seriesId });
+    }
+
+    if (!grabbed && !claimedSeasons.has(seasonNumber)) {
+      await runSearchCommand(client, {
+        name: "SeasonSearch",
+        seriesId,
+        seasonNumber,
+      });
+    }
   }
 
   return downloads.sort(
     (left, right) => (left.seasonNumber ?? 0) - (right.seasonNumber ?? 0),
   );
-}
-
-/** A single-season pack, not an episode or a multi-season bundle. */
-function isSeasonPack(release: ServarrRelease, seasonNumber: number): boolean {
-  if (release.fullSeason !== true) {
-    return false;
-  }
-  const seasons = release.seasonNumbers;
-  if (seasons && seasons.length > 0) {
-    return seasons.length === 1 && seasons[0] === seasonNumber;
-  }
-  return release.seasonNumber === undefined || release.seasonNumber === seasonNumber;
 }
 
 async function grabPickedRelease(

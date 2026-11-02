@@ -7,7 +7,7 @@ import {
   type ReleaseCandidate,
 } from "./release-pick.js";
 import type { ShowRelease } from "./types.js";
-import type { ServarrRelease } from "./upstream/servarr.js";
+import type { ServarrRelease, ServarrSeriesResource } from "./upstream/servarr.js";
 
 /** Stable, opaque id for a Sonarr release. */
 export function releaseId(release: Pick<ServarrRelease, "indexerId" | "guid">): string | null {
@@ -225,16 +225,17 @@ function releaseEpisodeNumbers(release: ServarrRelease): number[] {
   return Array.from({ length: end - start + 1 }, (_, index) => start + index);
 }
 
-function releaseSeasonNumbers(release: ServarrRelease): number[] {
+export function releaseSeasonNumbers(release: ServarrRelease): number[] {
   const explicit = (release.seasonNumbers ?? []).filter(
     (season): season is number => Number.isInteger(season) && season >= 0,
   );
-  if (explicit.length > 0) {
+  if (explicit.length > 1) {
     return [...new Set(explicit)].sort((left, right) => left - right);
   }
 
-  // Sonarr's parser exposes a single `seasonNumber` even for releases such as
-  // "Show.S01-03". Recover the intended range from the title for display.
+  // Sonarr's parser exposes a single `seasonNumber` (and sometimes a single
+  // `seasonNumbers` entry) even for releases such as "Show.S01-03". Recover the
+  // intended range from the title.
   const range = release.title?.match(/\bS(\d{1,2})\s*[-\u2013]\s*S?(\d{1,2})\b/i);
   if (range) {
     const start = Number.parseInt(range[1] ?? "", 10);
@@ -244,11 +245,70 @@ function releaseSeasonNumbers(release: ServarrRelease): number[] {
     }
   }
 
+  if (explicit.length === 1) {
+    return explicit;
+  }
+
   if (Number.isInteger(release.seasonNumber) && (release.seasonNumber ?? -1) >= 0) {
     return [release.seasonNumber as number];
   }
 
   return [];
+}
+
+/**
+ * Seasons a full-season release covers. Sonarr exposes `S01-03` as a single
+ * `seasonNumber` without `seasonNumbers`, so recover the range from the title.
+ * Returns undefined for episode releases and packs for a different season.
+ */
+export function seasonPackSeasons(
+  release: ServarrRelease,
+  seasonNumber: number,
+): number[] | undefined {
+  if (release.fullSeason !== true) {
+    return undefined;
+  }
+  const seasons = releaseSeasonNumbers(release);
+  if (seasons.length === 0) {
+    return release.seasonNumber === undefined || release.seasonNumber === seasonNumber
+      ? [seasonNumber]
+      : undefined;
+  }
+  return seasons.includes(seasonNumber) ? seasons : undefined;
+}
+
+export interface SeasonMonitoringClient {
+  getSeries(id: number): Promise<ServarrSeriesResource>;
+  updateSeries(id: number, payload: Record<string, unknown>): Promise<ServarrSeriesResource>;
+}
+
+/** Monitor every season a multi-season pack covers before grabbing it. */
+export async function monitorSeriesSeasons(
+  client: SeasonMonitoringClient,
+  seriesId: number,
+  seasonNumbers: number[],
+): Promise<void> {
+  const desired = new Set(
+    seasonNumbers.filter((season) => Number.isInteger(season) && season >= 0),
+  );
+  if (desired.size === 0) {
+    return;
+  }
+
+  const series = await client.getSeries(seriesId);
+  const seasons = series.seasons ?? [];
+  let changed = false;
+  const updated = seasons.map((season) => {
+    if (!desired.has(season.seasonNumber) || season.monitored) {
+      return season;
+    }
+    changed = true;
+    return { ...season, monitored: true };
+  });
+  if (!changed) {
+    return;
+  }
+  await client.updateSeries(seriesId, { ...series, seasons: updated });
 }
 
 function releaseEpisodeLabel(

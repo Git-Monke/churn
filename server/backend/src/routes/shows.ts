@@ -9,10 +9,12 @@ import {
   buildReleaseGrabPayload,
   findRelease,
   mappedEpisodeIds,
+  monitorSeriesSeasons,
   releaseId,
   releaseMatchesEpisode,
   releaseMatchesSeason,
   releaseNeedsOverride,
+  seasonPackSeasons,
   toShowReleases,
 } from "../releases.js";
 import { mediaCoverUrl } from "../search.js";
@@ -380,6 +382,18 @@ async function grabShowRelease(
       "release_unmapped",
       "Sonarr cannot map this release to any episodes, so it cannot be grabbed",
     );
+  }
+
+  const packSeasons = seasonPackSeasons(release, input.seasonNumber);
+  if (packSeasons && packSeasons.length > 1) {
+    try {
+      await monitorSeriesSeasons(client, seriesId, packSeasons);
+    } catch (error) {
+      throw releaseApiError(
+        error,
+        "Sonarr could not monitor every season in that pack",
+      );
+    }
   }
 
   const payload = buildReleaseGrabPayload(

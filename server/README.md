@@ -225,12 +225,13 @@ to 4K) when that tier has no torrents above **Minimum seeders** (default 5). A
 tier climb the quality profile would reject is grabbed with an explicit
 override; releases rejected for anything other than quality are never
 auto-overridden. Usenet releases always count as healthy. Movie requests grab
-the pick directly; show requests grab well-seeded single-season packs and let
-Sonarr's `SeasonSearch` handle seasons without one. If the search or grab
-fails, churn falls back to the arr's own `MoviesSearch`, `SeasonSearch` or
-`SeriesSearch` command. The show release list marks the same pick as
-**Recommended** with the reason. Turn the switch off to keep the arr's original
-search-on-add behaviour.
+the pick directly; show requests grab well-seeded season packs and let Sonarr's
+`SeasonSearch` handle seasons without one. When a pack covers several seasons,
+churn monitors all of them before grabbing so Sonarr imports the whole pack. If
+the search or grab fails, churn falls back to the arr's own `MoviesSearch`,
+`SeasonSearch` or `SeriesSearch` command. The show release list marks the same
+pick as **Recommended** with the reason. Turn the switch off to keep the arr's
+original search-on-add behaviour.
 
 Indexer seeder counts can be tracker inflation, so churn also checks the real
 swarm. About a minute after a smart grab it reads qBittorrent's connected seeds
@@ -307,7 +308,8 @@ multi-season packs that cover the selected season, which catches packs Sonarr
 files under their first season (for example `S01-05`). The list shows size,
 quality, indexer, seeders, season coverage and rejection reasons; the smallest
 mapped multi-season pack is marked recommended when no release is automatically
-eligible.
+eligible. Grabbing a multi-season pack monitors every season it covers first, so
+Sonarr imports the whole pack rather than only the selected season.
 
 Missing individual episodes also get their own **Choose release** action. That
 uses Sonarr's episode-id search instead of its season search, so single-episode

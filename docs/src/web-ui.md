@@ -183,8 +183,10 @@ tier, for example a 720p profile accepting a well-seeded 1080p release. That
 override is applied explicitly, and releases rejected for language or mapping
 reasons are never overridden just for seeders. Usenet releases always count as
 healthy. Movie requests grab the pick directly; show requests grab well-seeded
-single-season packs and fall back to Sonarr's per-season search. If picking
-fails, the arr's own search command runs instead, so requests keep working.
+season packs and fall back to Sonarr's per-season search. A multi-season pack
+such as `S01-03` monitors every season it covers before the grab, so Sonarr
+imports the whole pack instead of only the requested season. If picking fails,
+the arr's own search command runs instead, so requests keep working.
 Turn the switch off for the previous search-on-add behaviour.
 
 Because tracker seeder counts are often inflated, a smart grab is watched for
@@ -259,9 +261,11 @@ and keeps multi-season packs that cover the selected season, which catches
 packs such as `S01-05` that Sonarr indexes under Season 1. When no release is
 automatic, the smallest mapped multi-season pack is recommended. Choosing a
 release sends it to Sonarr with an override, so a pack like `S01-03` can be used
-for season 1 when its size is acceptable. Upstream GUIDs and magnet URLs stay
-on the backend. Sonarr and Radarr sync only normal TV/movie indexer categories,
-so adult XXX releases are excluded from this picker by default.
+for season 1 when its size is acceptable; before the grab, every season the
+pack covers is marked monitored so Sonarr imports all of it. Upstream GUIDs and
+magnet URLs stay on the backend. Sonarr and Radarr sync only normal TV/movie
+indexer categories, so adult XXX releases are excluded from this picker by
+default.
 
 Missing episodes have their own **Choose release** action. It searches by
 Sonarr episode id rather than by season, so individual episode releases show up

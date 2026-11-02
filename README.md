@@ -156,8 +156,10 @@ command (`MoviesSearch`, `SeasonSearch` or `SeriesSearch`), so requests still
 work when an indexer is slow or offline.
 
 Movie requests auto-grab the picked release. Show requests prefer well-seeded
-single-season packs for every monitored season and fall back to Sonarr's
-per-season search for seasons without one. The show release list also marks the
+season packs for every monitored season and fall back to Sonarr's per-season
+search for seasons without one. A multi-season pack such as `S01-03` monitors
+every season it covers before the grab, so Sonarr imports the whole pack instead
+of only the requested season. The show release list also marks the
 seeders-aware pick as **Recommended**, including the reason (preferred tier,
 tier upgrade, or no release clearing the threshold), so you can override it
 before or after the automatic pick.

@@ -348,6 +348,18 @@ export function createArrClient(service: ArrServiceId, config: ServiceConfig, ti
       );
     },
 
+    /** Update an existing series, including its per-season monitoring flags. */
+    async updateSeries(
+      id: number,
+      payload: Record<string, unknown>,
+    ): Promise<ServarrSeriesResource> {
+      return fetchJson<ServarrSeriesResource>(
+        service,
+        `${config.url}/api/v3/series/${id}`,
+        { timeoutMs, headers: authHeaders(), method: "PUT", body: payload },
+      );
+    },
+
     async addMovie(payload: Record<string, unknown>): Promise<ServarrMovieResource> {
       return postJson<ServarrMovieResource>(
         service,

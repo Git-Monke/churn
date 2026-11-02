@@ -5,6 +5,7 @@ import {
   releaseId,
   releaseMatchesEpisode,
   releaseMatchesSeason,
+  releaseSeasonNumbers,
   toShowReleases,
 } from "../src/releases.js";
 import type { ServarrRelease } from "../src/upstream/servarr.js";
@@ -91,6 +92,17 @@ describe("show releases", () => {
       "Example.Show.S01-05",
     ]);
     expect(result[0]?.recommended).toBe(true);
+  });
+
+  it("recovers a multi-season range when Sonarr reports one season", () => {
+    expect(
+      releaseSeasonNumbers(
+        release({ title: "Show.S01-03", seasonNumber: 1, seasonNumbers: [1] }),
+      ),
+    ).toEqual([1, 2, 3]);
+    expect(
+      releaseSeasonNumbers(release({ title: "Show.S04-S06", seasonNumber: 4 })),
+    ).toEqual([4, 5, 6]);
   });
 
   it("keeps only releases that can satisfy the requested season", () => {
