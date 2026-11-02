@@ -32,6 +32,7 @@ describe("config loading", () => {
     expect(config.sessionTtlMs).toBe(12 * 60 * 60 * 1000);
     expect(config.cookieSecure).toBe("auto");
     expect(config.services.jellyfin.url).toBe("http://127.0.0.1:8096");
+    expect(config.jellyfinPublicUrl).toBe("http://127.0.0.1:8096");
     expect(config.services.jellyfin.apiKey).toBeUndefined();
     expect(config.services.sonarr.url).toBe("http://127.0.0.1:8989");
     expect(config.services.sonarr.apiKey).toBe("sonarr-key");
@@ -48,6 +49,7 @@ describe("config loading", () => {
         HOST: "0.0.0.0",
         PORT: "5000",
         JELLYFIN_URL: "http://jellyfin:8096/",
+        JELLYFIN_PUBLIC_URL: "https://media.example.test/jellyfin/",
         JELLYFIN_API_KEY: "jellyfin-key",
         SONARR_URL: "http://sonarr:8989",
         SONARR_API_KEY: "env-key",
@@ -60,6 +62,7 @@ describe("config loading", () => {
     expect(config.host).toBe("0.0.0.0");
     expect(config.port).toBe(5000);
     expect(config.services.jellyfin.url).toBe("http://jellyfin:8096");
+    expect(config.jellyfinPublicUrl).toBe("https://media.example.test/jellyfin");
     expect(config.services.jellyfin.apiKey).toBe("jellyfin-key");
     expect(config.services.sonarr.url).toBe("http://sonarr:8989");
     expect(config.services.sonarr.apiKey).toBe("env-key");

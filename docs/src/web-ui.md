@@ -41,7 +41,8 @@ survive a rerun.
 | --- | --- | --- |
 | `HOST` | `127.0.0.1` | Backend bind address |
 | `PORT` | `4000` | Backend port |
-| `JELLYFIN_URL` | `http://127.0.0.1:8096` | Jellyfin base URL |
+| `JELLYFIN_URL` | `http://127.0.0.1:8096` | Jellyfin base URL used by the backend |
+| `JELLYFIN_PUBLIC_URL` | `JELLYFIN_URL` | Browser-facing Jellyfin URL for video playback |
 | `JELLYFIN_API_KEY` | — | Written by churn after Jellyfin setup |
 | `JELLYFIN_ADMIN_USER` | `admin` | Optional non-interactive setup username |
 | `JELLYFIN_ADMIN_PASSWORD` | — | Optional non-interactive setup password |
@@ -87,8 +88,8 @@ permissions to limit library visibility.
 
 Failed logins are throttled to 10 attempts per 15 minutes per IP and username.
 Auth responses are `no-store`, and cross-origin mutating requests are rejected.
-Future playback work will use this per-user session identity rather than a
-static token in `.env`.
+Playback uses the signed-in user's Jellyfin session token rather than a static
+token in `.env`, so resume positions and watched state are per user.
 
 ## API
 
@@ -105,6 +106,12 @@ static token in `.env`.
 | `GET /api/library/shows/:source/:id` | Show seasons, episodes and download overlays |
 | `GET /api/library/shows/:source/:id/releases?season=N` | Sonarr season release search, including rejected and multi-season packs |
 | `POST /api/library/shows/:source/:id/releases/grab` | Grab a selected release with an override when Sonarr can map it |
+| `GET /api/playback/items/:itemId` | Playable item metadata, resume position and same-origin stream URL |
+| `GET /api/playback/items/:itemId/stream` | Redirect the media element to Jellyfin's direct stream URL for this session |
+| `GET /api/playback/items/:itemId/hls.m3u8` | Redirect to a Jellyfin HLS transcode (H.264/AAC) when the source is not browser-compatible |
+| `POST /api/playback/items/:itemId/start` | Report playback start to Jellyfin |
+| `POST /api/playback/items/:itemId/progress` | Report position and paused state to Jellyfin |
+| `POST /api/playback/items/:itemId/stop` | Report playback stop to Jellyfin |
 | `GET /api/activity` | Active Sonarr/Radarr queue grouped by movie/show |
 | `GET /api/search?q=<term>` | Sonarr/Radarr lookup with library-state markers |
 | `GET /api/search/images/:service` | Proxied artwork (allowlisted CDN `remoteUrl`) |
@@ -190,9 +197,30 @@ Sonarr episode id rather than by season, so individual episode releases show up
 even when no season pack exists.
 
 After requesting a series, churn opens the picker immediately for the first
-monitored season, so release options appear without visiting the show page.
+monitored season so release options appear without visiting the show page.
 Sonarr's automatic search continues in the background, and the overlay stays
 open with a retry action if no releases are returned.
+
+## Playback
+
+Movies in Library and episodes in show detail open `#/play/<itemId>`. The player
+uses Jellyfin's per-user `UserData` to resume where you stopped, then sends
+playback start/progress/stop reports so Jellyfin apps see the same position and
+watched state.
+
+Playback is codec-aware. Browser-compatible sources use a same-origin
+`/api/playback/items/:itemId/stream` URL; the backend validates the session and
+redirects to Jellyfin's `static=true` stream with the user's token. Sources the
+browser cannot decode (for example HEVC/AC3 in an MKV) use
+`/api/playback/items/:itemId/hls.m3u8`, which redirects to a Jellyfin HLS
+transcode with H.264 video and AAC stereo audio at the source resolution. The
+frontend plays HLS with `hls.js` and falls back to native HLS when available.
+
+The token stays out of the page DOM and API responses but is visible to browser
+devtools in redirect targets and Jellyfin HLS playlist/segment URLs; video bytes
+still come directly from Jellyfin. Set `JELLYFIN_PUBLIC_URL` when the browser
+reaches Jellyfin at a different address than the backend. Playback failures show
+the media error alert with an **Open Jellyfin** fallback.
 
 ## Roadmap
 
@@ -201,7 +229,7 @@ open with a retry action if no releases are returned.
 3. Active downloads in Library — done
 4. Jellyfin login and per-user sessions — done
 5. Download history and queue actions — next
-6. Jellyfin playback/session controls
+6. Jellyfin playback/session controls — done
 
 ## Container note
 

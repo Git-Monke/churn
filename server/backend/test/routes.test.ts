@@ -12,6 +12,7 @@ function makeConfig(overrides: Partial<AppConfig["services"]> = {}): AppConfig {
     requestTimeoutMs: 500,
     sessionTtlMs: 12 * 60 * 60 * 1000,
     cookieSecure: "auto",
+    jellyfinPublicUrl: "http://jellyfin.test:8096",
     services: {
       jellyfin: {
         id: "jellyfin",
@@ -1749,6 +1750,273 @@ describe("show releases", () => {
     });
     expect(stale.statusCode).toBe(404);
     expect(stale.json().error.code).toBe("release_not_found");
+    await app.close();
+  });
+});
+
+describe("playback", () => {
+  const playbackItem = {
+    Id: "item-1",
+    Name: "Example Movie",
+    Type: "Movie",
+    ProductionYear: 2020,
+    RunTimeTicks: 7_200_000_000,
+    Overview: "A film.",
+    ImageTags: { Primary: "tag-1" },
+    UserData: { PlaybackPositionTicks: 120_000_000, Played: false },
+  };
+
+  const playbackInfo = {
+    PlaySessionId: "session-1",
+    MediaSources: [{ Id: "source-1", SupportsDirectPlay: true }],
+  };
+
+  function installPlaybackFetch(): ReturnType<typeof vi.fn> {
+    return installFetch((url) => {
+      if (url.includes("/PlaybackInfo?")) {
+        return jsonResponse(playbackInfo);
+      }
+      if (/\/Items\/item-1\?/.test(url)) {
+        return jsonResponse(playbackItem);
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+  }
+
+  it("returns playable metadata with a same-origin stream URL", async () => {
+    installPlaybackFetch();
+    const app = await buildAuthedServer(makeConfig());
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/playback/items/item-1",
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["cache-control"]).toBe("no-store");
+    const body = response.json();
+    expect(body.state).toBe("ok");
+    expect(body.item).toMatchObject({
+      id: "item-1",
+      type: "Movie",
+      name: "Example Movie",
+      year: 2020,
+      runtimeTicks: 7_200_000_000,
+      positionTicks: 120_000_000,
+      played: false,
+      imageUrl: "/api/library/images/item-1?tag=tag-1",
+      streamUrl:
+        "/api/playback/items/item-1/stream?mediaSourceId=source-1&playSessionId=session-1",
+      mediaSourceId: "source-1",
+      playSessionId: "session-1",
+      directPlay: true,
+      playbackMethod: "direct",
+    });
+    expect(JSON.stringify(body)).not.toContain("test-user-token");
+    await app.close();
+  });
+
+  it("redirects the media element to Jellyfin without exposing the token in the API body", async () => {
+    installFetch(() => {
+      throw new Error("the stream route should not call upstream with both ids");
+    });
+    const app = await buildAuthedServer(makeConfig());
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/playback/items/item-1/stream?mediaSourceId=source-1&playSessionId=session-1",
+    });
+
+    expect(response.statusCode).toBe(302);
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(response.headers["referrer-policy"]).toBe("no-referrer");
+    const location = String(response.headers.location);
+    expect(location).toContain(
+      "http://jellyfin.test:8096/Videos/item-1/stream?",
+    );
+    expect(location).toContain("static=true");
+    expect(location).toContain("mediaSourceId=source-1");
+    expect(location).toContain("playSessionId=session-1");
+    expect(location).toContain("api_key=test-user-token");
+    await app.close();
+  });
+
+  it("uses HLS for sources the browser cannot decode directly", async () => {
+    installFetch((url) => {
+      if (url.includes("/PlaybackInfo?")) {
+        return jsonResponse({
+          PlaySessionId: "session-1",
+          MediaSources: [
+            {
+              Id: "source-1",
+              Container: "mkv",
+              Bitrate: 8_785_944,
+              SupportsDirectPlay: true,
+              MediaStreams: [
+                { Type: "Video", Codec: "hevc", Height: 822 },
+                { Type: "Audio", Codec: "ac3", Channels: 6 },
+              ],
+            },
+          ],
+        });
+      }
+      if (/\/Items\/item-1\?/.test(url)) {
+        return jsonResponse(playbackItem);
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildAuthedServer(makeConfig());
+    const metadata = await app.inject({
+      method: "GET",
+      url: "/api/playback/items/item-1",
+    });
+    expect(metadata.json().item).toMatchObject({
+      playbackMethod: "hls",
+      directPlay: false,
+      streamUrl:
+        "/api/playback/items/item-1/hls.m3u8?mediaSourceId=source-1&playSessionId=session-1",
+    });
+
+    const manifest = await app.inject({
+      method: "GET",
+      url: "/api/playback/items/item-1/hls.m3u8?mediaSourceId=source-1&playSessionId=session-1",
+    });
+    expect(manifest.statusCode).toBe(302);
+    const location = String(manifest.headers.location);
+    expect(location).toContain("http://jellyfin.test:8096/Videos/item-1/master.m3u8?");
+    expect(location).toContain("VideoCodec=h264");
+    expect(location).toContain("AudioCodec=aac");
+    expect(location).toContain("MaxHeight=822");
+    expect(location).toContain("MediaSourceId=source-1");
+    expect(location).toContain("PlaySessionId=session-1");
+    expect(location).toContain("api_key=test-user-token");
+    await app.close();
+  });
+
+  it("fills missing stream ids from PlaybackInfo", async () => {
+    installPlaybackFetch();
+    const app = await buildAuthedServer(makeConfig());
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/playback/items/item-1/stream",
+    });
+
+    expect(response.statusCode).toBe(302);
+    const location = String(response.headers.location);
+    expect(location).toContain("mediaSourceId=source-1");
+    expect(location).toContain("playSessionId=session-1");
+    await app.close();
+  });
+
+  it("posts start, progress and stop reports with the session token", async () => {
+    const posted: Array<{ url: string; body: unknown }> = [];
+    installFetch((url, init) => {
+      if (url.includes("/Sessions/Playing")) {
+        expect(init?.headers).toMatchObject({
+          "X-Emby-Token": "test-user-token",
+          "X-Emby-Device-Id": "churn-web",
+        });
+        posted.push({ url, body: JSON.parse(String(init?.body)) });
+        return new Response(null, { status: 204 });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+    const app = await buildAuthedServer(makeConfig());
+    const payload = {
+      positionTicks: 500,
+      mediaSourceId: "source-1",
+      playSessionId: "session-1",
+      isPaused: false,
+    };
+
+    for (const kind of ["start", "progress", "stop"]) {
+      const response = await app.inject({
+        method: "POST",
+        url: `/api/playback/items/item-1/${kind}`,
+        payload,
+      });
+      expect(response.statusCode).toBe(204);
+    }
+
+    expect(posted.map((entry) => entry.url)).toEqual([
+      "http://jellyfin.test:8096/Sessions/Playing",
+      "http://jellyfin.test:8096/Sessions/Playing/Progress",
+      "http://jellyfin.test:8096/Sessions/Playing/Stopped",
+    ]);
+    expect(posted[0]?.body).toMatchObject({
+      ItemId: "item-1",
+      MediaSourceId: "source-1",
+      PlaySessionId: "session-1",
+      PositionTicks: 500,
+      PlayMethod: "DirectPlay",
+      CanSeek: true,
+    });
+    expect(posted[2]?.body).toMatchObject({ Failed: false, PositionTicks: 500 });
+    await app.close();
+  });
+
+  it("expires the session when Jellyfin rejects playback reporting", async () => {
+    installFetch((url) => {
+      if (url.includes("/Sessions/Playing")) {
+        return jsonResponse({ error: "unauthorized" }, 401);
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+    const app = await buildAuthedServer(makeConfig());
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/playback/items/item-1/start",
+      payload: { positionTicks: 0 },
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json().error.code).toBe("session_expired");
+
+    const after = await app.inject({ method: "GET", url: "/api/library" });
+    expect(after.statusCode).toBe(401);
+    expect(after.json().error.code).toBe("unauthenticated");
+    await app.close();
+  });
+
+  it("maps Jellyfin failures and rejects invalid input", async () => {
+    installFetch((url) => {
+      if (url.includes("/PlaybackInfo?")) {
+        throw new Error("connection refused");
+      }
+      if (/\/Items\/item-1\?/.test(url)) {
+        return jsonResponse(playbackItem);
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+    const app = await buildAuthedServer(makeConfig());
+
+    const unreachable = await app.inject({
+      method: "GET",
+      url: "/api/playback/items/item-1",
+    });
+    expect(unreachable.statusCode).toBe(200);
+    expect(unreachable.json()).toMatchObject({ state: "unreachable" });
+
+    const invalidId = await app.inject({
+      method: "GET",
+      url: "/api/playback/items/bad%20id",
+    });
+    expect(invalidId.statusCode).toBe(400);
+    expect(invalidId.json().error.code).toBe("invalid_item_id");
+
+    const invalidTicks = await app.inject({
+      method: "POST",
+      url: "/api/playback/items/item-1/progress",
+      payload: { positionTicks: -1 },
+    });
+    expect(invalidTicks.statusCode).toBe(400);
+    expect(invalidTicks.json().error.code).toBe("invalid_playback_report");
+
+    const invalidSession = await app.inject({
+      method: "GET",
+      url: "/api/playback/items/item-1/stream?playSessionId=bad%20id",
+    });
+    expect(invalidSession.statusCode).toBe(400);
+    expect(invalidSession.json().error.code).toBe("invalid_query");
     await app.close();
   });
 });

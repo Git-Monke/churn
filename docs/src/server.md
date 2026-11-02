@@ -79,12 +79,12 @@ needed; the password is not stored. Sonarr and Radarr API keys are read from
 
 The dashboard requires a Jellyfin login. Churn stores the returned user token in
 an in-memory session and sends only an HttpOnly session cookie to the browser;
-restarting the backend signs everyone out. Library calls use the user's token,
-while the installer's API key stays server-side for status checks. All
-logged-in Jellyfin users get the full dashboard, including Sonarr/Radarr
+restarting the backend signs everyone out. Library calls and playback use the
+user's token, while the installer's API key stays server-side for status checks.
+All logged-in Jellyfin users get the full dashboard, including Sonarr/Radarr
 requests.
 
 The planned order is: library/status dashboard, search and media requests
 (done), active downloads in Library (done), Jellyfin login and per-user sessions
-(done), download history and queue actions, then Jellyfin playback controls. See
+(done), Jellyfin playback (done), then download history and queue actions. See
 [Web dashboard](web-ui.md) for the current API and configuration.

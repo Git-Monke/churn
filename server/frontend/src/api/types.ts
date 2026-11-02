@@ -216,6 +216,8 @@ export interface ShowEpisode {
   runtimeMinutes?: number;
   imageUrl?: string;
   monitored?: boolean;
+  /** Jellyfin episode id, used to open the in-app player. */
+  jellyfinId?: string;
   availability: ShowAvailability;
   download?: ShowDownload;
 }
@@ -349,4 +351,41 @@ export interface CreateRequestResponse {
   title: string;
   year?: number;
   id?: number;
+}
+
+export type PlaybackState = "ok" | "unauthorized" | "unreachable";
+
+export interface PlaybackItem {
+  id: string;
+  type: "Movie" | "Episode";
+  name: string;
+  seriesName?: string;
+  seriesId?: string;
+  seasonNumber?: number;
+  episodeNumber?: number;
+  year?: number;
+  overview?: string;
+  runtimeTicks?: number;
+  positionTicks?: number;
+  played?: boolean;
+  imageUrl?: string;
+  /** Same-origin redirect endpoint; never contains the Jellyfin token. */
+  streamUrl: string;
+  playSessionId?: string;
+  mediaSourceId?: string;
+  directPlay: boolean;
+  playbackMethod: "direct" | "hls";
+}
+
+export interface PlaybackItemResponse {
+  state: PlaybackState;
+  detail?: string;
+  item?: PlaybackItem;
+}
+
+export interface PlaybackReport {
+  positionTicks?: number;
+  playSessionId?: string;
+  mediaSourceId?: string;
+  isPaused?: boolean;
 }

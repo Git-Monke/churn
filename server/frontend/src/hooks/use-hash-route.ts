@@ -6,6 +6,7 @@ export type AppRoute =
   | { page: "services" }
   | { page: "library" }
   | { page: "show"; source: ShowSource; id: string }
+  | { page: "play"; id: string }
   | { page: "search" };
 
 export function useHashRoute(): AppRoute {
@@ -35,6 +36,9 @@ export function parseHash(hash: string): AppRoute {
   }
   if (parts.length === 1 && parts[0] === "search") {
     return { page: "search" };
+  }
+  if (parts.length === 2 && parts[0] === "play" && parts[1]) {
+    return { page: "play", id: decodeURIComponent(parts[1]) };
   }
   if (
     parts.length === 4 &&

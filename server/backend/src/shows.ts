@@ -202,6 +202,7 @@ function mapEpisode(
   assignIfDefined(episode, "runtimeMinutes", runtimeMinutes(jellyfin?.RunTimeTicks));
   assignIfDefined(episode, "imageUrl", jellyfinImageUrl(jellyfin) ?? fallbackImage);
   assignIfDefined(episode, "monitored", sonarr?.monitored);
+  assignIfDefined(episode, "jellyfinId", jellyfin?.Id);
 
   if (download) {
     episode.download = mapDownload(download);

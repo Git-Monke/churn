@@ -22,6 +22,7 @@ export interface AppConfig {
   requestTimeoutMs: number;
   sessionTtlMs: number;
   cookieSecure: CookieSecureSetting;
+  jellyfinPublicUrl: string;
   services: Record<ServiceId, ServiceConfig>;
 }
 
@@ -98,6 +99,10 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
     requestTimeoutMs: parseTimeout(values.REQUEST_TIMEOUT_MS),
     sessionTtlMs: parseSessionTtl(values.CHURN_SESSION_TTL_MS),
     cookieSecure: parseCookieSecure(values.CHURN_COOKIE_SECURE),
+    jellyfinPublicUrl: normalizeUrl(
+      values.JELLYFIN_PUBLIC_URL,
+      services.jellyfin.url,
+    ),
     services,
   };
 }

@@ -57,7 +57,8 @@ preserves unknown keys, so hand-added settings survive a rerun.
 | --- | --- | --- |
 | `HOST` | `127.0.0.1` | Backend bind address |
 | `PORT` | `4000` | Backend port |
-| `JELLYFIN_URL` | `http://127.0.0.1:8096` | Jellyfin base URL |
+| `JELLYFIN_URL` | `http://127.0.0.1:8096` | Jellyfin base URL used by the backend |
+| `JELLYFIN_PUBLIC_URL` | `JELLYFIN_URL` | Jellyfin URL the browser uses for video streams (different in Docker/LAN) |
 | `JELLYFIN_API_KEY` | — | Written by churn after Jellyfin setup |
 | `JELLYFIN_ADMIN_USER` | `admin` | Optional non-interactive setup username |
 | `JELLYFIN_ADMIN_PASSWORD` | — | Optional non-interactive setup password; not persisted |
@@ -122,8 +123,9 @@ permissions if you want to limit library visibility.
 
 Auth responses are `no-store`. Failed logins are throttled to 10 attempts per
 15 minutes per IP and username. Cross-origin state-changing requests are
-rejected in addition to `SameSite=Lax`. Playback, when it lands, will use this
-per-user session identity instead of a static token in `.env`.
+rejected in addition to `SameSite=Lax`. Playback uses the signed-in user's
+session token, so resume positions and watched state are per Jellyfin user; no
+static playback token is stored in `.env`.
 
 ## API
 
@@ -140,6 +142,12 @@ per-user session identity instead of a static token in `.env`.
 | `GET /api/library/shows/:source/:id` | Jellyfin/Sonarr show detail with seasons, episodes and download overlays |
 | `GET /api/library/shows/:source/:id/releases?season=N` | Sonarr season release search, including rejected and multi-season packs |
 | `POST /api/library/shows/:source/:id/releases/grab` | Grab a selected release, overriding automatic restrictions when Sonarr can map it |
+| `GET /api/playback/items/:itemId` | Playable item metadata, resume position, media source and same-origin stream URL |
+| `GET /api/playback/items/:itemId/stream` | Redirect the media element to Jellyfin's direct stream URL for this session |
+| `GET /api/playback/items/:itemId/hls.m3u8` | Redirect to a Jellyfin HLS transcode (H.264/AAC) when the source is not browser-compatible |
+| `POST /api/playback/items/:itemId/start` | Report playback start to Jellyfin |
+| `POST /api/playback/items/:itemId/progress` | Report playback position and paused state to Jellyfin |
+| `POST /api/playback/items/:itemId/stop` | Report playback stop so Jellyfin keeps the resume position / watched state |
 | `GET /api/activity` | Active Sonarr/Radarr queue grouped by movie/show |
 | `GET /api/search?q=<term>` | Sonarr/Radarr lookup with library-state markers |
 | `GET /api/search/images/:service` | Proxied arr media cover |
@@ -225,6 +233,35 @@ ids Sonarr mapped. Upstream GUIDs, magnet URLs and indexer ids stay on the
 backend. A show that exists only in Sonarr still opens a Sonarr-backed detail
 page.
 
+## Playback
+
+Movies in Library and episodes in show detail open `#/play/<itemId>`, an HTML5
+`<video>` page backed by Jellyfin. Playback is per Jellyfin user: the item's
+resume position comes from Jellyfin `UserData`, and start/progress/stop reports
+keep Jellyfin's Continue Watching and watched state in sync.
+
+Video bytes are not proxied through Churn. Playback is codec-aware:
+
+- Browser-compatible sources use a same-origin
+  `/api/playback/items/:itemId/stream` URL. The backend validates the session
+  and returns a `302` to Jellyfin's `static=true` stream with the user's access
+  token as `api_key`. Seeking works because Jellyfin serves byte ranges.
+- Other sources (for example HEVC video with AC3 audio in an MKV) use a
+  same-origin `/api/playback/items/:itemId/hls.m3u8` URL. The backend returns a
+  `302` to Jellyfin's HLS manifest with explicit H.264/AAC transcode parameters
+  based on the source resolution and bitrate. The frontend plays it with
+  `hls.js`, with native HLS as a fallback.
+
+The token never appears in the page DOM or API responses, but it is visible in
+browser devtools, redirect targets and Jellyfin HLS playlist/segment URLs. That
+is the accepted tradeoff for stream redirection; a backend proxy would be needed
+if Churn is exposed beyond the LAN.
+
+Set `JELLYFIN_PUBLIC_URL` when the browser reaches Jellyfin at a different
+address than the backend (for example a LAN IP instead of a Docker service
+name). Playback failures show the media error alert with an **Open Jellyfin**
+fallback.
+
 ## Development
 
 ```bash
@@ -244,7 +281,7 @@ required.
 3. **Active downloads in Library** — done
 4. **Jellyfin login and per-user sessions** — done
 5. Download history and queue actions — next
-6. Jellyfin playback/session controls
+6. Jellyfin playback/session controls — done
 
 ## Container later
 

@@ -85,12 +85,14 @@ describe("buildShowDetail", () => {
     expect(detail.episodes[0]).toMatchObject({
       title: "Jellyfin 1x1",
       availability: "jellyfin",
+      jellyfinId: "j1",
       imageUrl: "/api/library/images/j1?tag=tag",
     });
     expect(detail.episodes[1]).toMatchObject({
       availability: "missing",
       download: { status: "downloading", progress: 50 },
     });
+    expect(detail.episodes[1]?.jellyfinId).toBeUndefined();
     expect(detail.episodes[2]).toMatchObject({
       availability: "upcoming",
       download: { status: "queued", progress: 0, seasonPack: true },

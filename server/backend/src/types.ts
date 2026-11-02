@@ -290,6 +290,8 @@ export interface ShowEpisode {
   runtimeMinutes?: number;
   imageUrl?: string;
   monitored?: boolean;
+  /** Jellyfin episode id, used to open the in-app player. */
+  jellyfinId?: string;
   availability: ShowAvailability;
   download?: ShowDownload;
 }

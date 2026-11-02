@@ -8,6 +8,8 @@ import type {
   GrabShowReleaseInput,
   GrabShowReleaseResponse,
   LibraryResponse,
+  PlaybackItemResponse,
+  PlaybackReport,
   RequestedLibraryResponse,
   RequestOptionsResponse,
   SearchResponse,
@@ -103,6 +105,42 @@ export function fetchShow(
   id: string,
 ): Promise<ShowDetailResponse> {
   return getJson<ShowDetailResponse>(`/api/library/shows/${source}/${encodeURIComponent(id)}`);
+}
+
+export function fetchPlayback(itemId: string): Promise<PlaybackItemResponse> {
+  return getJson<PlaybackItemResponse>(
+    `/api/playback/items/${encodeURIComponent(itemId)}`,
+  );
+}
+
+export function reportPlaybackStart(
+  itemId: string,
+  body: PlaybackReport,
+): Promise<null> {
+  return postJson<null>(
+    `/api/playback/items/${encodeURIComponent(itemId)}/start`,
+    body,
+  );
+}
+
+export function reportPlaybackProgress(
+  itemId: string,
+  body: PlaybackReport,
+): Promise<null> {
+  return postJson<null>(
+    `/api/playback/items/${encodeURIComponent(itemId)}/progress`,
+    body,
+  );
+}
+
+export function reportPlaybackStop(
+  itemId: string,
+  body: PlaybackReport,
+): Promise<null> {
+  return postJson<null>(
+    `/api/playback/items/${encodeURIComponent(itemId)}/stop`,
+    body,
+  );
 }
 
 export function fetchShowReleases(

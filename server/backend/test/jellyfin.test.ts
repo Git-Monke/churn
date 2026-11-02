@@ -97,6 +97,7 @@ describe("Jellyfin authentication client", () => {
       }
       expect(url).toContain("/Users/user-1/Items?");
       expect(url).toContain("ParentId=view-1");
+      expect(url).not.toContain("Recursive=true");
       return new Response(JSON.stringify({ Items: [] }), {
         status: 200,
         headers: { "content-type": "application/json" },
@@ -106,5 +107,85 @@ describe("Jellyfin authentication client", () => {
 
     await createJellyfinClient(config, 500, "user-token").listLibrary("user-1");
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("adds the user id to item and PlaybackInfo requests", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      expect(init?.headers).toMatchObject({ "X-Emby-Token": "user-token" });
+      const url = String(input);
+      if (url.includes("/PlaybackInfo?")) {
+        expect(url).toContain("/Items/item-1/PlaybackInfo?userId=user-1");
+        return new Response(
+          JSON.stringify({
+            PlaySessionId: "session-1",
+            MediaSources: [{ Id: "source-1", SupportsDirectPlay: true }],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      expect(url).toContain("userId=user-1");
+      return new Response(
+        JSON.stringify({
+          Id: "item-1",
+          Name: "Movie",
+          Type: "Movie",
+          UserData: { PlaybackPositionTicks: 12, Played: false },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createJellyfinClient(config, 500, "user-token");
+    const [item, info] = await Promise.all([
+      client.getItem("item-1", "user-1"),
+      client.getPlaybackInfo("item-1", "user-1"),
+    ]);
+    expect(item.UserData?.PlaybackPositionTicks).toBe(12);
+    expect(info.MediaSources?.[0]?.Id).toBe("source-1");
+  });
+
+  it("posts playback reports with the device headers and accepts 204", async () => {
+    const calls: Array<{ url: string; body: unknown }> = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      expect(init?.method).toBe("POST");
+      expect(init?.headers).toMatchObject({
+        "X-Emby-Token": "user-token",
+        "X-Emby-Device-Id": "churn-web",
+        "content-type": "application/json",
+      });
+      calls.push({ url: String(input), body: JSON.parse(String(init?.body)) });
+      return new Response(null, { status: 204 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createJellyfinClient(config, 500, "user-token");
+    const body = {
+      ItemId: "item-1",
+      MediaSourceId: "source-1",
+      PlaySessionId: "session-1",
+      PositionTicks: 100,
+      CanSeek: true,
+      IsPaused: false,
+      IsMuted: false,
+      PlayMethod: "DirectPlay" as const,
+    };
+    await client.reportPlaybackStart(body);
+    await client.reportPlaybackProgress({ ...body, PositionTicks: 200 });
+    await client.reportPlaybackStopped({
+      ItemId: "item-1",
+      MediaSourceId: "source-1",
+      PlaySessionId: "session-1",
+      PositionTicks: 300,
+      Failed: false,
+    });
+
+    expect(calls.map((call) => call.url)).toEqual([
+      "http://jellyfin.test:8096/Sessions/Playing",
+      "http://jellyfin.test:8096/Sessions/Playing/Progress",
+      "http://jellyfin.test:8096/Sessions/Playing/Stopped",
+    ]);
+    expect(calls[1]?.body).toMatchObject({ PositionTicks: 200 });
+    expect(calls[2]?.body).toMatchObject({ Failed: false });
   });
 });

@@ -2,146 +2,140 @@
 
 ## Context
 
+The account system is done: every request runs as a signed-in Jellyfin user,
+and the backend holds that user's `AccessToken` in the in-memory session
+(`request.auth.accessToken`, `request.auth.user.id`). This plan resumes the
+playback work that was paused for auth, but replaces the old installer-provisioned
+`JELLYFIN_USER_TOKEN` design with the signed-in session identity.
+
 The dashboard covers library browsing, search/requests, active downloads and
 show detail, but every playback action still means opening Jellyfin in another
-tab. Roadmap step 4 (download history/queue actions) remains open; this plan
-takes the playback half of step 5 so movies and episodes can be watched from
-Churn, with resume points and watched state written back to Jellyfin.
+tab. This adds an in-app player, Jellyfin resume positions and playback reporting
+so watched state syncs back to Jellyfin.
 
 Decisions made with the user:
 
 - **In-app player**: an HTML5 `<video>` page inside the dashboard.
-- **Direct Jellyfin streaming**: the browser receives a Jellyfin stream URL and
-  pulls bytes straight from Jellyfin. The backend does not proxy video bytes.
+- **Same-origin redirect streaming**: `<video>` points at
+  `/api/playback/items/:itemId/stream`. The backend validates the session and
+  returns a `302` to the Jellyfin stream URL containing the user's token. Video
+  bytes come straight from Jellyfin; the token stays out of the DOM/`src` (but
+  is still visible in devtools, which is accepted). No backend video proxy.
 - **Report to Jellyfin**: send playback start/progress/stop so resume works in
-  Jellyfin apps too, and expose a Continue Watching row.
-- **Entry points**: movie cards in Library, episode rows in show detail, and
-  Continue Watching.
+  Jellyfin apps too.
+- **Entry points**: movie cards in Library and episode rows in show detail.
+- **No Continue Watching row this round** (not selected by the user). The old
+  plan's `/api/playback/resume` route and row are dropped.
+- **No watched/unwatched toggle** this round.
+- **`JELLYFIN_PUBLIC_URL`**: the browser-facing Jellyfin address, defaulting to
+  `JELLYFIN_URL`. This keeps Docker/service-DNS backend URLs working.
+
+### Why the session token is the right credential
+
+Jellyfin API keys have no user identity. `POST /Sessions/Playing*` resolves the
+user from the access token, and `/UserItems/Resume` is per user. The session
+already stores the token returned by `/Users/AuthenticateByName`, so playback
+gets per-user resume and reporting for free. No new `.env` token, no installer
+change, and existing installs do not need to re-run `churn`.
 
 ### Security tradeoff (accepted)
 
-The direct stream URL must contain a Jellyfin token because `<video>` cannot add
-request headers. That token is visible in the browser's DOM and network tab.
-Use the **user access token**, not the admin API key, and keep the existing API
-key server-side for library/status calls. The app still binds to `127.0.0.1` by
-default. If it is ever exposed beyond the LAN, replace direct streaming with a
-same-origin redirect or a backend/HLS proxy.
-
-### Why a user token is required
-
-Jellyfin API keys are server-level credentials with no user identity.
-`POST /Sessions/Playing*` resolves the user from the access token, so progress
-reported with an API key is not attributed to a user. Churn already
-authenticates as the admin during install; this plan persists that
-`AccessToken` as a user token so playback state syncs to the admin's
-Continue Watching.
-
-Existing installs must re-run `churn` once to mint the token; rerunning prompts
-for the Jellyfin admin password only when the token is missing. The password is
-still not persisted.
+The redirect target contains the user's Jellyfin access token as `api_key`
+because a redirect cannot add request headers. The token is that user's own
+session, not the admin API key. It appears in devtools/network and the browser's
+redirect cache, but not in the page DOM. Jellyfin still enforces the user's
+library access. If Churn is exposed beyond the LAN, a backend proxy would be the
+stricter option.
 
 ## Approach
 
-### 1. Installer: persist a Jellyfin user token
-
-`src/jellyfin.rs`:
-
-- Add `pub const USER_TOKEN_ENV: &str = "JELLYFIN_USER_TOKEN";`.
-- Extend the authentication result parsing to keep the existing `AccessToken`.
-- Return the token from `provision` and write it with
-  `envfile::upsert(env_path, USER_TOKEN_ENV, &token)` next to
-  `JELLYFIN_API_KEY`.
-- Add `validate_user_token(&self, token)` using `GET /Users/Me` with
-  `X-Emby-Token`, mirroring `validate_api_key`.
-- Align the installer `AUTH_HEADER` `DeviceId` with the backend's playback
-  device id (`churn-web`) so the persisted token and the player use one stable
-  Jellyfin device identity. The token is a normal user session token, not an
-  API key.
-
-`src/main.rs` `setup_jellyfin`:
-
-- Read both `JELLYFIN_API_KEY` and `JELLYFIN_USER_TOKEN` from process env /
-  `server/.env`.
-- Only return early when the key is valid **and** the user token is valid.
-- Otherwise collect credentials and run `provision`, which reuses a valid API
-  key but always persists a fresh user token.
-- Keep the current dry-run output and success logging.
-
-### 2. Backend config
+### 1. Backend config
 
 `server/backend/src/config.ts`:
 
-- Add `userToken?: string` to `ServiceConfig` (only Jellyfin uses it), read from
-  `JELLYFIN_USER_TOKEN`.
 - Add `jellyfinPublicUrl: string` to `AppConfig`, read from
-  `JELLYFIN_PUBLIC_URL` and defaulting to `services.jellyfin.url`. This lets the
-  backend reach Jellyfin over one address while the browser uses another
-  (Docker/LAN). Keep `JELLYFIN_URL` as the backend address.
-- Update `server/backend/test/routes.test.ts` `makeConfig` and
-  `server/backend/test/config.test.ts`.
+  `JELLYFIN_PUBLIC_URL` and defaulting to `services.jellyfin.url`.
+- Validate/normalize it with the existing `normalizeUrl` helper (http/https,
+  trailing slashes stripped). Keep `JELLYFIN_URL` as the backend address.
+- Update `server/backend/test/config.test.ts` (default and override) and the
+  `makeConfig` helper in `server/backend/test/routes.test.ts`.
 
-### 3. Jellyfin client extensions
+No `JELLYFIN_USER_TOKEN` and no `src/`/`tests/` Rust changes.
+
+### 2. Jellyfin client extensions
 
 `server/backend/src/upstream/jellyfin.ts`:
 
-- Extend `JellyfinItem` with `UserData?: { PlaybackPositionTicks?, Played?,
-  PlayCount?, LastPlayedDate? }`, `SeriesName?`, `SeriesId?`, and `Type:
-  "Episode"` handling.
-- Allow an explicit auth token:
-  `createJellyfinClient(config, timeoutMs, token = config.apiKey)`. Existing
-  callers keep using the API key; playback uses the user token when present.
-- Add:
-  - `getCurrentUser()` → `GET /Users/Me` (user token).
-  - `listUsers()` → `GET /Users` (fallback admin selection).
-  - `getItem(itemId, userId?)` → append `userId` to `GET /Items/:id`.
-  - `getPlaybackInfo(itemId, userId)` → `GET /Items/:id/PlaybackInfo?userId=`.
-  - `getResumeItems(userId, limit)` → `GET /UserItems/Resume` with
-    `Limit`, `IncludeItemTypes=Movie,Episode`,
-    `Fields=ProductionYear,RunTimeTicks,ProviderIds,Overview`,
-    `ImageTypeLimit=1`, `EnableImageTypes=Primary`.
-  - `reportPlaybackStart/Progress/Stopped(userToken, body)` posting to
-    `/Sessions/Playing`, `/Sessions/Playing/Progress`,
-    `/Sessions/Playing/Stopped` with token, client/device headers
-    (`X-Emby-Client: Churn`, `X-Emby-Device-Name: Churn Web`,
-    `X-Emby-Device-Id: churn-web`, `X-Emby-Client-Version`).
-- Add `PlaybackInfoResponse`, `JellyfinMediaSource`, and `JellyfinUser` types.
-- Reuse `fetchJson` / `postJson` from `server/backend/src/http.ts`.
+- Extend `JellyfinItem` with
+  `UserData?: { PlaybackPositionTicks?, Played?, PlayCount?, LastPlayedDate? }`,
+  `SeriesName?`, and `SeriesId?`.
+- Add `PlaybackInfoResponse`, `JellyfinMediaSource` and `JellyfinMediaStream`
+  types (`Id`, `SupportsDirectPlay`, `SupportsDirectStream`,
+  `SupportsTranscoding`, `Container`, `Name`).
+- Extend `getItem(itemId, userId?)` to append `userId` so Jellyfin returns
+  `UserData`.
+- Add `getPlaybackInfo(itemId, userId)` →
+  `GET /Items/:id/PlaybackInfo?userId=`.
+- Add `reportPlaybackStart/Progress/Stopped(body)` posting to
+  `/Sessions/Playing`, `/Sessions/Playing/Progress`, `/Sessions/Playing/Stopped`
+  with the client's token and the existing `X-Emby-*` device headers.
+- Use `fetchWithTimeout` + `upstreamResponseError` for reporting, **not**
+  `postJson`: Jellyfin returns `204 No Content`, and `fetchJson` rejects empty
+  bodies as invalid JSON.
+- Existing callers keep using `createJellyfinClient(service, timeout, token)`;
+  playback passes `request.auth.accessToken`.
 
-### 4. Backend playback module and routes
+### 3. Playback helpers
 
 New `server/backend/src/playback.ts`:
 
-- `resolvePlaybackUser(config)`:
-  - token = `jellyfin.userToken ?? jellyfin.apiKey`;
-  - with a user token, `GET /Users/Me`;
-  - otherwise `GET /Users` and pick an administrator, then the first user;
-  - cache `{ userId, tokenKind, expiresAt }` in memory for ~10 minutes, keyed by
-    Jellyfin URL + token. No database.
-- `buildDirectStreamUrl(publicUrl, itemId, mediaSource, playSessionId, token)`:
-  `/Videos/{itemId}/stream?static=true&mediaSourceId=...&playSessionId=...&api_key=...`.
-- `mapResumeItem(item)` and `playbackProgress` helpers.
+- `playbackStreamPath(itemId, mediaSourceId, playSessionId)` → same-origin
+  `/api/playback/items/:itemId/stream?...` used as the `<video>` source.
+- `buildJellyfinStreamUrl(publicUrl, itemId, mediaSourceId, playSessionId, token)`
+  → `${publicUrl}/Videos/{itemId}/stream?static=true&mediaSourceId=...&playSessionId=...&api_key=...`.
+  Concatenate onto `publicUrl` rather than using `new URL("/...")` so a
+  sub-path public URL (e.g. `https://host/jellyfin`) survives.
+- `pickMediaSource(playbackInfo)` → first source plus `PlaySessionId`, with
+  `SupportsDirectPlay`/`SupportsDirectStream`.
+- `mapPlaybackItem(item, source, playSessionId, streamUrl)` → the API item shape
+  (id, type, name, series/season/episode, year, overview, runtimeTicks,
+  positionTicks, played, imageUrl, directPlay).
+- `parsePlaybackReport(body)` → validates/normalizes
+  `{ positionTicks?, playSessionId?, mediaSourceId?, isPaused? }`; ticks must be
+  a non-negative safe integer, session/source ids match
+  `/^[A-Za-z0-9._~-]{1,128}$/`.
+- `playbackReportBodies(itemId, input)` → PascalCase Jellyfin payloads for start
+  / progress / stop (`ItemId`, `MediaSourceId`, `PlaySessionId`,
+  `PositionTicks`, `CanSeek`, `IsPaused`, `IsMuted`, `PlayMethod: "DirectPlay"`,
+  plus `Failed: false` on stop).
 
-New `server/backend/src/routes/playback.ts`, registered in `server.ts`:
+Unit-test these in a new `server/backend/test/playback.test.ts`.
+
+### 4. Playback routes
+
+New `server/backend/src/routes/playback.ts`, registered in
+`server/backend/src/server.ts` alongside the other route modules:
 
 ```ts
 GET  /api/playback/items/:itemId
+GET  /api/playback/items/:itemId/stream
 POST /api/playback/items/:itemId/start
 POST /api/playback/items/:itemId/progress
 POST /api/playback/items/:itemId/stop
-GET  /api/playback/resume
 ```
 
 `GET /api/playback/items/:itemId` returns:
 
 ```ts
 interface PlaybackItemResponse {
-  state: "ok" | "unconfigured" | "unauthorized" | "unreachable";
+  state: "ok" | "unauthorized" | "unreachable";
   detail?: string;
-  item: {
+  item?: {
     id: string;
     type: "Movie" | "Episode";
     name: string;
     seriesName?: string;
+    seriesId?: string;
     seasonNumber?: number;
     episodeNumber?: number;
     year?: number;
@@ -150,125 +144,143 @@ interface PlaybackItemResponse {
     positionTicks?: number;
     played?: boolean;
     imageUrl?: string;
-    streamUrl: string;
+    streamUrl: string;      // same-origin redirect endpoint
     playSessionId?: string;
     mediaSourceId?: string;
-    directPlay: boolean;   // mediaSource.SupportsDirectPlay
-    syncEnabled: boolean;  // user token available
+    directPlay: boolean;    // mediaSource.SupportsDirectPlay
   };
 }
 ```
 
 Flow:
 
-1. Require the Jellyfin API key; otherwise `unconfigured`.
-2. Resolve the user (user token or admin fallback).
-3. Fetch the item (with `userId`) and `PlaybackInfo` in parallel.
-4. Pick the first media source, its `Id`, `SupportsDirectPlay`, and the
-   response `PlaySessionId`.
-5. Build the direct URL with the playback token; `directPlay: false` is a
-   warning, not an error.
-6. Map image with the existing `/api/library/images/:itemId?tag=` pattern.
+1. `requireAuth(request)` — the global auth hook already enforces the cookie.
+2. Validate the item id with the existing `/^[A-Za-z0-9-]{1,64}$/` pattern.
+3. `getItem(itemId, auth.user.id)` and `getPlaybackInfo(itemId, auth.user.id)`
+   in parallel with the session token.
+4. `pickMediaSource`; build `streamUrl` via `playbackStreamPath` including the
+   chosen `mediaSourceId`/`playSessionId` so reports use the same values.
+5. Map the image with the existing `/api/library/images/:itemId?tag=` shape.
+6. Errors: 401/403 → `unauthorized`; transport/invalid JSON → `unreachable`;
+   missing item → 404; invalid id → 400. `cache-control: no-store`.
 
-Errors: 401/403 → `unauthorized` with a re-run-churn hint, transport failures
-→ `unreachable`, missing item → 404, invalid item id → 400. Cache-control
-`no-store`.
+`GET /api/playback/items/:itemId/stream`:
 
-`GET /api/playback/resume` returns `{ state, detail?, items, total }` where each
-item mirrors the resume card fields (`itemId`, `type`, name, series/season/
-episode, year, runtime, `positionTicks`, percent, image URL). It uses
-`/UserItems/Resume` with the resolved user id; a missing user token still works
-via API key for reading.
+1. `requireAuth`, validate id and optional `mediaSourceId`/`playSessionId`
+   query strings.
+2. If both query values are absent, call `getPlaybackInfo` to choose a source.
+   If present, use them directly; they came from Churn's own metadata response.
+3. Build the Jellyfin URL with `JELLYFIN_PUBLIC_URL` and the session token.
+4. Return `reply.header("cache-control", "no-store")`
+   `.header("referrer-policy", "no-referrer")` and a `302` redirect.
+5. On 401/403, call `expireSession(request)` and return 401. On other upstream
+   failures return 502. Do not log the redirect URL.
 
-The three POST routes validate `{ positionTicks?, playSessionId?, mediaSourceId?,
-isPaused? }`, map to Jellyfin `PlaybackStartInfo` / `PlaybackProgressInfo` /
-`PlaybackStopInfo`, and return 204. If no user token is configured they skip
-the upstream call and still return 204; the player already knows sync is off
-from `syncEnabled`.
+The browser follows the redirect for the initial request and then sends Range
+requests directly to Jellyfin. Seeking works because Jellyfin serves byte
+ranges for `static=true`.
+
+The three POST routes:
+
+1. `requireAuth`, validate id, `parsePlaybackReport(request.body)`.
+2. Build payloads with `playbackReportBodies`.
+3. Call the client report method with `auth.accessToken`.
+4. On 401/403 `expireSession` + 401 `session_expired` (same pattern as
+   library/shows). Otherwise return 204.
+5. If Jellyfin is briefly unreachable, return 502; the player keeps playing and
+   the next progress tick retries.
+
+Because every route is authenticated, `syncEnabled` is no longer needed: a
+missing user token cannot happen. `directPlay: false` remains a warning, not an
+error; the player offers Jellyfin as a fallback.
 
 ### 5. Show episodes: expose Jellyfin episode ids
 
 `server/backend/src/shows.ts` and `server/backend/src/types.ts`:
 
-- Add `jellyfinId?: string` to `ShowEpisode` and map `candidate.jellyfin?.Id`.
+- Add `jellyfinId?: string` to `ShowEpisode`.
+- `assignIfDefined(episode, "jellyfinId", jellyfin?.Id)` in `mapEpisode`.
 - Mirror the field in `server/frontend/src/api/types.ts`.
-- Update `server/backend/test/shows.test.ts` expectations where useful.
+- Extend `server/backend/test/shows.test.ts` to assert the id is mapped.
 
-### 6. Frontend API and player
+### 6. Frontend API, route and player
 
 `server/frontend/src/api/{client,types}.ts`:
 
-- Add `PlaybackItemResponse`, `PlaybackResumeResponse`, `PlaybackReport` types.
-- `fetchPlayback(itemId)`, `fetchResume()`,
-  `reportPlaybackStart/Progress/Stop(itemId, body)`.
+- Add `PlaybackItemResponse`, `PlaybackItem`, `PlaybackReport` types.
+- `fetchPlayback(itemId)`, `reportPlaybackStart/Progress/Stop(itemId, body)`.
+  The report calls can use `requestJson<null>`; 204 bodies parse to `null`.
 
 Route: extend `server/frontend/src/hooks/use-hash-route.ts` with
-`{ page: "play"; id: string }` for `#/play/<itemId>`. `AppHeader` highlights
-Library for play routes; `App.tsx` renders `<PlayPage key={id} id={id} />`.
+`{ page: "play"; id: string }` for `#/play/<itemId>`. `AppHeader` treats
+`play` like `show` (Library highlighted); `App.tsx` renders
+`<PlayPage key={id} id={id} />`.
 
 New `server/frontend/src/pages/PlayPage.tsx`:
 
-- Query `["playback", id]` (`no-store`, no interval).
+- Query `["playback", id]` with no polling.
+- Loading skeleton; non-`ok` state or missing item renders an `Alert` with a
+  re-run/login hint and an **Open Jellyfin** action using the existing
+  `/api/services/jellyfin/open` redirect.
+- Header: title, `S01E02`/series name/type badge/year/runtime, back link to
+  Library (and to the show detail page when `seriesId` is present).
 - `<video controls playsInline preload="metadata" poster={imageUrl}
-  src={streamUrl}>`.
+  src={streamUrl}>` in a `Card`.
 - On `loadedmetadata`, seek to `positionTicks / 10_000_000` when it is > 0 and
-  not near the end; show a short “Resumed” note.
-- Back link to Library and title/meta header reusing `Card`, `Badge`, `Alert`,
-  `Skeleton`, `Empty`.
-- On `play`, report start once; every ~10 s while playing and on pause, report
-  progress; on `ended` or unmount, report stop. Use `navigator.sendBeacon` for
-  page unload and `fetch(..., { keepalive: true })` for route cleanup.
+  more than ~30 s from the end; show a short “Resumed” note.
+- Reporting with refs so React StrictMode cannot double-start:
+  - `onPlay`: report start once.
+  - Every ~10 s while playing and on pause: report progress (`isPaused`).
+  - `onEnded`: report stop at the duration.
+  - Unmount/`pagehide`: send stop with `navigator.sendBeacon` (same-origin, so
+    the cookie is included) or `fetch(..., { keepalive: true })`.
+  - Ignore reporting failures in the player; keep the video playing.
 - Show a warning when `directPlay` is false (“this file may need transcoding;
-  open Jellyfin if it does not play”) and when `syncEnabled` is false (“rerun
-  churn to sync progress”).
-- On `<video>` error, show an alert with an “Open Jellyfin” action using the
-  existing `/api/services/jellyfin/open` redirect.
-- After a stop, invalidate `["playback-resume"]` and `["library"]`.
+  open Jellyfin if it does not play”).
+- On `<video>` error, show an alert with the same Open Jellyfin action.
+- After a successful stop, invalidate `["playback", id]` so reopening the page
+  picks up the new resume position.
 
-New `server/frontend/src/features/playback/ContinueWatchingRow.tsx`:
+### 7. Entry points
 
-- Query `["playback-resume"]` every 30 s on the Library page.
-- Horizontal row of poster cards with a progress bar, “Resume S01E02 · 12:34” or
-  movie title, linking to `#/play/<itemId>`.
-- Hide the row when the list is empty; show a compact alert if Jellyfin is
-  unavailable.
+`server/frontend/src/features/library/LibraryGrid.tsx`:
 
-Library and show entry points:
+- Movie cards backed by `entry.library` (Jellyfin movie) link to
+  `#/play/<library.id>` and show a small play affordance. Series cards keep
+  opening show detail. Requested-only/activity-only movies are not playable.
 
-- `LibraryGrid`/`LibraryPage`: make available movie cards link to
-  `#/play/<library.id>` and show a small play affordance/chevron. Shows keep
-  opening show detail.
-- `ShowPage` `EpisodeRow`: add a Play/Resume button for episodes with
-  `jellyfinId` and `availability === "jellyfin"`, linking to
-  `#/play/<jellyfinId>`.
-- `LibraryPage` renders `ContinueWatchingRow` above the type tabs.
+`server/frontend/src/pages/ShowPage.tsx`:
 
-### 7. Documentation
+- `EpisodeRow` receives `playHref` for episodes with `jellyfinId` and
+  `availability === "jellyfin"`.
+- Render a **Play** button (with `PlayIcon`) next to the existing
+  **Choose release** action; keep both right-aligned when present.
 
-- `server/README.md`: add `JELLYFIN_USER_TOKEN` and `JELLYFIN_PUBLIC_URL` to the
-  env table, list the playback routes, document the direct-stream/token
-  tradeoff, and move playback to done in the roadmap.
-- Root `README.md` and `docs/src/web-ui.md`: note in-app playback, direct
-  streaming and the one-time churn rerun for existing installs.
-- `docs/src/server.md`: update the roadmap sentence if needed.
+### 8. Documentation
+
+- `server/README.md`: add `JELLYFIN_PUBLIC_URL` to the env table, add the five
+  playback routes, explain same-origin redirect streaming and the token
+  tradeoff, and move playback to done in the roadmap. Remove the “playback, when
+  it lands” sentence and replace it with the session-token behavior.
+- Root `README.md`: note in-app playback and direct streaming; roadmap item 6
+  becomes done/current.
+- `docs/src/web-ui.md`: document the player, resume/reporting, movie/episode
+  entry points and `JELLYFIN_PUBLIC_URL`; update the future-playback sentence.
+- `docs/src/server.md`: update the roadmap wording if needed.
 
 ## Files to modify
 
-Installer
-
-- `src/jellyfin.rs` — user-token provisioning/validation.
-- `src/main.rs` — reuse/refresh token logic.
-- `tests/jellyfin.rs` — token written and reused.
-
 Backend
 
-- `server/backend/src/config.ts` — `JELLYFIN_USER_TOKEN`, `JELLYFIN_PUBLIC_URL`.
-- `server/backend/src/upstream/jellyfin.ts` — user/resume/PlaybackInfo/reporting.
-- `server/backend/src/playback.ts` (new) — user resolution, URL building, mapping.
+- `server/backend/src/config.ts` — `JELLYFIN_PUBLIC_URL`.
+- `server/backend/src/upstream/jellyfin.ts` — item `UserData`, PlaybackInfo,
+  no-content playback reporting.
+- `server/backend/src/playback.ts` (new) — URL/payload/mapping helpers.
 - `server/backend/src/routes/playback.ts` (new).
 - `server/backend/src/server.ts` — register playback routes.
 - `server/backend/src/types.ts` and `server/backend/src/shows.ts` — `jellyfinId`.
-- `server/backend/test/{routes,config,shows}.test.ts`, new `playback.test.ts`.
+- `server/backend/test/{config,routes,jellyfin,shows}.test.ts`; new
+  `playback.test.ts`.
 
 Frontend
 
@@ -277,11 +289,8 @@ Frontend
 - `server/frontend/src/App.tsx`
 - `server/frontend/src/components/AppHeader.tsx`
 - `server/frontend/src/pages/PlayPage.tsx` (new)
-- `server/frontend/src/pages/LibraryPage.tsx`
-- `server/frontend/src/features/library/LibraryGrid.tsx`
-- `server/frontend/src/features/playback/ContinueWatchingRow.tsx` (new)
 - `server/frontend/src/pages/ShowPage.tsx`
-- `server/frontend/src/api/types.ts` (episode `jellyfinId`)
+- `server/frontend/src/features/library/LibraryGrid.tsx`
 
 Docs
 
@@ -289,33 +298,43 @@ Docs
 
 ## Reuse
 
-- Jellyfin auth/error patterns: `server/backend/src/upstream/jellyfin.ts`,
-  `server/backend/src/errors.ts`, `server/backend/src/upstream/states.ts`.
-- HTTP helpers: `fetchJson`, `postJson` in `server/backend/src/http.ts`.
-- Image proxy URL shape: `mapJellyfinItem` and
+- Session/auth plumbing: `server/backend/src/auth.ts` (`requireAuth`,
+  `expireSession`), the global hook in `server/backend/src/server.ts`.
+- Jellyfin client and token override:
+  `server/backend/src/upstream/jellyfin.ts`, device headers already defined.
+- HTTP/errors: `fetchWithTimeout`, `upstreamResponseError` in
+  `server/backend/src/http.ts`; `UpstreamError`, `ApiError`,
+  `isUnauthorized` in `server/backend/src/errors.ts`; `stateForError` /
+  `errorMessage` in `server/backend/src/upstream/states.ts`.
+- Image proxy URL shape and id validation: `mapJellyfinItem` and
   `server/backend/src/routes/library.ts`.
-- Route registration/error envelope: `server/backend/src/server.ts`.
-- Existing hash routing and header nav: `use-hash-route.ts`, `AppHeader.tsx`.
-- UI primitives: `Card`, `Badge`, `Alert`, `Button`, `Progress`, `Skeleton`,
-  `Empty`, `Tooltip` under `server/frontend/src/components/ui/`.
-- Existing show episode rendering: `server/frontend/src/pages/ShowPage.tsx`.
-- Existing image fallback/poster rendering: `LibraryGrid.tsx`.
+- Route registration and error envelope: `server/backend/src/server.ts`.
+- Jellyfin open fallback: `GET /api/services/:id/open` in
+  `server/backend/src/routes/services.ts`.
+- Hash routing/header nav: `use-hash-route.ts`, `AppHeader.tsx`.
+- UI primitives: `Card`, `Badge`, `Alert`, `Button`, `Skeleton`, `Empty`
+  under `server/frontend/src/components/ui/`.
+- Existing show episode rendering and movie card rendering: `ShowPage.tsx`,
+  `LibraryGrid.tsx`.
+- Test harness: `buildServer`, `makeConfig`, `installFetch`,
+  `buildAuthedServer` in `server/backend/test/routes.test.ts`.
 
 ## Steps
 
-- [ ] Installer persists and validates `JELLYFIN_USER_TOKEN`; update Rust tests.
-- [ ] Config reads `JELLYFIN_USER_TOKEN` and `JELLYFIN_PUBLIC_URL`; update tests.
-- [ ] Extend Jellyfin client with user, item-with-user, PlaybackInfo, resume and
-      playback-report methods.
-- [ ] Add `playback.ts` helpers (cached user resolution, direct URL builder,
-      progress mapping) with unit tests.
-- [ ] Add `/api/playback/*` routes and register them.
-- [ ] Add `jellyfinId` to show episodes and tests.
-- [ ] Add frontend API types/client for playback.
-- [ ] Add `#/play/:id` route and `PlayPage` with resume, reporting and fallback
-      states.
-- [ ] Add Continue Watching row and movie-card / episode-row play entry points.
-- [ ] Update README and docs.
+- [x] Add `JELLYFIN_PUBLIC_URL` to config and update config/route test helpers.
+- [x] Extend the Jellyfin client with `UserData`, `getItem(userId)`,
+      `getPlaybackInfo` and no-content playback reporting; add client tests.
+- [x] Add `playback.ts` helpers with unit tests.
+- [x] Add `/api/playback/*` routes (metadata, redirect stream, start/progress/
+      stop) and register them; add authenticated route tests.
+- [x] Add `jellyfinId` to show episodes and update show tests.
+- [x] Add frontend playback types/client functions.
+- [x] Add `#/play/:id` route, header active state and `PlayPage` with resume,
+      reporting, unload handling and fallback alerts.
+- [x] Add movie-card and episode-row play entry points.
+- [x] Update README/docs and roadmap.
+- [x] Add browser codec compatibility checks and the HLS transcode fallback
+      (see the post-implementation amendment below).
 
 ## Verification
 
@@ -326,27 +345,72 @@ cd /home/monke/Projects/churn && cargo test
 cd server && npm run typecheck && npm test && npm run build
 ```
 
-Backend tests must cover: stream URL contains the user token/media source/play
-session; resume mapping; progress posts correct Jellyfin payloads and headers;
-missing user token degrades to `syncEnabled: false`; Jellyfin 401/404/transport
-states; invalid ids/ticks rejected.
+Backend tests must cover:
+
+- `JELLYFIN_PUBLIC_URL` defaults to `JELLYFIN_URL` and overrides it.
+- metadata route returns a same-origin `streamUrl` (no token), the chosen
+  `mediaSourceId`/`playSessionId` and `positionTicks`/`played` from `UserData`;
+- stream route returns a `302` to `JELLYFIN_PUBLIC_URL` with `static=true`, the
+  media source, play session and URL-encoded user token, and `no-store`;
+- progress/start/stop post the correct PascalCase payloads and `X-Emby-*`
+  headers with the session token, and return 204 for Jellyfin's empty body;
+- Jellyfin 401/403 expires the session and returns `session_expired`;
+- Jellyfin transport failure maps to `unreachable` / 502;
+- invalid item ids, tick values and session/source ids are rejected;
+- episodes expose `jellyfinId`.
 
 Manual end-to-end (server stack running):
 
-1. Re-run `sudo ./target/release/churn` (or the release binary) and confirm
-   `JELLYFIN_USER_TOKEN` appears in `server/.env` without overwriting hand-added
-   keys; restart the backend.
-2. `cd server && npm run dev`; open Library and confirm Continue Watching appears
-   after watching part of a title.
-3. Play a movie: video loads directly from Jellyfin, seeks work (Range), and
-   playback resumes near the previous position on reload.
-4. While playing, Jellyfin Dashboard → Activity shows the Churn web session at
-   the current position; pausing updates it.
-5. Navigate back mid-play; stop progress is recorded and Continue Watching
-   reflects the position. Let a short item finish and confirm Jellyfin marks it
-   played.
-6. Play an episode from show detail; confirm the correct episode starts.
-7. Stop Jellyfin or use a wrong token: the player shows the setup/error alert and
-   the Open Jellyfin action works; the rest of Library still renders.
-8. Test a browser-unsupported codec: the video error alert appears instead of a
+1. `cd server && npm run dev`; sign in with a Jellyfin user.
+2. Open Library, click a movie card: the player page loads and the video plays
+   directly from Jellyfin.
+3. Confirm the network panel shows the same-origin stream URL redirecting to
+   Jellyfin; the page DOM/`<video src>` contains no Jellyfin token.
+4. Seek forward, navigate back, then reopen the movie: it resumes near the last
+   position. Jellyfin Dashboard → Activity shows the Churn web session at the
+   current position, and pausing updates it.
+5. Let a short item finish; Jellyfin marks it played.
+6. Open a Jellyfin show, click **Play** on an episode row: the correct episode
+   starts and resumes independently per user.
+7. Sign in as a second Jellyfin user with different library access; confirm
+   playback and resume positions are scoped to that user.
+8. Stop Jellyfin or revoke the user token: the player shows the setup/error
+   alert and the Open Jellyfin action works; other pages still render.
+9. Try a browser-unsupported codec: the video error alert appears instead of a
    silent blank frame.
+10. Set `JELLYFIN_PUBLIC_URL` to a LAN address different from `JELLYFIN_URL`
+    and confirm the redirect uses the public address.
+
+## Post-implementation amendment: browser-compatible playback
+
+The original plan treated Jellyfin's `SupportsDirectPlay` as sufficient for the
+browser. That is not true for sources such as HEVC video with AC3 audio in an
+MKV: Jellyfin can serve the original file, but the browser plays it silently or
+not at all.
+
+Implemented after the initial playback work:
+
+- `canBrowserDirectPlay` in `server/backend/src/playback.ts` only allows direct
+  play for browser-safe containers (MP4/M4V/MOV/WebM) and codecs (H.264/VP8/
+  VP9/AV1 video; AAC/MP3/Opus/Vorbis/FLAC/PCM audio). Missing stream metadata
+  still trusts Jellyfin's `SupportsDirectPlay` for older responses.
+- `PlaybackItem` now includes `playbackMethod: "direct" | "hls"`. `directPlay`
+  reflects browser compatibility, not just Jellyfin's source capability.
+- `buildJellyfinHlsUrl` builds a Jellyfin `master.m3u8` URL with explicit
+  H.264/AAC parameters, stereo downmix and source-derived `MaxHeight`/
+  `VideoBitrate` (bounded to 240–2160p and 1–20 Mbps). Without these parameters
+  Jellyfin falls back to a very low default transcode profile.
+- `GET /api/playback/items/:itemId/hls.m3u8` validates the session, resolves
+  the media source and redirects to that manifest. Direct playback still uses
+  `GET /api/playback/items/:itemId/stream` with `static=true`.
+- `PlayPage` dynamically imports `hls.js` for HLS items, uses native HLS when
+  available, resets fatal errors to the existing **Open Jellyfin** alert, and
+  leaves direct-play items on a normal `<video src>`.
+- The transcoding warning is now informational (“Transcoding for browser
+  playback”) instead of telling the user to leave Churn.
+- Tests cover HEVC/AC3 rejection, MP4/H.264/AAC acceptance, HLS URL parameters,
+  the HLS redirect route and metadata selecting `playbackMethod: "hls"`.
+
+Verified end-to-end against Jellyfin 10.11.11: a 1080p HEVC/AC3 MKV produced an
+HLS stream with H.264 video and stereo AAC audio, and the same-origin HLS route
+played through `ffprobe` with the user's session cookie.

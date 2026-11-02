@@ -137,11 +137,14 @@ and TV monitoring, and start a download search immediately.
 The Library page merges titles already in Jellyfin with active Sonarr/Radarr
 downloads. Movies show progress and ETA on their card. Shows open a season and
 episode view with per-episode availability and download progress, including
-season-pack handling. See `server/README.md` for configuration and container
-notes. Development is planned in this order: library/status dashboard, search
-and media requests (done), active downloads in Library (done), Jellyfin login
-and per-user sessions (done), download history and queue actions, then Jellyfin
-playback controls.
+season-pack handling. Movies and Jellyfin episodes also open an in-app player:
+video streams from Jellyfin, transcoding to HLS when the browser cannot decode
+the source, resume positions come from the signed-in user, and progress is
+reported back to Jellyfin. See `server/README.md` for
+configuration, `JELLYFIN_PUBLIC_URL` and container notes. Development is
+planned in this order: library/status dashboard, search and media requests
+(done), active downloads in Library (done), Jellyfin login and per-user sessions
+(done), Jellyfin playback (done), then download history and queue actions.
 
 ## Running a stack
 

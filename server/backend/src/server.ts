@@ -16,6 +16,7 @@ import { registerAuthRoutes } from "./routes/auth.js";
 import { registerActivityRoutes } from "./routes/activity.js";
 import { registerHealthRoutes } from "./routes/health.js";
 import { registerLibraryRoutes } from "./routes/library.js";
+import { registerPlaybackRoutes } from "./routes/playback.js";
 import { registerRequestRoutes } from "./routes/requests.js";
 import { registerRequestedLibraryRoutes } from "./routes/requested.js";
 import { registerSearchRoutes } from "./routes/search.js";
@@ -107,6 +108,7 @@ export async function buildServer(
   registerAuthRoutes(app, config, { store: sessionStore, throttle: loginThrottle });
   registerStatusRoutes(app, config);
   registerLibraryRoutes(app, config);
+  registerPlaybackRoutes(app, config);
   registerRequestedLibraryRoutes(app, config);
   registerSearchRoutes(app, config);
   registerRequestRoutes(app, config);

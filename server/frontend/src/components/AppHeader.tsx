@@ -21,7 +21,7 @@ const NAV_ITEMS = [
 
 export function AppHeader({ route, checkedAt, refreshing, onRefresh }: AppHeaderProps) {
   const { session, logout, isPending } = useAuth();
-  const activePage = route.page === "show" ? "library" : route.page;
+  const activePage = route.page === "show" || route.page === "play" ? "library" : route.page;
   const user = session?.user;
 
   return (

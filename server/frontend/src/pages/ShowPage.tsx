@@ -4,6 +4,7 @@ import {
   ChevronLeftIcon,
   CircleAlertIcon,
   DownloadIcon,
+  PlayIcon,
   FilmIcon,
   TriangleAlertIcon,
 } from "lucide-react";
@@ -205,6 +206,11 @@ export function ShowPage({ source, id }: { source: ShowSource; id: string }) {
                     <EpisodeRow
                       key={episode.key}
                       episode={episode}
+                      playHref={
+                        episode.jellyfinId && episode.availability === "jellyfin"
+                          ? `#/play/${encodeURIComponent(episode.jellyfinId)}`
+                          : undefined
+                      }
                       onChooseRelease={
                         showQuery.data?.source === "sonarr" &&
                         episode.download === undefined &&
@@ -286,9 +292,11 @@ function ShowHeader({ series, source }: { series: ShowSeriesSummary; source: Sho
 
 function EpisodeRow({
   episode,
+  playHref,
   onChooseRelease,
 }: {
   episode: ShowEpisode;
+  playHref?: string;
   onChooseRelease?: () => void;
 }) {
   const download = episode.download;
@@ -316,16 +324,23 @@ function EpisodeRow({
               <AvailabilityBadge availability={episode.availability} />
             ) : null}
             {download ? <DownloadBadge download={download} /> : null}
-            {onChooseRelease ? (
-              <Button
-                className="ml-auto"
-                variant="outline"
-                size="sm"
-                onClick={onChooseRelease}
-              >
-                <DownloadIcon data-icon="inline-start" />
-                Choose release
-              </Button>
+            {playHref || onChooseRelease ? (
+              <div className="ml-auto flex flex-wrap items-center gap-2">
+                {playHref ? (
+                  <Button asChild variant="secondary" size="sm">
+                    <a href={playHref}>
+                      <PlayIcon data-icon="inline-start" />
+                      Play
+                    </a>
+                  </Button>
+                ) : null}
+                {onChooseRelease ? (
+                  <Button variant="outline" size="sm" onClick={onChooseRelease}>
+                    <DownloadIcon data-icon="inline-start" />
+                    Choose release
+                  </Button>
+                ) : null}
+              </div>
             ) : null}
           </div>
 

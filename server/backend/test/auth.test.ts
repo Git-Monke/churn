@@ -32,6 +32,7 @@ function makeConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     requestTimeoutMs: 500,
     sessionTtlMs: 12 * 60 * 60 * 1000,
     cookieSecure: "auto",
+    jellyfinPublicUrl: "http://jellyfin.test:8096",
     services: {
       jellyfin: {
         id: "jellyfin",

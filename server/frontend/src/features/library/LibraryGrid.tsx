@@ -1,4 +1,4 @@
-import { ChevronRightIcon, FilmIcon, TvIcon } from "lucide-react";
+import { ChevronRightIcon, FilmIcon, PlayIcon, TvIcon } from "lucide-react";
 
 import type { ActivityItem, LibraryItem, RequestedLibraryItem } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
@@ -37,7 +37,7 @@ function LibraryCard({ entry }: { entry: LibraryEntry }) {
   const title = entryTitle(entry) || "Untitled";
   const year = library?.year ?? requested?.year ?? activity?.year;
   const imageUrl = library?.imageUrl ?? requested?.imageUrl ?? activity?.imageUrl;
-  const href = type === "Series" ? showHref(entry) : undefined;
+  const href = type === "Series" ? showHref(entry) : playHref(entry);
 
   const card = (
     <Card
@@ -62,6 +62,13 @@ function LibraryCard({ entry }: { entry: LibraryEntry }) {
             )}
           </div>
         )}
+        {href && type === "Movie" ? (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-transparent transition-colors group-hover:bg-black/30">
+            <span className="flex size-12 items-center justify-center rounded-full bg-background/90 text-foreground opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
+              <PlayIcon className="size-5" />
+            </span>
+          </div>
+        ) : null}
         <div className="absolute left-2 top-2 flex flex-wrap gap-1">
           {library || requested?.available ? (
             <Badge variant="outline" className="bg-background/85 backdrop-blur">
@@ -88,7 +95,11 @@ function LibraryCard({ entry }: { entry: LibraryEntry }) {
             </h3>
           </div>
           {href ? (
-            <ChevronRightIcon className="mt-1 size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground" />
+            type === "Movie" ? (
+              <PlayIcon className="mt-1 size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground" />
+            ) : (
+              <ChevronRightIcon className="mt-1 size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground" />
+            )
           ) : null}
         </div>
 
@@ -122,6 +133,13 @@ function LibraryCard({ entry }: { entry: LibraryEntry }) {
   ) : (
     card
   );
+}
+
+function playHref(entry: LibraryEntry): string | undefined {
+  if (entry.library?.type === "Movie") {
+    return `#/play/${encodeURIComponent(entry.library.id)}`;
+  }
+  return undefined;
 }
 
 function showHref(entry: LibraryEntry): string | undefined {

@@ -1,6 +1,6 @@
 import type { ServiceConfig } from "../config.js";
 import { UpstreamError } from "../errors.js";
-import { fetchJson, fetchWithTimeout } from "../http.js";
+import { fetchJson, fetchWithTimeout, upstreamResponseError } from "../http.js";
 import type { LibraryItem } from "../types.js";
 
 export interface JellyfinPublicInfo {
@@ -41,10 +41,68 @@ export interface JellyfinItem {
   PremiereDate?: string;
   ParentIndexNumber?: number;
   IndexNumber?: number;
+  SeriesName?: string;
+  SeriesId?: string;
   ProviderIds?: Record<string, string>;
+  UserData?: {
+    PlaybackPositionTicks?: number;
+    Played?: boolean;
+    PlayCount?: number;
+    LastPlayedDate?: string;
+  };
   ImageTags?: {
     Primary?: string;
   };
+}
+
+export interface JellyfinMediaStream {
+  Type?: string;
+  Codec?: string;
+  Language?: string;
+  DisplayTitle?: string;
+  IsExternal?: boolean;
+  BitRate?: number;
+  Width?: number;
+  Height?: number;
+  Channels?: number;
+  VideoRange?: string;
+}
+
+export interface JellyfinMediaSource {
+  Id?: string;
+  Name?: string;
+  Container?: string;
+  Bitrate?: number;
+  SupportsDirectPlay?: boolean;
+  SupportsDirectStream?: boolean;
+  SupportsTranscoding?: boolean;
+  MediaStreams?: JellyfinMediaStream[];
+}
+
+export interface PlaybackInfoResponse {
+  MediaSources?: JellyfinMediaSource[];
+  PlaySessionId?: string;
+}
+
+export interface PlaybackStartInfo {
+  ItemId: string;
+  MediaSourceId?: string;
+  PlaySessionId?: string;
+  PositionTicks?: number;
+  CanSeek: boolean;
+  IsPaused: boolean;
+  IsMuted: boolean;
+  PlayMethod: "DirectPlay";
+}
+
+export interface PlaybackProgressInfo extends PlaybackStartInfo {}
+
+export interface PlaybackStopInfo {
+  ItemId: string;
+  MediaSourceId?: string;
+  PlaySessionId?: string;
+  PositionTicks?: number;
+  Failed: boolean;
 }
 
 interface JellyfinItemsResponse {
@@ -70,7 +128,9 @@ const CLIENT_VERSION = "0.1.0";
 const AUTHORIZATION_HEADER = `MediaBrowser Client="${CLIENT_NAME}", Device="${DEVICE_NAME}", DeviceId="${DEVICE_ID}", Version="${CLIENT_VERSION}"`;
 
 const LIBRARY_QUERY = new URLSearchParams({
-  Recursive: "true",
+  // Jellyfin returns the view folder itself (and no media) when Recursive=true
+  // is combined with ParentId on this endpoint. Library views list their media
+  // as direct children, so query one view non-recursively at a time.
   IncludeItemTypes: "Movie,Series",
   SortBy: "SortName",
   SortOrder: "Ascending",
@@ -94,6 +154,25 @@ export function createJellyfinClient(
 
   const authHeaders = (): Record<string, string> =>
     token ? { "X-Emby-Token": token, ...deviceHeaders() } : deviceHeaders();
+
+  const postNoContent = async (url: string, body: unknown): Promise<void> => {
+    if (!token) {
+      throw new UpstreamError("jellyfin", "unauthorized", "Jellyfin API key is not configured");
+    }
+    const response = await fetchWithTimeout(
+      "jellyfin",
+      url,
+      {
+        method: "POST",
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        body: JSON.stringify(body),
+      },
+      timeoutMs,
+    );
+    if (!response.ok) {
+      throw await upstreamResponseError("jellyfin", response);
+    }
+  };
 
   return {
     async authenticate(username: string, password: string): Promise<JellyfinAuthenticationResult> {
@@ -186,16 +265,43 @@ export function createJellyfinClient(
       });
     },
 
-    async getItem(itemId: string): Promise<JellyfinItem> {
+    async getItem(itemId: string, userId?: string): Promise<JellyfinItem> {
       if (!token) {
         throw new UpstreamError("jellyfin", "unauthorized", "Jellyfin API key is not configured");
       }
       const query = new URLSearchParams({ Fields: DETAIL_FIELDS });
+      if (userId) {
+        query.set("userId", userId);
+      }
       return fetchJson<JellyfinItem>(
         "jellyfin",
         `${config.url}/Items/${encodeURIComponent(itemId)}?${query.toString()}`,
         { timeoutMs, headers: authHeaders() },
       );
+    },
+
+    async getPlaybackInfo(itemId: string, userId: string): Promise<PlaybackInfoResponse> {
+      if (!token) {
+        throw new UpstreamError("jellyfin", "unauthorized", "Jellyfin API key is not configured");
+      }
+      const query = new URLSearchParams({ userId });
+      return fetchJson<PlaybackInfoResponse>(
+        "jellyfin",
+        `${config.url}/Items/${encodeURIComponent(itemId)}/PlaybackInfo?${query.toString()}`,
+        { timeoutMs, headers: authHeaders() },
+      );
+    },
+
+    async reportPlaybackStart(body: PlaybackStartInfo): Promise<void> {
+      await postNoContent(`${config.url}/Sessions/Playing`, body);
+    },
+
+    async reportPlaybackProgress(body: PlaybackProgressInfo): Promise<void> {
+      await postNoContent(`${config.url}/Sessions/Playing/Progress`, body);
+    },
+
+    async reportPlaybackStopped(body: PlaybackStopInfo): Promise<void> {
+      await postNoContent(`${config.url}/Sessions/Playing/Stopped`, body);
     },
 
     async getSeasons(seriesId: string): Promise<JellyfinItem[]> {
