@@ -426,3 +426,67 @@ fn library_setup_is_a_noop_when_media_paths_are_already_correct() {
             .is_empty()
     );
 }
+
+#[test]
+fn real_time_monitoring_is_enabled_on_the_media_libraries() {
+    let updates = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let updates_for_handler = Arc::clone(&updates);
+
+    let server = mock_server(
+        move |request| match (request.method.as_str(), request.path()) {
+            ("GET", "/Library/VirtualFolders") => (
+                200,
+                r#"[
+                {
+                    "Name":"Movies",
+                    "Locations":["/data/media/movies"],
+                    "CollectionType":"movies",
+                    "ItemId":"movies-id",
+                    "LibraryOptions":{"EnableRealtimeMonitor":false,"SaveLocalMetadata":false}
+                },
+                {
+                    "Name":"Shows",
+                    "Locations":["/data/media/tv"],
+                    "CollectionType":"tvshows",
+                    "ItemId":"shows-id",
+                    "LibraryOptions":{"EnableRealtimeMonitor":true,"SaveLocalMetadata":true}
+                }
+            ]"#
+                .into(),
+            ),
+            ("POST", "/Library/VirtualFolders/LibraryOptions") => {
+                updates_for_handler
+                    .lock()
+                    .unwrap()
+                    .push(request.body.clone());
+                (204, String::new())
+            }
+            _ => (404, "{}".into()),
+        },
+    );
+
+    let client = Jellyfin::new(&server.base_url, Duration::from_secs(2));
+    let changes = client
+        .ensure_libraries("api-key")
+        .expect("library setup should succeed");
+
+    let updates = updates.lock().unwrap();
+    assert_eq!(
+        updates.len(),
+        1,
+        "only the library without monitoring is updated"
+    );
+    let body: serde_json::Value = serde_json::from_str(&updates[0]).expect("json body");
+    assert_eq!(body["Id"], "movies-id");
+    assert_eq!(body["LibraryOptions"]["EnableRealtimeMonitor"], true);
+    assert_eq!(
+        body["LibraryOptions"]["SaveLocalMetadata"], false,
+        "the other library options must round-trip unchanged"
+    );
+    assert_eq!(changes.len(), 1);
+    assert!(
+        changes
+            .iter()
+            .any(|change| change.contains("real-time monitoring") && change.contains("Movies"))
+    );
+}

@@ -1,5 +1,10 @@
 # Library scanning phase and fast Jellyfin refresh
 
+> **Superseded (scan trigger only):** the trigger is now Sonarr/Radarr's
+> `downloadFolderImported` history event with a resolution check, not the
+> qBittorrent completion poll. See `plans/import-triggered-scan.md`. The
+> scanning/`scan_failed` card states described here are unchanged.
+
 ## Context
 
 When a download finishes, Radarr/Sonarr immediately report the file as available,

@@ -43,6 +43,8 @@ export interface JellyfinItem {
   IndexNumber?: number;
   SeriesName?: string;
   SeriesId?: string;
+  /** Only returned when the query asks for the Path field. */
+  Path?: string;
   ProviderIds?: Record<string, string>;
   UserData?: {
     PlaybackPositionTicks?: number;
@@ -338,6 +340,30 @@ export function createJellyfinClient(
       return response.Items ?? [];
     },
 
+    /**
+     * Every Movie or Series with its provider ids and path. Jellyfin's
+     * `AnyProviderIdEquals` filter is unreliable (it also returns unrelated
+     * items), so churn matches provider ids itself.
+     */
+    async listItemsByType(type: "Movie" | "Series"): Promise<JellyfinItem[]> {
+      if (!token) {
+        throw new UpstreamError("jellyfin", "unauthorized", "Jellyfin API key is not configured");
+      }
+      const query = new URLSearchParams({
+        Recursive: "true",
+        IncludeItemTypes: type,
+        Fields: "ProviderIds,Path",
+        ImageTypeLimit: "0",
+        Limit: "5000",
+      });
+      const response = await fetchJson<JellyfinItemsResponse>(
+        "jellyfin",
+        `${config.url}/Items?${query.toString()}`,
+        { timeoutMs, headers: authHeaders() },
+      );
+      return response.Items ?? [];
+    },
+
     async refreshLibrary(): Promise<void> {
       await postNoContent(`${config.url}/Library/Refresh`, {});
     },
@@ -422,7 +448,8 @@ function providerNumber(item: JellyfinItem, key: string): number | undefined {
   return Number.isSafeInteger(number) && number > 0 ? number : undefined;
 }
 
-function providerString(item: JellyfinItem, key: string): string | undefined {
+/** Provider id lookup shared with the library scan's resolution check. */
+export function providerString(item: JellyfinItem, key: string): string | undefined {
   const entry = Object.entries(item.ProviderIds ?? {}).find(
     ([providerKey]) => providerKey.toLowerCase() === key.toLowerCase(),
   );

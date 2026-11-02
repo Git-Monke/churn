@@ -1,13 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AppConfig } from "../src/config.js";
-import {
-  createLibraryScanWatcher,
-  isTorrentDownloadComplete,
-} from "../src/library-scan.js";
-import type { QbittorrentTorrent } from "../src/upstream/qbittorrent.js";
+import { createLibraryScanWatcher, type ImportEvent } from "../src/library-scan.js";
 
-function makeConfig(overrides: { qbittorrentKey?: boolean; jellyfinKey?: boolean } = {}): AppConfig {
+function makeConfig(
+  overrides: { sonarrKey?: boolean; radarrKey?: boolean; jellyfinKey?: boolean } = {},
+): AppConfig {
   return {
     host: "127.0.0.1",
     port: 4000,
@@ -29,18 +27,18 @@ function makeConfig(overrides: { qbittorrentKey?: boolean; jellyfinKey?: boolean
         id: "sonarr",
         name: "Sonarr",
         url: "http://sonarr.test:8989",
-        apiKey: "sonarr-key",
+        apiKey: overrides.sonarrKey === false ? undefined : "sonarr-key",
       },
       radarr: {
         id: "radarr",
         name: "Radarr",
         url: "http://radarr.test:7878",
-        apiKey: "radarr-key",
+        apiKey: overrides.radarrKey === false ? undefined : "radarr-key",
       },
     },
     qbittorrent: {
       url: "http://qbittorrent.test:8080",
-      apiKey: overrides.qbittorrentKey === false ? undefined : "qbt-key",
+      apiKey: "qbt-key",
     },
     vpn: {
       statusUrl: "http://vpn-status.test:8098",
@@ -49,149 +47,180 @@ function makeConfig(overrides: { qbittorrentKey?: boolean; jellyfinKey?: boolean
   };
 }
 
-function torrent(overrides: Partial<QbittorrentTorrent> = {}): QbittorrentTorrent {
+function importEvent(overrides: Partial<ImportEvent> = {}): ImportEvent {
   return {
-    hash: "abcdef0123456789",
-    size: 2_000,
-    amount_left: 0,
-    progress: 1,
+    service: "sonarr",
+    id: 132,
+    date: new Date().toISOString(),
+    seriesId: 2,
+    title: "Parks and Recreation",
     ...overrides,
   };
+}
+
+function watcherFor(
+  imports: ImportEvent[],
+  overrides: {
+    refresh?: () => Promise<void>;
+    resolve?: (pending: ImportEvent[]) => Promise<ImportEvent[]>;
+    now?: () => number;
+    sleep?: (ms: number) => Promise<void>;
+    resolveTimeoutMs?: number;
+    config?: AppConfig;
+  } = {},
+) {
+  const refresh = vi.fn(overrides.refresh ?? (async () => undefined));
+  const resolve = vi.fn(overrides.resolve ?? (async () => []));
+  const watcher = createLibraryScanWatcher(overrides.config ?? makeConfig(), {
+    getImports: async () => imports,
+    refresh,
+    resolve,
+    now: overrides.now,
+    sleep: overrides.sleep,
+    resolveTimeoutMs: overrides.resolveTimeoutMs,
+  });
+  return { watcher, refresh, resolve };
 }
 
 afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("isTorrentDownloadComplete", () => {
-  it("uses progress when available and falls back to remaining bytes", () => {
-    expect(isTorrentDownloadComplete({ progress: 0.99 })).toBe(false);
-    expect(isTorrentDownloadComplete({ progress: 1 })).toBe(true);
-    expect(
-      isTorrentDownloadComplete({ amount_left: 0, size: 100, progress: undefined }),
-    ).toBe(true);
-    expect(
-      isTorrentDownloadComplete({ amount_left: 0, size: 0, progress: undefined }),
-    ).toBe(false);
-  });
-});
-
 describe("library scan watcher", () => {
-  it("scans a completed torrent first seen recently, then does not repeat", async () => {
-    const now = Date.now();
-    const torrents = [{ ...torrentNow(now) }];
+  it("scans once per import, however often the same history row is returned", async () => {
+    const imports = [importEvent()];
+    const { watcher, refresh } = watcherFor(imports);
+
+    await watcher.pollOnce();
+    expect(refresh).toHaveBeenCalledTimes(1);
+
+    await watcher.pollOnce();
+    await watcher.pollOnce();
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("scans when a new history row appears after the first poll", async () => {
+    let imports: ImportEvent[] = [importEvent({ id: 1, seriesId: 2 })];
     const refresh = vi.fn(async () => undefined);
-    const watcher = createLibraryScanWatcher(
-      { ...makeConfig(), qbittorrent: { url: "http://qbittorrent.test:8080", apiKey: "key" } },
-      {
-        now: () => now,
-        getTorrents: async () => torrents,
-        refresh,
+    const watcher = createLibraryScanWatcher(makeConfig(), {
+      getImports: async () => imports,
+      refresh,
+      resolve: async () => [],
+    });
+
+    await watcher.pollOnce();
+    imports = [
+      importEvent({ id: 1, seriesId: 2 }),
+      importEvent({ id: 2, seriesId: 3 }),
+    ];
+    await watcher.pollOnce();
+    expect(refresh).toHaveBeenCalledTimes(2);
+  });
+
+  it("coalesces a season pack's import rows into one scan", async () => {
+    const imports = [
+      importEvent({ id: 1, seriesId: 2 }),
+      importEvent({ id: 2, seriesId: 2 }),
+      importEvent({ id: 3, seriesId: 2 }),
+      importEvent({ service: "radarr", id: 9, seriesId: undefined, movieId: 4 }),
+    ];
+    let clock = 0;
+    let resolveCalls = 0;
+    const { watcher, refresh } = watcherFor(imports, {
+      resolve: async (pending) => {
+        resolveCalls += 1;
+        return pending;
       },
-    );
-
-    await watcher.pollOnce();
-    expect(refresh).toHaveBeenCalledTimes(1);
-
-    await watcher.pollOnce();
-    expect(refresh).toHaveBeenCalledTimes(1);
-  });
-
-  it("ignores a completed torrent first seen outside the recent window", async () => {
-    const now = Date.now();
-    const refresh = vi.fn(async () => undefined);
-    const watcher = createLibraryScanWatcher(configWithKeys(), {
-      now: () => now,
-      getTorrents: async () => [torrent({ completion_on: Math.floor(now / 1_000) - 11 * 60 })],
-      refresh,
+      now: () => clock,
+      sleep: async (ms) => {
+        clock += ms;
+      },
+      resolveTimeoutMs: 2_000,
     });
 
     await watcher.pollOnce();
-    expect(refresh).not.toHaveBeenCalled();
+    // One scan, then one retry because the imports never resolved.
+    expect(refresh).toHaveBeenCalledTimes(2);
+    expect(resolveCalls).toBeGreaterThan(1);
   });
 
-  it("scans on an incomplete-to-complete transition", async () => {
-    let now = Date.now();
-    let torrents = [torrent({ progress: 0.4, amount_left: 600, completion_on: 0 })];
-    const refresh = vi.fn(async () => undefined);
-    const watcher = createLibraryScanWatcher(configWithKeys(), {
-      now: () => now,
-      getTorrents: async () => torrents,
-      refresh,
+  it("does not rescan when Jellyfin resolves the import on the first check", async () => {
+    const resolve = vi.fn(async () => []);
+    const { watcher, refresh } = watcherFor([importEvent()], { resolve });
+
+    await watcher.pollOnce();
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(resolve).toHaveBeenCalledTimes(1);
+  });
+
+  it("rescans once when the item is still missing, then gives up", async () => {
+    let clock = 0;
+    const resolve = vi.fn(async () => [importEvent()]);
+    const { watcher, refresh } = watcherFor([importEvent()], {
+      resolve,
+      now: () => clock,
+      sleep: async (ms) => {
+        clock += ms;
+      },
+      resolveTimeoutMs: 4_000,
     });
 
     await watcher.pollOnce();
-    expect(refresh).not.toHaveBeenCalled();
-
-    now += 1_000;
-    torrents = [torrentNow(now)];
-    await watcher.pollOnce();
-    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(refresh).toHaveBeenCalledTimes(2);
+    expect(clock).toBeGreaterThanOrEqual(8_000);
+    expect(resolve.mock.calls.length).toBeGreaterThan(2);
   });
 
-  it("coalesces multiple completions in one poll into one refresh", async () => {
-    const now = Date.now();
-    const refresh = vi.fn(async () => undefined);
-    const watcher = createLibraryScanWatcher(configWithKeys(), {
-      now: () => now,
-      getTorrents: async () => [
-        torrent({ hash: "aaa", completion_on: Math.floor(now / 1_000) - 1 }),
-        torrent({ hash: "bbb", completion_on: Math.floor(now / 1_000) - 1 }),
-      ],
-      refresh,
+  it("keeps scanning when the resolution check itself fails", async () => {
+    const { watcher, refresh } = watcherFor([importEvent()], {
+      resolve: async () => {
+        throw new Error("jellyfin is down");
+      },
     });
 
     await watcher.pollOnce();
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
-  it("does nothing when qBittorrent or Jellyfin is unconfigured", async () => {
-    const getTorrents = vi.fn(async () => [torrent()]);
-    const refresh = vi.fn(async () => undefined);
+  it("does nothing when Jellyfin or both arrs are unconfigured", async () => {
+    const getImports = vi.fn(async () => [importEvent()]);
 
     for (const config of [
-      makeConfig({ qbittorrentKey: false }),
       makeConfig({ jellyfinKey: false }),
+      makeConfig({ sonarrKey: false, radarrKey: false }),
     ]) {
       const watcher = createLibraryScanWatcher(config, {
-        getTorrents,
-        refresh,
+        getImports,
+        refresh: async () => undefined,
+        resolve: async () => [],
       });
       await watcher.pollOnce();
       watcher.start();
       watcher.stop();
     }
 
-    expect(getTorrents).not.toHaveBeenCalled();
-    expect(refresh).not.toHaveBeenCalled();
+    expect(getImports).not.toHaveBeenCalled();
   });
 
   it("stops polling after stop()", async () => {
     vi.useFakeTimers();
-    const getTorrents = vi.fn(async () => []);
-    const watcher = createLibraryScanWatcher(configWithKeys(), {
+    const getImports = vi.fn(async () => [] as ImportEvent[]);
+    const watcher = createLibraryScanWatcher(makeConfig(), {
       intervalMs: 1_000,
-      getTorrents,
+      getImports,
       refresh: async () => undefined,
+      resolve: async () => [],
     });
 
     watcher.start();
     await vi.advanceTimersByTimeAsync(0);
-    expect(getTorrents).toHaveBeenCalledTimes(1);
+    expect(getImports).toHaveBeenCalledTimes(1);
 
     await vi.advanceTimersByTimeAsync(1_000);
-    expect(getTorrents).toHaveBeenCalledTimes(2);
+    expect(getImports).toHaveBeenCalledTimes(2);
 
     watcher.stop();
     await vi.advanceTimersByTimeAsync(5_000);
-    expect(getTorrents).toHaveBeenCalledTimes(2);
+    expect(getImports).toHaveBeenCalledTimes(2);
   });
 });
-
-function configWithKeys(): AppConfig {
-  return makeConfig();
-}
-
-function torrentNow(now: number): QbittorrentTorrent {
-  return torrent({ completion_on: Math.floor(now / 1_000) - 2 });
-}

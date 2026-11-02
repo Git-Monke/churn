@@ -82,6 +82,13 @@ struct VirtualFolderInfo {
     locations: Option<Vec<String>>,
     #[serde(default)]
     collection_type: Option<String>,
+    #[serde(default)]
+    item_id: Option<String>,
+    /// Jellyfin's full `LibraryOptions`. Kept as raw JSON because the update
+    /// endpoint replaces the whole object: every field churn does not know
+    /// about has to round-trip unchanged.
+    #[serde(default)]
+    library_options: Option<serde_json::Value>,
 }
 
 struct HttpResponse {
@@ -344,7 +351,67 @@ impl Jellyfin {
         if !changes.is_empty() {
             self.refresh_library(api_key)?;
         }
+
+        // Re-read the folders so libraries just created above are included.
+        let folders = self.list_virtual_folders(api_key)?;
+        for (name, collection_type, _) in MEDIA_LIBRARIES {
+            let Some(folder) = folders.iter().find(|folder| {
+                folder
+                    .collection_type
+                    .as_deref()
+                    .is_some_and(|value| value.eq_ignore_ascii_case(collection_type))
+                    || folder
+                        .name
+                        .as_deref()
+                        .is_some_and(|value| value.eq_ignore_ascii_case(name))
+            }) else {
+                continue;
+            };
+            if self.enable_realtime_monitoring(api_key, folder)? {
+                changes.push(format!(
+                    "enabled real-time monitoring for Jellyfin library {}",
+                    folder.name.as_deref().unwrap_or(name)
+                ));
+            }
+        }
+
         Ok(changes)
+    }
+
+    /// Let Jellyfin watch the media folders itself. Churn still asks for a scan
+    /// after an import, but a scan that starts too early finds nothing; real-time
+    /// monitoring makes the library catch up without another churn scan.
+    fn enable_realtime_monitoring(
+        &self,
+        api_key: &str,
+        folder: &VirtualFolderInfo,
+    ) -> io::Result<bool> {
+        let (Some(item_id), Some(options)) = (folder.item_id.as_deref(), &folder.library_options)
+        else {
+            return Ok(false);
+        };
+        if options
+            .get("EnableRealtimeMonitor")
+            .and_then(|v| v.as_bool())
+            == Some(true)
+        {
+            return Ok(false);
+        }
+
+        let mut updated = options.clone();
+        updated["EnableRealtimeMonitor"] = json!(true);
+        expect_no_content(
+            self.send_json(
+                ureq::post(&format!(
+                    "{}/Library/VirtualFolders/LibraryOptions",
+                    self.base_url
+                ))
+                .set("X-Emby-Token", api_key),
+                json!({ "Id": item_id, "LibraryOptions": updated }),
+            )?,
+            "enable Jellyfin real-time library monitoring",
+        )?;
+        Ok(true)
     }
 
     fn list_virtual_folders(&self, api_key: &str) -> io::Result<Vec<VirtualFolderInfo>> {

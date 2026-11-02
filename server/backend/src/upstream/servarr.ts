@@ -195,6 +195,23 @@ export interface ServarrMediaCover {
   contentType: string;
 }
 
+/**
+ * One row from `/api/v3/history/since`. churn only reads
+ * `downloadFolderImported` rows: that event is written after the arr has moved
+ * the files into the library, which is the moment Jellyfin can actually see
+ * them.
+ */
+export interface ServarrHistoryRecord {
+  id?: number;
+  eventType?: string;
+  date?: string;
+  seriesId?: number;
+  episodeId?: number;
+  movieId?: number;
+  sourceTitle?: string;
+  downloadId?: string;
+}
+
 /** Posters and fanart are a few hundred KB; anything huge is not artwork. */
 const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
 
@@ -294,6 +311,12 @@ export function createArrClient(service: ArrServiceId, config: ServiceConfig, ti
 
     async getMovie(id: number): Promise<ServarrMovieResource> {
       return get<ServarrMovieResource>(`/api/v3/movie/${id}`);
+    },
+
+    /** Imports that finished after `date` (ISO 8601), newest data included. */
+    async getImportsSince(date: string): Promise<ServarrHistoryRecord[]> {
+      const query = new URLSearchParams({ date, eventType: "downloadFolderImported" });
+      return get<ServarrHistoryRecord[]>(`/api/v3/history/since?${query.toString()}`);
     },
 
     async getEpisodes(seriesId: number): Promise<ServarrEpisode[]> {
