@@ -1,10 +1,10 @@
 import type { FastifyInstance } from "fastify";
 
 import type { AppConfig, ServiceConfig } from "../config.js";
-import { filterActiveQueueRecords } from "../activity.js";
+import { filterActiveQueueRecords, isActiveQueueRecord, isSeasonPack, queueRecordSeasons } from "../activity.js";
 import { mapWithConcurrency } from "../concurrency.js";
 import { requireAuth, type AuthContext } from "../auth.js";
-import { ApiError, isUnauthorized, UpstreamError } from "../errors.js";
+import { ApiError, isUnauthorized, isUpstreamNotFound, UpstreamError } from "../errors.js";
 import {
   buildReleaseGrabPayload,
   findRelease,
@@ -21,6 +21,7 @@ import { mediaCoverUrl } from "../search.js";
 import { buildShowDetail } from "../shows.js";
 import type {
   ArrServiceState,
+  CancelEpisodeDownloadResponse,
   GrabShowReleaseResponse,
   ShowDetailResponse,
   ShowReleasesResponse,
@@ -82,6 +83,29 @@ export function registerShowRoutes(app: FastifyInstance, config: AppConfig): voi
       }
       const seriesId = parseSonarrId(request.params.id);
       return grabShowRelease(config, seriesId, parseGrabReleaseInput(request.body));
+    },
+  );
+
+  app.delete<{
+    Params: { source: string; id: string; season: string; episode: string };
+  }>(
+    "/api/library/shows/:source/:id/episodes/:season/:episode/download",
+    async (request, reply) => {
+      reply.header("cache-control", "no-store");
+      const source = parseSource(request.params.source);
+      if (source !== "sonarr") {
+        throw new ApiError(
+          400,
+          "invalid_source",
+          "Episode downloads can only be cancelled for Sonarr-backed shows",
+        );
+      }
+      return cancelEpisodeDownload(
+        config,
+        parseSonarrId(request.params.id),
+        parseSeasonNumber(request.params.season),
+        parseSeasonNumber(request.params.episode),
+      );
     },
   );
 }
@@ -186,6 +210,7 @@ async function loadJellyfinShow(
     state: "ok",
     warnings: warnings.length > 0 ? warnings : undefined,
     series,
+    ...(sonarrSeries?.id !== undefined ? { sonarrId: sonarrSeries.id } : {}),
     ...detail,
   };
 }
@@ -411,6 +436,90 @@ async function grabShowRelease(
   return { status: "grabbed", title: release.title?.trim() || "Release" };
 }
 
+async function cancelEpisodeDownload(
+  config: AppConfig,
+  seriesId: number,
+  seasonNumber: number,
+  episodeNumber: number,
+): Promise<CancelEpisodeDownloadResponse> {
+  const service = config.services.sonarr;
+  if (!service.apiKey) {
+    throw new ApiError(503, "sonarr_unconfigured", unconfiguredDetail("sonarr"));
+  }
+
+  const client = createArrClient("sonarr", service, config.requestTimeoutMs);
+  let episodeId: number | undefined;
+  let queue: ServarrQueueRecord[];
+  try {
+    const episodes = await client.getEpisodes(seriesId);
+    episodeId = episodes.find(
+      (episode) =>
+        episode.seasonNumber === seasonNumber &&
+        episode.episodeNumber === episodeNumber,
+    )?.id;
+    queue = await client.getQueue();
+  } catch (error) {
+    throw releaseApiError(error, "Could not load the Sonarr download queue");
+  }
+
+  if (episodeId === undefined) {
+    throw new ApiError(404, "episode_not_found", "Episode not found in Sonarr");
+  }
+
+  // Match the same queue records the show overlay used, so cancelling from an
+  // episode does not touch downloads for another season or episode.
+  const records = queue.filter((record) => {
+    if (record.seriesId !== seriesId || !isActiveQueueRecord(record)) {
+      return false;
+    }
+    const seasons = queueRecordSeasons(record);
+    const multiSeason = seasons.length > 1;
+    if (record.episodeId !== undefined && !multiSeason) {
+      return record.episodeId === episodeId;
+    }
+    return seasons.includes(seasonNumber);
+  });
+  const removable = records.filter(
+    (record): record is ServarrQueueRecord & { id: number } => record.id !== undefined,
+  );
+  if (removable.length === 0) {
+    throw new ApiError(
+      404,
+      "download_not_found",
+      "This episode has no active download to cancel",
+    );
+  }
+
+  // A season pack can produce several queue records for one download. Removing
+  // one can already remove its siblings, so a 404 for the rest is expected.
+  await Promise.all(
+    removable.map(async (record) => {
+      try {
+        await client.removeQueueRecord(record.id, {
+          blocklist: true,
+          skipRedownload: true,
+        });
+      } catch (error) {
+        if (!isUpstreamNotFound(error)) {
+          throw error;
+        }
+      }
+    }),
+  );
+
+  return {
+    status: "cancelled",
+    service: "sonarr",
+    seriesId,
+    seasonNumber,
+    episodeNumber,
+    queueRemoved: removable.length,
+    seasonPack: records.some(
+      (record) => isSeasonPack(record) || queueRecordSeasons(record).length > 1,
+    ),
+  };
+}
+
 function releaseApiError(error: unknown, fallback: string, status = 502): ApiError {
   if (error instanceof ApiError) {
     return error;
@@ -469,6 +578,7 @@ async function loadSonarrShow(config: AppConfig, seriesId: number): Promise<Show
     state: "ok",
     warnings: warnings.length > 0 ? warnings : undefined,
     series,
+    sonarrId: seriesId,
     ...detail,
   };
 }

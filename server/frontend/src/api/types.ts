@@ -154,6 +154,16 @@ export interface CancelLibraryItemResponse {
   queueRemoved: number;
 }
 
+export interface CancelEpisodeDownloadResponse {
+  status: "cancelled";
+  service: "sonarr";
+  seriesId: number;
+  seasonNumber: number;
+  episodeNumber: number;
+  queueRemoved: number;
+  seasonPack: boolean;
+}
+
 export type RequestKind = "movie" | "series";
 export type RequestMonitor = "all" | "firstSeason" | "future" | "none";
 export type ArrServiceState = "ok" | "unconfigured" | "unauthorized" | "unreachable";
@@ -316,6 +326,8 @@ export interface ShowDetailResponse {
   detail?: string;
   warnings?: string[];
   series: ShowSeriesSummary;
+  /** Sonarr series id when this show is tracked there, regardless of source. */
+  sonarrId?: number;
   defaultSeason?: number;
   seasons: ShowSeason[];
   episodes: ShowEpisode[];

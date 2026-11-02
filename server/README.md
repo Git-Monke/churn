@@ -180,6 +180,7 @@ static playback token is stored in `.env`.
 | `GET /api/library/shows/:source/:id` | Jellyfin/Sonarr show detail with seasons, episodes and download overlays |
 | `GET /api/library/shows/:source/:id/releases?season=N` | Sonarr season release search, including rejected and multi-season packs |
 | `POST /api/library/shows/:source/:id/releases/grab` | Grab a selected release, overriding automatic restrictions when Sonarr can map it |
+| `DELETE /api/library/shows/sonarr/:id/episodes/:season/:episode/download` | Cancel that episode's active download, blocklist the release and keep imported files |
 | `GET /api/playback/items/:itemId` | Playable item metadata, resume position, media source and same-origin stream URL |
 | `GET /api/playback/items/:itemId/stream` | Redirect the media element to Jellyfin's direct stream URL for this session |
 | `GET /api/playback/items/:itemId/hls.m3u8` | Redirect to a Jellyfin HLS transcode (H.264/AAC) when the source is not browser-compatible |
@@ -301,7 +302,8 @@ their download progress appears on every covered season even when Sonarr only
 reports one season in its queue. Shared queue records are counted once when
 totalling download size.
 
-For Sonarr-backed shows, **Choose release** runs a season search and lists every
+For shows tracked in Sonarr — including Jellyfin-backed shows, which expose
+their Sonarr series id — **Choose release** runs a season search and lists every
 release Sonarr returned, including rejected releases and multi-season packs. The
 **All seasons** action searches the show's other seasons and merges any
 multi-season packs that cover the selected season, which catches packs Sonarr
@@ -313,7 +315,12 @@ Sonarr imports the whole pack rather than only the selected season.
 
 Missing individual episodes also get their own **Choose release** action. That
 uses Sonarr's episode-id search instead of its season search, so single-episode
-releases are available even when no season pack exists. After requesting a
+releases are available even when no season pack exists. An episode that is
+already downloading gets a **Cancel download** action instead: it removes that
+episode's queue records from Sonarr and the download client, blocklists the
+release so Sonarr does not grab it again, and leaves imported files alone. A
+season-pack download cancels the whole pack, and the confirmation says so.
+After requesting a
 series, churn opens the picker immediately for the first monitored season so you
 can choose a release while Sonarr's automatic search runs in the background. If
 no releases are found, the picker stays open with retry and all-seasons actions.

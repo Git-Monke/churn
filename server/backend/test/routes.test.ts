@@ -1933,6 +1933,7 @@ describe("show detail", () => {
       source: "jellyfin",
       state: "ok",
       series: { title: "Example Show", tvdbId: 1234 },
+      sonarrId: 42,
       defaultSeason: 1,
     });
     expect(body.episodes).toHaveLength(2);
@@ -2026,6 +2027,7 @@ describe("show detail", () => {
       source: "sonarr",
       state: "ok",
       series: { title: "Example Show" },
+      sonarrId: 42,
       defaultSeason: 1,
     });
     expect(body.episodes).toHaveLength(2);
@@ -2458,6 +2460,136 @@ describe("show releases", () => {
     });
     expect(stale.statusCode).toBe(404);
     expect(stale.json().error.code).toBe("release_not_found");
+    await app.close();
+  });
+});
+
+describe("cancel episode download", () => {
+  it("removes only the queue record for the requested episode", async () => {
+    const calls: Array<{ url: string; method?: string }> = [];
+    installFetch((url, init) => {
+      if (url.includes("sonarr.test") && url.includes("/api/v3/episode?seriesId=42")) {
+        return jsonResponse([
+          { id: 501, seriesId: 42, seasonNumber: 1, episodeNumber: 1 },
+          { id: 502, seriesId: 42, seasonNumber: 1, episodeNumber: 2 },
+        ]);
+      }
+      if (url.includes("sonarr.test") && url.includes("/api/v3/queue?")) {
+        return jsonResponse({
+          records: [
+            {
+              id: 10,
+              seriesId: 42,
+              episodeId: 501,
+              seasonNumber: 1,
+              status: "downloading",
+              trackedDownloadState: "downloading",
+            },
+            {
+              id: 11,
+              seriesId: 42,
+              episodeId: 502,
+              seasonNumber: 1,
+              status: "downloading",
+              trackedDownloadState: "downloading",
+            },
+          ],
+        });
+      }
+      if (url.includes("sonarr.test") && url.includes("/api/v3/queue/10")) {
+        calls.push({ url, method: init?.method });
+        return new Response(null, { status: 200 });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildAuthedServer(makeConfig());
+    const response = await app.inject({
+      method: "DELETE",
+      url: "/api/library/shows/sonarr/42/episodes/1/1/download",
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      status: "cancelled",
+      service: "sonarr",
+      seriesId: 42,
+      seasonNumber: 1,
+      episodeNumber: 1,
+      queueRemoved: 1,
+      seasonPack: false,
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.method).toBe("DELETE");
+    expect(calls[0]?.url).toContain("removeFromClient=true");
+    expect(calls[0]?.url).toContain("blocklist=true");
+    expect(calls[0]?.url).toContain("skipRedownload=true");
+    expect(calls.some((call) => call.url.includes("/api/v3/queue/11"))).toBe(false);
+    await app.close();
+  });
+
+  it("cancels a season pack that covers the episode", async () => {
+    const calls: Array<{ url: string; method?: string }> = [];
+    installFetch((url, init) => {
+      if (url.includes("sonarr.test") && url.includes("/api/v3/episode?seriesId=42")) {
+        return jsonResponse([{ id: 601, seriesId: 42, seasonNumber: 2, episodeNumber: 1 }]);
+      }
+      if (url.includes("sonarr.test") && url.includes("/api/v3/queue?")) {
+        return jsonResponse({
+          records: [
+            {
+              id: 20,
+              seriesId: 42,
+              seasonNumber: 2,
+              title: "Example.Show.S02.1080p",
+              status: "downloading",
+              trackedDownloadState: "downloading",
+            },
+          ],
+        });
+      }
+      if (url.includes("sonarr.test") && url.includes("/api/v3/queue/20")) {
+        calls.push({ url, method: init?.method });
+        return new Response(null, { status: 200 });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildAuthedServer(makeConfig());
+    const response = await app.inject({
+      method: "DELETE",
+      url: "/api/library/shows/sonarr/42/episodes/2/1/download",
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      status: "cancelled",
+      queueRemoved: 1,
+      seasonPack: true,
+    });
+    expect(calls).toHaveLength(1);
+    await app.close();
+  });
+
+  it("returns 404 when the episode has no active download", async () => {
+    installFetch((url) => {
+      if (url.includes("sonarr.test") && url.includes("/api/v3/episode?seriesId=42")) {
+        return jsonResponse([{ id: 501, seriesId: 42, seasonNumber: 1, episodeNumber: 1 }]);
+      }
+      if (url.includes("sonarr.test") && url.includes("/api/v3/queue?")) {
+        return jsonResponse({ records: [] });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildAuthedServer(makeConfig());
+    const response = await app.inject({
+      method: "DELETE",
+      url: "/api/library/shows/sonarr/42/episodes/1/1/download",
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json().error.code).toBe("download_not_found");
     await app.close();
   });
 });

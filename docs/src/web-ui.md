@@ -112,6 +112,7 @@ token in `.env`, so resume positions and watched state are per user.
 | `GET /api/library/shows/:source/:id` | Show seasons, episodes and download overlays |
 | `GET /api/library/shows/:source/:id/releases?season=N` | Sonarr season release search, including rejected and multi-season packs |
 | `POST /api/library/shows/:source/:id/releases/grab` | Grab a selected release with an override when Sonarr can map it |
+| `DELETE /api/library/shows/sonarr/:id/episodes/:season/:episode/download` | Cancel one episode's active download and blocklist the release |
 | `GET /api/playback/items/:itemId` | Playable item metadata, resume position and same-origin stream URL |
 | `GET /api/playback/items/:itemId/stream` | Redirect the media element to Jellyfin's direct stream URL for this session |
 | `GET /api/playback/items/:itemId/hls.m3u8` | Redirect to a Jellyfin HLS transcode (H.264/AAC) when the source is not browser-compatible |
@@ -253,7 +254,9 @@ upcoming), and overlays per-episode downloads. Sonarr season packs mark every
 episode in the season. Jellyfin shows are matched to Sonarr through
 `ProviderIds.Tvdb`; download-only shows use the Sonarr source directly.
 
-Sonarr-backed shows also have a release picker per season. It searches the
+Shows tracked in Sonarr also have a release picker per season, including
+Jellyfin-backed shows (the detail response carries the Sonarr series id). It
+searches the
 indexers again and lists **all** results — automatic, rejected, single-season
 and multi-season — with size, quality, indexer, seed count and rejection
 reasons. **All seasons** runs the same search across the show's other seasons
@@ -269,7 +272,11 @@ default.
 
 Missing episodes have their own **Choose release** action. It searches by
 Sonarr episode id rather than by season, so individual episode releases show up
-even when no season pack exists.
+even when no season pack exists. When an episode is already downloading, that
+action becomes **Cancel download** instead. It removes only that episode's queue
+records from Sonarr and the download client, blocklists the release so Sonarr
+does not grab it again, and keeps files that already imported. Cancelling a
+season-pack download stops the whole pack; the confirmation says so.
 
 After requesting a series, churn opens the picker immediately for the first
 monitored season so release options appear without visiting the show page.

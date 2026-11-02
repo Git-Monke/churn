@@ -179,7 +179,11 @@ downloads. Movies show progress and ETA on their card. Each arr-backed card has
 a trash button that cancels the download, removes the title and its files from
 Sonarr/Radarr, and refreshes Jellyfin — useful for replacing a large release
 with a smaller profile. Shows open a season and episode view with per-episode
-availability and download progress, including season-pack handling. Movies and Jellyfin episodes also open an in-app player:
+availability and download progress, including season-pack handling. A
+downloading episode has its own **Cancel download** action that stops just that
+download, blocklists the release and keeps imported files; shows that are in
+Jellyfin still get Sonarr release search through the matched Sonarr series.
+Movies and Jellyfin episodes also open an in-app player:
 video streams from Jellyfin, transcoding to HLS when the browser cannot decode
 the source, resume positions come from the signed-in user, and progress is
 reported back to Jellyfin. See `server/README.md` for

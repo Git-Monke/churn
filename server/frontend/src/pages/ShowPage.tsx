@@ -6,6 +6,7 @@ import {
   DownloadIcon,
   PlayIcon,
   FilmIcon,
+  Trash2Icon,
   TriangleAlertIcon,
 } from "lucide-react";
 
@@ -39,6 +40,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { ReleasePicker } from "@/features/show/ReleasePicker";
 import { ReleasePickerDialog } from "@/features/show/ReleasePickerDialog";
+import { CancelEpisodeDownloadDialog } from "@/features/show/CancelEpisodeDownloadDialog";
 import type { ShowSource } from "@/hooks/use-hash-route";
 
 export function ShowPage({ source, id }: { source: ShowSource; id: string }) {
@@ -50,6 +52,7 @@ export function ShowPage({ source, id }: { source: ShowSource; id: string }) {
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
   const [releasesOpen, setReleasesOpen] = useState(false);
   const [releaseEpisode, setReleaseEpisode] = useState<ShowEpisode | null>(null);
+  const [cancelEpisode, setCancelEpisode] = useState<ShowEpisode | null>(null);
 
   useEffect(() => {
     const data = showQuery.data;
@@ -77,12 +80,15 @@ export function ShowPage({ source, id }: { source: ShowSource; id: string }) {
     );
   }, [selectedSeason, showQuery.data]);
 
+  // Jellyfin-backed shows still expose their Sonarr series id, so release
+  // searches and episode cancels work from the same page.
+  const sonarrSeriesId = showQuery.data?.sonarrId;
   const seasonHasDownload = episodes.some((episode) => episode.download !== undefined);
   const seasonHasFile = episodes.some(
     (episode) => episode.availability === "jellyfin" || episode.availability === "sonarr",
   );
   const showReleasePrompt =
-    showQuery.data?.source === "sonarr" &&
+    sonarrSeriesId !== undefined &&
     selectedSeason !== null &&
     episodes.some((episode) => episode.availability === "missing") &&
     !seasonHasDownload &&
@@ -153,7 +159,7 @@ export function ShowPage({ source, id }: { source: ShowSource; id: string }) {
                     ))}
                   </SelectContent>
                 </Select>
-                {showQuery.data.source === "sonarr" && selectedSeason !== null ? (
+                {sonarrSeriesId !== undefined && selectedSeason !== null ? (
                   <Button
                     variant="outline"
                     size="sm"
@@ -165,10 +171,10 @@ export function ShowPage({ source, id }: { source: ShowSource; id: string }) {
                 ) : null}
               </div>
 
-              {showQuery.data.source === "sonarr" &&
+              {sonarrSeriesId !== undefined &&
               releasesOpen &&
               selectedSeason !== null ? (
-                <ReleasePicker seriesId={Number(id)} seasonNumber={selectedSeason} />
+                <ReleasePicker seriesId={sonarrSeriesId} seasonNumber={selectedSeason} />
               ) : null}
 
               <ReleasePickerDialog
@@ -178,10 +184,28 @@ export function ShowPage({ source, id }: { source: ShowSource; id: string }) {
                     setReleaseEpisode(null);
                   }
                 }}
-                seriesId={Number(id)}
+                seriesId={sonarrSeriesId}
                 seasonNumber={releaseEpisode?.seasonNumber}
                 episodeNumber={releaseEpisode?.episodeNumber}
                 showTitle={showQuery.data.series.title}
+              />
+
+              <CancelEpisodeDownloadDialog
+                open={cancelEpisode !== null}
+                onOpenChange={(open) => {
+                  if (!open) {
+                    setCancelEpisode(null);
+                  }
+                }}
+                seriesId={sonarrSeriesId ?? 0}
+                seasonNumber={cancelEpisode?.seasonNumber ?? 0}
+                episodeNumber={cancelEpisode?.episodeNumber ?? 0}
+                episodeTitle={
+                  cancelEpisode
+                    ? `${episodeCode(cancelEpisode)} · ${cancelEpisode.title}`
+                    : "This episode"
+                }
+                seasonPack={cancelEpisode?.download?.seasonPack === true}
               />
 
               {showReleasePrompt ? (
@@ -212,10 +236,15 @@ export function ShowPage({ source, id }: { source: ShowSource; id: string }) {
                           : undefined
                       }
                       onChooseRelease={
-                        showQuery.data?.source === "sonarr" &&
+                        sonarrSeriesId !== undefined &&
                         episode.download === undefined &&
                         episode.availability === "missing"
                           ? () => setReleaseEpisode(episode)
+                          : undefined
+                      }
+                      onCancelDownload={
+                        sonarrSeriesId !== undefined && episode.download !== undefined
+                          ? () => setCancelEpisode(episode)
                           : undefined
                       }
                     />
@@ -294,10 +323,12 @@ function EpisodeRow({
   episode,
   playHref,
   onChooseRelease,
+  onCancelDownload,
 }: {
   episode: ShowEpisode;
   playHref?: string;
   onChooseRelease?: () => void;
+  onCancelDownload?: () => void;
 }) {
   const download = episode.download;
   return (
@@ -324,7 +355,7 @@ function EpisodeRow({
               <AvailabilityBadge availability={episode.availability} />
             ) : null}
             {download ? <DownloadBadge download={download} /> : null}
-            {playHref || onChooseRelease ? (
+            {playHref || onChooseRelease || onCancelDownload ? (
               <div className="ml-auto flex flex-wrap items-center gap-2">
                 {playHref ? (
                   <Button asChild variant="secondary" size="sm">
@@ -338,6 +369,17 @@ function EpisodeRow({
                   <Button variant="outline" size="sm" onClick={onChooseRelease}>
                     <DownloadIcon data-icon="inline-start" />
                     Choose release
+                  </Button>
+                ) : null}
+                {onCancelDownload ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                    onClick={onCancelDownload}
+                  >
+                    <Trash2Icon data-icon="inline-start" />
+                    Cancel download
                   </Button>
                 ) : null}
               </div>

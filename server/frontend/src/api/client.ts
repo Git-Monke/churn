@@ -2,6 +2,7 @@ import type {
   ActivityResponse,
   AuthSessionResponse,
   CancelLibraryItemResponse,
+  CancelEpisodeDownloadResponse,
   LoginInput,
   LoginResponse,
   CreateRequestInput,
@@ -107,6 +108,16 @@ export function cancelLibraryItem(
 ): Promise<CancelLibraryItemResponse> {
   return deleteJson<CancelLibraryItemResponse>(
     `/api/library/requested/${service}/${encodeURIComponent(String(id))}`,
+  );
+}
+
+export function cancelEpisodeDownload(
+  seriesId: number,
+  seasonNumber: number,
+  episodeNumber: number,
+): Promise<CancelEpisodeDownloadResponse> {
+  return deleteJson<CancelEpisodeDownloadResponse>(
+    `/api/library/shows/sonarr/${encodeURIComponent(String(seriesId))}/episodes/${encodeURIComponent(String(seasonNumber))}/${encodeURIComponent(String(episodeNumber))}/download`,
   );
 }
 
