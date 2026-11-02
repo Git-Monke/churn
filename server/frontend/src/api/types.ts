@@ -235,12 +235,27 @@ export interface ActivityServiceState {
   count: number;
 }
 
+export interface ReleaseRepickEvent {
+  id: number;
+  at: string;
+  service: "sonarr" | "radarr";
+  mediaTitle: string;
+  seasonNumber?: number;
+  fromTitle: string;
+  toTitle: string;
+  fromReportedSeeders?: number;
+  connectedSeeds?: number;
+  downloadSpeed?: number;
+  toReportedSeeders?: number;
+}
+
 export interface ActivityResponse {
   checkedAt: string;
   services: ActivityServiceState[];
   items: ActivityItem[];
   total: number;
   detail?: string;
+  repicks?: ReleaseRepickEvent[];
 }
 
 export type ShowSource = "jellyfin" | "sonarr";
@@ -319,6 +334,7 @@ export interface ShowRelease {
   approved: boolean;
   canGrab: boolean;
   recommended: boolean;
+  recommendation?: ReleasePickReason;
   rejections: string[];
   mappedEpisodeCount: number;
   protocol?: "torrent" | "usenet";
@@ -365,6 +381,8 @@ export interface ArrRequestDefaults {
   rootFolderPath?: string;
   monitor?: RequestMonitor;
   searchOnAdd: boolean;
+  smartPick?: boolean;
+  minSeeders?: number;
 }
 
 export interface ArrRequestOptions {
@@ -389,6 +407,8 @@ export interface RequestOptionsInput {
   rootFolderPath?: string;
   monitor?: RequestMonitor;
   searchOnAdd?: boolean;
+  smartPick?: boolean;
+  minSeeders?: number;
 }
 
 export interface CreateRequestInput {
@@ -398,12 +418,29 @@ export interface CreateRequestInput {
   options?: RequestOptionsInput;
 }
 
+export type ReleasePickReason =
+  | "preferred"
+  | "tier_upgrade"
+  | "below_threshold"
+  | "best_effort";
+
+export interface RequestDownload {
+  title: string;
+  quality?: string;
+  seeders?: number;
+  sizeBytes?: number;
+  seasonNumber?: number;
+  reason: ReleasePickReason;
+  override: boolean;
+}
+
 export interface CreateRequestResponse {
   status: "added" | "already_exists";
   service: "sonarr" | "radarr";
   title: string;
   year?: number;
   id?: number;
+  downloads?: RequestDownload[];
 }
 
 export type PlaybackState = "ok" | "unauthorized" | "unreachable";

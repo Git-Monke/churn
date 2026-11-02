@@ -40,6 +40,15 @@ import {
   type ServiceRequestDefaults,
 } from "@/features/search/use-request-defaults";
 
+const MIN_SEEDERS_OPTIONS = [
+  { value: 0, label: "Any release" },
+  { value: 2, label: "At least 2" },
+  { value: 5, label: "At least 5 (recommended)" },
+  { value: 10, label: "At least 10" },
+  { value: 20, label: "At least 20" },
+  { value: 50, label: "At least 50" },
+];
+
 interface RequestOptionsPopoverProps {
   options?: RequestOptionsResponse;
   loading: boolean;
@@ -244,6 +253,55 @@ function ServiceOptions({
               onCheckedChange={(checked) => onChange({ searchOnAdd: checked })}
             />
           </Field>
+
+          <Field orientation="horizontal">
+            <FieldContent>
+              <FieldLabel htmlFor={`${service.id}-smart-pick`}>
+                Seeders-aware pick
+              </FieldLabel>
+              <FieldDescription>
+                Grab the release with the best seeder count instead of {name}&apos;s
+                quality-profile picker. Climbs one quality tier when the preferred tier
+                has no healthy torrents.
+              </FieldDescription>
+            </FieldContent>
+            <Switch
+              id={`${service.id}-smart-pick`}
+              checked={defaults.smartPick}
+              disabled={!defaults.searchOnAdd}
+              onCheckedChange={(checked) => onChange({ smartPick: checked })}
+            />
+          </Field>
+
+          {defaults.searchOnAdd && defaults.smartPick ? (
+            <Field>
+              <FieldLabel htmlFor={`${service.id}-min-seeders`}>
+                Minimum seeders
+              </FieldLabel>
+              <Select
+                value={String(defaults.minSeeders)}
+                onValueChange={(value) =>
+                  onChange({ minSeeders: Number.parseInt(value, 10) })
+                }
+              >
+                <SelectTrigger id={`${service.id}-min-seeders`} className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent position="popper">
+                  <SelectGroup>
+                    {MIN_SEEDERS_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={String(option.value)}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+              <FieldDescription>
+                Torrents below this are treated as dead. 0 accepts any release.
+              </FieldDescription>
+            </Field>
+          ) : null}
         </FieldGroup>
       )}
     </FieldSet>

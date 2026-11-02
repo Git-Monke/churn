@@ -193,6 +193,12 @@ export function ReleasePicker({
               ) : null}
             </div>
 
+            {release.recommended ? (
+              <p className="text-xs text-muted-foreground">
+                {recommendationHint(release)}
+              </p>
+            ) : null}
+
             {release.rejections.length > 0 ? (
               <p className="text-xs text-muted-foreground">
                 {release.rejections.join(" · ")}
@@ -219,6 +225,19 @@ export function ReleasePicker({
       </CardContent>
     </Card>
   );
+}
+
+function recommendationHint(release: ShowRelease): string {
+  switch (release.recommendation) {
+    case "tier_upgrade":
+      return "Picked over your preferred quality tier because this release has more seeders.";
+    case "below_threshold":
+      return "No release clears the seeder threshold; this is the least-bad option.";
+    case "best_effort":
+      return "No release matches the quality profile exactly; this is the best available.";
+    default:
+      return "Preferred quality with enough seeders.";
+  }
 }
 
 function releaseTargetName(seasonNumber: number, episodeNumber?: number): string {

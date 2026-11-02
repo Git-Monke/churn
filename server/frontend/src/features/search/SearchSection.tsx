@@ -10,6 +10,7 @@ import {
 } from "@/api/client";
 import type {
   CreateRequestInput,
+  RequestDownload,
   RequestMonitor,
   SearchResponse,
   SearchResult,
@@ -85,8 +86,10 @@ export function SearchSection() {
               },
             }
           : undefined;
+      const download = data.downloads?.[0];
       if (data.status === "added") {
         toast.success(`Requested ${formatTitle(data.title, data.year)}`, {
+          description: download ? downloadSummary(download) : undefined,
           duration: data.service === "sonarr" ? 12_000 : undefined,
         });
       } else {
@@ -112,7 +115,12 @@ export function SearchSection() {
       void queryClient.invalidateQueries({ queryKey: ["activity"] });
       void queryClient.invalidateQueries({ queryKey: ["requested-library"] });
 
-      if (data.status === "added" && data.service === "sonarr" && data.id !== undefined) {
+      if (
+        data.status === "added" &&
+        !download &&
+        data.service === "sonarr" &&
+        data.id !== undefined
+      ) {
         const monitor = variables.input.options?.monitor ?? "all";
         if (monitor !== "none" && monitor !== "future") {
           const seasonNumber = releaseSeason(variables.result, monitor);
@@ -163,6 +171,8 @@ export function SearchSection() {
         qualityProfileId: serviceDefaults.qualityProfileId,
         rootFolderPath: serviceDefaults.rootFolderPath,
         searchOnAdd: serviceDefaults.searchOnAdd,
+        smartPick: serviceDefaults.smartPick,
+        minSeeders: serviceDefaults.minSeeders,
         ...(result.kind === "series"
           ? { monitor: serviceDefaults.monitor ?? "all" }
           : {}),
@@ -326,6 +336,23 @@ function requestKey(input: CreateRequestInput): string | null {
 
 function formatTitle(title: string, year?: number): string {
   return year ? `${title} (${year})` : title;
+}
+
+function downloadSummary(download: RequestDownload): string {
+  const details: string[] = [];
+  if (download.quality) {
+    details.push(download.quality);
+  }
+  if (download.seeders !== undefined) {
+    details.push(`${download.seeders} seeder${download.seeders === 1 ? "" : "s"}`);
+  }
+  const label =
+    download.reason === "tier_upgrade"
+      ? "Upgraded a quality tier for the best seeder count"
+      : download.override
+        ? "Grabbed with a quality override"
+        : "Grabbed the best-seeded release";
+  return details.length > 0 ? `${label} · ${details.join(" · ")}` : label;
 }
 
 function releaseSeason(

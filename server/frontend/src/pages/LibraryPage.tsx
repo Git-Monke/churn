@@ -1,9 +1,13 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { CircleAlertIcon, FilmIcon, SearchIcon } from "lucide-react";
+import { ArrowRightLeftIcon, CircleAlertIcon, FilmIcon, SearchIcon } from "lucide-react";
 
 import { fetchActivity, fetchLibrary, fetchRequestedLibrary } from "@/api/client";
-import type { ActivityServiceState, RequestedLibraryServiceState } from "@/api/types";
+import type {
+  ActivityServiceState,
+  ReleaseRepickEvent,
+  RequestedLibraryServiceState,
+} from "@/api/types";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,6 +30,7 @@ type Filter = "all" | "Movie" | "Series";
 
 export function LibraryPage({ jellyfinUrl }: { jellyfinUrl?: string }) {
   const [filter, setFilter] = useState<Filter>("all");
+  const [dismissedRepicks, setDismissedRepicks] = useState<number[]>([]);
   const libraryQuery = useQuery({
     queryKey: ["library"],
     queryFn: fetchLibrary,
@@ -77,6 +82,9 @@ export function LibraryPage({ jellyfinUrl }: { jellyfinUrl?: string }) {
     activityQuery.data?.services.every((service) => service.state === "ok") ?? false;
   const requestedSettled =
     requestedQuery.data?.services.every((service) => service.state === "ok") ?? false;
+  const repicks = (activityQuery.data?.repicks ?? []).filter(
+    (event) => !dismissedRepicks.includes(event.id),
+  );
 
   return (
     <section className="flex flex-col gap-4">
@@ -128,6 +136,13 @@ export function LibraryPage({ jellyfinUrl }: { jellyfinUrl?: string }) {
         <ActivityServiceNotice key={service.id} service={service} />
       ))}
 
+      {repicks.length > 0 ? (
+        <RepickNotice
+          events={repicks}
+          onDismiss={(id) => setDismissedRepicks((current) => [...current, id])}
+        />
+      ) : null}
+
       {libraryQuery.data && libraryQuery.data.state !== "ok" ? (
         <LibraryStateNotice library={libraryQuery.data} jellyfinUrl={jellyfinUrl} />
       ) : null}
@@ -171,6 +186,69 @@ export function LibraryPage({ jellyfinUrl }: { jellyfinUrl?: string }) {
       ) : null}
     </section>
   );
+}
+
+function RepickNotice({
+  events,
+  onDismiss,
+}: {
+  events: ReleaseRepickEvent[];
+  onDismiss: (id: number) => void;
+}) {
+  const shown = events.slice(0, 3);
+  return (
+    <Alert>
+      <ArrowRightLeftIcon />
+      <AlertTitle>Release re-picked for a faster swarm</AlertTitle>
+      <AlertDescription>
+        <ul className="flex flex-col gap-2">
+          {shown.map((event) => (
+            <li key={event.id} className="flex flex-col gap-1">
+              <span>
+                <span className="font-medium text-foreground">{event.mediaTitle}</span>
+                {event.seasonNumber !== undefined
+                  ? ` · season ${event.seasonNumber}`
+                  : ""}
+                {" — "}
+                only {event.connectedSeeds ?? "a few"} connected seed
+                {event.connectedSeeds === 1 ? "" : "s"}
+                {event.downloadSpeed !== undefined
+                  ? ` at ${formatSpeed(event.downloadSpeed)}`
+                  : ""}
+                . Switched from{" "}
+                <span title={event.fromTitle}>{shortRelease(event.fromTitle)}</span>{" "}
+                to{" "}
+                <span title={event.toTitle}>{shortRelease(event.toTitle)}</span>
+                {event.toReportedSeeders !== undefined
+                  ? ` (${event.toReportedSeeders} reported seeders)`
+                  : ""}
+                .
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="w-fit"
+                onClick={() => onDismiss(event.id)}
+              >
+                Dismiss
+              </Button>
+            </li>
+          ))}
+        </ul>
+      </AlertDescription>
+    </Alert>
+  );
+}
+
+function shortRelease(title: string): string {
+  return title.length > 56 ? `${title.slice(0, 53)}…` : title;
+}
+
+function formatSpeed(bytesPerSecond: number): string {
+  if (bytesPerSecond >= 1024 * 1024) {
+    return `${(bytesPerSecond / (1024 * 1024)).toFixed(1)} MB/s`;
+  }
+  return `${Math.max(0, Math.round(bytesPerSecond / 1024))} KB/s`;
 }
 
 function RequestedServiceNotice({ service }: { service: RequestedLibraryServiceState }) {

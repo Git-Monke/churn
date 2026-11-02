@@ -217,6 +217,32 @@ folder against the live API, checks for duplicates, then adds the title. Sonarr
 gets the chosen monitoring scope; Radarr adds with a `released` minimum
 availability.
 
+**Seeders-aware pick** is also on by default. After adding a title, churn asks
+the arr for its release list, picks the release with the best seeder count at
+the preferred quality tier, and climbs one tier (720p to 1080p, never straight
+to 4K) when that tier has no torrents above **Minimum seeders** (default 5). A
+tier climb the quality profile would reject is grabbed with an explicit
+override; releases rejected for anything other than quality are never
+auto-overridden. Usenet releases always count as healthy. Movie requests grab
+the pick directly; show requests grab well-seeded single-season packs and let
+Sonarr's `SeasonSearch` handle seasons without one. If the search or grab
+fails, churn falls back to the arr's own `MoviesSearch`, `SeasonSearch` or
+`SeriesSearch` command. The show release list marks the same pick as
+**Recommended** with the reason. Turn the switch off to keep the arr's original
+search-on-add behaviour.
+
+Indexer seeder counts can be tracker inflation, so churn also checks the real
+swarm. About a minute after a smart grab it reads qBittorrent's connected seeds
+(`num_seeds`) and speed. When fewer than **Minimum seeders** are connected and
+the speed is below 300 KB/s before 25% completion, it removes and blocklists
+the stalled queue item, then grabs the best-seeded alternative from the same
+search result set. The alternative must be at least 1.5× the stalled release's
+reported seeders, must not be a lower quality tier, and must stay within one
+tier of the profile. Only one re-pick is attempted per request. If the
+replacement grab fails, the arr's normal search command runs again. Re-picks
+appear as a dismissible notice on the Library page and in `/api/activity` as
+`repicks`.
+
 Search stays usable when one app is down: the other app's results are still
 returned and an alert explains the unavailable service.
 

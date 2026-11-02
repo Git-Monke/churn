@@ -12,6 +12,10 @@ export interface ServiceRequestDefaults {
   rootFolderPath?: string;
   monitor?: RequestMonitor;
   searchOnAdd: boolean;
+  /** Let churn pick the fastest well-seeded release instead of the arr. */
+  smartPick: boolean;
+  /** Minimum seeders for a torrent to count as usable. */
+  minSeeders: number;
   /** Prefer a 720p-only quality profile over larger ones when auto-picking. */
   preferSmaller: boolean;
 }
@@ -23,8 +27,8 @@ export interface RequestDefaults {
 
 const STORAGE_KEY = "churn.requestDefaults.v3";
 const DEFAULT_STATE: RequestDefaults = {
-  sonarr: { monitor: "all", searchOnAdd: true, preferSmaller: true },
-  radarr: { searchOnAdd: true, preferSmaller: true },
+  sonarr: { monitor: "all", searchOnAdd: true, smartPick: true, minSeeders: 5, preferSmaller: true },
+  radarr: { searchOnAdd: true, smartPick: true, minSeeders: 5, preferSmaller: true },
 };
 
 export function useRequestDefaults(options?: RequestOptionsResponse) {
@@ -93,6 +97,14 @@ function resolveServiceDefaults(
       typeof current.searchOnAdd === "boolean"
         ? current.searchOnAdd
         : options.defaults.searchOnAdd,
+    smartPick:
+      typeof current.smartPick === "boolean"
+        ? current.smartPick
+        : (options.defaults.smartPick ?? true),
+    minSeeders:
+      typeof current.minSeeders === "number"
+        ? current.minSeeders
+        : (options.defaults.minSeeders ?? 5),
     preferSmaller,
   };
 }

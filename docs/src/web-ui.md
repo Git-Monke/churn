@@ -174,6 +174,27 @@ smaller exists. Turn it off to use the arr default (`HD - 720p/1080p`, then
 folder, all seasons and search on add. The Request button uses these settings
 directly.
 
+**Seeders-aware pick** (on by default) makes churn search releases itself and
+grab the one with the best seeder count, rather than trusting a quality
+profile that may point at a dead 720p torrent. When the preferred tier has no
+torrent above **Minimum seeders** (default 5), churn climbs exactly one quality
+tier, for example a 720p profile accepting a well-seeded 1080p release. That
+override is applied explicitly, and releases rejected for language or mapping
+reasons are never overridden just for seeders. Usenet releases always count as
+healthy. Movie requests grab the pick directly; show requests grab well-seeded
+single-season packs and fall back to Sonarr's per-season search. If picking
+fails, the arr's own search command runs instead, so requests keep working.
+Turn the switch off for the previous search-on-add behaviour.
+
+Because tracker seeder counts are often inflated, a smart grab is watched for
+about a minute. If fewer than the **Minimum seeders** are actually connected to
+qBittorrent and speed stays below 300 KB/s before 25% completion, churn
+removes and blocklists the stalled queue item and grabs the best-seeded
+alternative from the same search: at least 1.5× the reported seeders, no lower
+quality tier, and at most one tier above the profile. Only one re-pick is tried
+per request. The Library page shows a dismissible notice for each switch, and
+`/api/activity` includes the same events under `repicks`.
+
 On `POST /api/requests` the backend re-fetches canonical metadata by id, checks
 for duplicates, validates the profile and root folder against the live arr APIs,
 then adds the title. Sonarr receives the selected monitoring scope; Radarr adds

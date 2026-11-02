@@ -1,4 +1,6 @@
 import type { ServiceId } from "./config.js";
+import type { ReleasePickReason } from "./release-pick.js";
+import type { ReleaseRepickEvent } from "./release-events.js";
 
 export type ServiceState = "ok" | "unconfigured" | "unauthorized" | "unreachable";
 
@@ -215,6 +217,8 @@ export interface ActivityResponse {
   items: ActivityItem[];
   total: number;
   detail?: string;
+  /** Recent automatic release re-picks, newest first. */
+  repicks?: ReleaseRepickEvent[];
 }
 
 export interface ShowRelease {
@@ -230,6 +234,8 @@ export interface ShowRelease {
   approved: boolean;
   canGrab: boolean;
   recommended: boolean;
+  /** Why this release was recommended, when it was. */
+  recommendation?: ReleasePickReason;
   rejections: string[];
   mappedEpisodeCount: number;
   protocol?: "torrent" | "usenet";
@@ -277,6 +283,21 @@ export interface ArrRequestDefaults {
   rootFolderPath?: string;
   monitor?: RequestMonitor;
   searchOnAdd: boolean;
+  /** Churn picks the fastest well-seeded release instead of the arr. */
+  smartPick?: boolean;
+  /** Minimum seeders for a torrent to count as usable. */
+  minSeeders?: number;
+}
+
+export interface RequestDownload {
+  title: string;
+  quality?: string;
+  seeders?: number;
+  sizeBytes?: number;
+  seasonNumber?: number;
+  reason: ReleasePickReason;
+  /** True when the arr had to override the quality profile to grab it. */
+  override: boolean;
 }
 
 export interface ArrRequestOptions {
@@ -301,6 +322,10 @@ export interface RequestOptionsInput {
   rootFolderPath?: string;
   monitor?: RequestMonitor;
   searchOnAdd?: boolean;
+  /** Let churn pick the fastest well-seeded release instead of the arr. */
+  smartPick?: boolean;
+  /** Minimum seeders for a torrent to count as usable. */
+  minSeeders?: number;
 }
 
 export interface CreateRequestInput {
@@ -316,6 +341,8 @@ export interface CreateRequestResponse {
   title: string;
   year?: number;
   id?: number;
+  /** Releases churn grabbed itself, when seeders-aware picking was enabled. */
+  downloads?: RequestDownload[];
 }
 
 export type ShowSource = "jellyfin" | "sonarr";

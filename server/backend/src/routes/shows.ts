@@ -2,13 +2,17 @@ import type { FastifyInstance } from "fastify";
 
 import type { AppConfig, ServiceConfig } from "../config.js";
 import { filterActiveQueueRecords } from "../activity.js";
+import { mapWithConcurrency } from "../concurrency.js";
 import { requireAuth, type AuthContext } from "../auth.js";
 import { ApiError, isUnauthorized, UpstreamError } from "../errors.js";
 import {
+  buildReleaseGrabPayload,
   findRelease,
+  mappedEpisodeIds,
   releaseId,
   releaseMatchesEpisode,
   releaseMatchesSeason,
+  releaseNeedsOverride,
   toShowReleases,
 } from "../releases.js";
 import { mediaCoverUrl } from "../search.js";
@@ -334,26 +338,6 @@ async function getAllSeasonReleaseMatches(
   return matches;
 }
 
-async function mapWithConcurrency<T, R>(
-  items: T[],
-  limit: number,
-  run: (item: T) => Promise<R>,
-): Promise<R[]> {
-  const results: R[] = new Array(items.length);
-  let next = 0;
-  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (true) {
-      const index = next++;
-      if (index >= items.length) {
-        return;
-      }
-      results[index] = await run(items[index] as T);
-    }
-  });
-  await Promise.all(workers);
-  return results;
-}
-
 async function grabShowRelease(
   config: AppConfig,
   seriesId: number,
@@ -388,11 +372,9 @@ async function grabShowRelease(
     throw new ApiError(404, "release_not_found", "That release is no longer available; search again");
   }
 
-  const mappedEpisodeIds = (release.mappedEpisodeInfo ?? [])
-    .map((episode) => episode.id)
-    .filter((id): id is number => Number.isInteger(id));
-  const needsOverride = release.rejected === true || release.downloadAllowed === false;
-  if (needsOverride && mappedEpisodeIds.length === 0) {
+  const episodeIds = mappedEpisodeIds(release);
+  const needsOverride = releaseNeedsOverride(release);
+  if (needsOverride && episodeIds.length === 0) {
     throw new ApiError(
       409,
       "release_unmapped",
@@ -400,17 +382,11 @@ async function grabShowRelease(
     );
   }
 
-  const payload: Record<string, unknown> = {
-    guid: release.guid,
-    indexerId: release.indexerId,
-    seriesId,
-  };
-  if (needsOverride) {
-    payload.shouldOverride = true;
-    payload.episodeIds = mappedEpisodeIds;
-    payload.quality = release.quality;
-    payload.languages = release.languages ?? [{ id: 0, name: "Unknown" }];
-  }
+  const payload = buildReleaseGrabPayload(
+    release,
+    { seriesId },
+    { override: needsOverride, episodeIds },
+  );
 
   try {
     await client.grabRelease(payload);

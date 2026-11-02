@@ -1,7 +1,30 @@
 import type { FastifyInstance } from "fastify";
 
 import type { AppConfig, ServiceConfig } from "../config.js";
+import { mapWithConcurrency } from "../concurrency.js";
 import { ApiError } from "../errors.js";
+import {
+  DEFAULT_MIN_SEEDERS,
+  movieReleaseCandidate,
+  pickRelease,
+  qualityTierFromName,
+  releaseIsTorrent,
+  releaseTier,
+  showReleaseCandidate,
+  type ReleasePick,
+} from "../release-pick.js";
+import type { ReleaseEventStore } from "../release-events.js";
+import {
+  buildReleaseGrabPayload,
+  mappedEpisodeIds,
+  releaseMatchesSeason,
+  releaseNeedsOverride,
+} from "../releases.js";
+import {
+  DEFAULT_SWARM_POLICY,
+  pickRepickRelease,
+  watchSwarm,
+} from "../swarm-watch.js";
 import {
   arrMonitorName,
   monitorSeasons,
@@ -14,22 +37,32 @@ import type {
   ArrRequestOptions,
   CreateRequestInput,
   CreateRequestResponse,
+  RequestDownload,
   RequestKind,
   RequestMonitor,
   RequestOptionsInput,
   RequestOptionsResponse,
 } from "../types.js";
 import { errorMessage, stateForError } from "../upstream/states.js";
+import { createQbittorrentClient } from "../upstream/qbittorrent.js";
 import {
   createArrClient,
   type ArrServiceId,
   type ServarrMovieResource,
   type ServarrQualityProfile,
+  type ServarrRelease,
   type ServarrRootFolder,
   type ServarrSeriesResource,
 } from "../upstream/servarr.js";
 
-export function registerRequestRoutes(app: FastifyInstance, config: AppConfig): void {
+/** Release searches hit every indexer, so they need more time than a CRUD call. */
+const RELEASE_SEARCH_TIMEOUT_MS = 30_000;
+
+export function registerRequestRoutes(
+  app: FastifyInstance,
+  config: AppConfig,
+  events?: ReleaseEventStore,
+): void {
   app.get("/api/requests/options", async (_request, reply) => {
     reply.header("cache-control", "no-store");
     const checkedAt = new Date().toISOString();
@@ -57,7 +90,14 @@ export function registerRequestRoutes(app: FastifyInstance, config: AppConfig): 
       );
     }
 
-    const client = createArrClient(service, serviceConfig, config.requestTimeoutMs);
+    const smartPick = input.options?.smartPick ?? true;
+    const client = createArrClient(
+      service,
+      serviceConfig,
+      smartPick
+        ? Math.max(config.requestTimeoutMs, RELEASE_SEARCH_TIMEOUT_MS)
+        : config.requestTimeoutMs,
+    );
     const term = input.kind === "movie" ? `tmdb:${input.tmdbId}` : `tvdb:${input.tvdbId}`;
     const [lookupResult, libraryResult, profileResult, folderResult] = await Promise.allSettled([
       input.kind === "movie" ? client.lookupMovie(term) : client.lookupSeries(term),
@@ -81,8 +121,8 @@ export function registerRequestRoutes(app: FastifyInstance, config: AppConfig): 
 
     const response =
       input.kind === "movie"
-        ? await addMovieRequest(client, input, lookupResult.value as ServarrMovieResource[], libraryResult.value as ServarrMovieResource[], profileResult.value, folderResult.value)
-        : await addSeriesRequest(client, input, lookupResult.value as ServarrSeriesResource[], libraryResult.value as ServarrSeriesResource[], profileResult.value, folderResult.value);
+        ? await addMovieRequest(client, config, events, input, lookupResult.value as ServarrMovieResource[], libraryResult.value as ServarrMovieResource[], profileResult.value, folderResult.value)
+        : await addSeriesRequest(client, config, events, input, lookupResult.value as ServarrSeriesResource[], libraryResult.value as ServarrSeriesResource[], profileResult.value, folderResult.value);
 
     return response;
   });
@@ -150,11 +190,15 @@ function defaultOptions(
     rootFolderPath: folder?.path,
     ...(id === "sonarr" ? { monitor: "all" as const } : {}),
     searchOnAdd: true,
+    smartPick: true,
+    minSeeders: DEFAULT_MIN_SEEDERS,
   };
 }
 
 async function addMovieRequest(
   client: ReturnType<typeof createArrClient>,
+  config: AppConfig,
+  events: ReleaseEventStore | undefined,
   input: CreateRequestInput,
   lookup: ServarrMovieResource[],
   library: ServarrMovieResource[],
@@ -182,6 +226,7 @@ async function addMovieRequest(
   }
 
   const resolved = resolveOptions(profiles, folders, input.options);
+  const smartPick = resolved.searchOnAdd && resolved.smartPick;
   const { id: _ignored, ...metadata } = resource;
   const added = await client.addMovie({
     ...metadata,
@@ -189,20 +234,73 @@ async function addMovieRequest(
     rootFolderPath: resolved.rootFolderPath,
     monitored: true,
     minimumAvailability: "released",
-    addOptions: { searchForMovie: resolved.searchOnAdd },
+    // When churn picks the release itself, Radarr must not start its own
+    // quality-profile-only search and grab a dead 720p torrent in parallel.
+    addOptions: { searchForMovie: smartPick ? false : resolved.searchOnAdd },
   });
+
+  const mediaTitle = added.title ?? resource.title ?? "Unknown title";
+  const downloads =
+    smartPick && added.id !== undefined
+      ? await smartPickMovie(client, config, events, added.id, mediaTitle, resolved)
+      : [];
 
   return {
     status: "added",
     service: "radarr",
-    title: added.title ?? resource.title ?? "Unknown title",
+    title: mediaTitle,
     year: added.year ?? resource.year,
     id: added.id,
+    ...(downloads.length > 0 ? { downloads } : {}),
   };
+}
+
+/**
+ * Search Radarr's indexers, pick the fastest release that respects the quality
+ * profile and clears the seeder gate, then grab it. Any failure falls back to
+ * Radarr's own `MoviesSearch` command so a request always keeps working.
+ */
+async function smartPickMovie(
+  client: ReturnType<typeof createArrClient>,
+  config: AppConfig,
+  events: ReleaseEventStore | undefined,
+  movieId: number,
+  mediaTitle: string,
+  resolved: ResolvedOptions,
+): Promise<RequestDownload[]> {
+  try {
+    const releases = await client.getMovieReleases(movieId);
+    const pick = pickRelease(
+      releases.map((release) => movieReleaseCandidate(release)),
+      pickPolicy(resolved),
+    );
+    if (pick) {
+      await grabPickedRelease(client, pick, { movieId });
+      scheduleSwarmWatch({
+        config,
+        events,
+        service: "radarr",
+        mediaTitle,
+        target: { movieId },
+        release: pick.release,
+        candidates: releases,
+        preferredTier: pickPolicy(resolved).preferredTier,
+        minSeeders: resolved.minSeeders,
+      });
+      return [toRequestDownload(pick)];
+    }
+  } catch {
+    // Fall through to Radarr's own search; the title is already added.
+  }
+
+  await runSearchCommand(client, { name: "MoviesSearch", movieIds: [movieId] });
+  return [];
 }
 
 async function addSeriesRequest(
   client: ReturnType<typeof createArrClient>,
+  config: AppConfig,
+  events: ReleaseEventStore | undefined,
   input: CreateRequestInput,
   lookup: ServarrSeriesResource[],
   library: ServarrSeriesResource[],
@@ -231,6 +329,12 @@ async function addSeriesRequest(
 
   const resolved = resolveOptions(profiles, folders, input.options);
   const monitor = input.options?.monitor ?? "all";
+  const monitoredSeasons = monitorSeasons(resource.seasons, monitor);
+  const smartPick =
+    resolved.searchOnAdd &&
+    resolved.smartPick &&
+    monitor !== "none" &&
+    monitor !== "future";
   const { id: _ignored, ...metadata } = resource;
   const added = await client.addSeries({
     ...metadata,
@@ -238,27 +342,295 @@ async function addSeriesRequest(
     rootFolderPath: resolved.rootFolderPath,
     monitored: true,
     seasonFolder: true,
-    seasons: monitorSeasons(resource.seasons, monitor),
+    seasons: monitoredSeasons,
     addOptions: {
       monitor: arrMonitorName(monitor),
-      searchForMissingEpisodes: resolved.searchOnAdd,
+      searchForMissingEpisodes: smartPick ? false : resolved.searchOnAdd,
     },
   });
+
+  const mediaTitle = added.title ?? resource.title ?? "Unknown title";
+  const downloads =
+    smartPick && added.id !== undefined
+      ? await smartPickSeasons(
+          client,
+          config,
+          events,
+          added.id,
+          mediaTitle,
+          (monitoredSeasons ?? [])
+            .filter((season) => season.monitored && season.seasonNumber > 0)
+            .map((season) => season.seasonNumber),
+          resolved,
+        )
+      : [];
 
   return {
     status: "added",
     service: "sonarr",
-    title: added.title ?? resource.title ?? "Unknown title",
+    title: mediaTitle,
     year: added.year ?? resource.year,
     id: added.id,
+    ...(downloads.length > 0 ? { downloads } : {}),
   };
+}
+
+/**
+ * Prefer well-seeded season packs for every monitored season. Seasons without
+ * a usable pack fall back to Sonarr's own `SeasonSearch`, which still picks
+ * individual episodes. A whole-series `SeriesSearch` is the last resort.
+ */
+async function smartPickSeasons(
+  client: ReturnType<typeof createArrClient>,
+  config: AppConfig,
+  events: ReleaseEventStore | undefined,
+  seriesId: number,
+  mediaTitle: string,
+  seasonNumbers: number[],
+  resolved: ResolvedOptions,
+): Promise<RequestDownload[]> {
+  if (seasonNumbers.length === 0) {
+    return [];
+  }
+
+  const downloads: RequestDownload[] = [];
+  try {
+    await mapWithConcurrency(seasonNumbers, 3, async (seasonNumber) => {
+      let grabbed = false;
+      try {
+        const releases = await client.getSeasonReleases(seriesId, seasonNumber);
+        const packs = releases.filter(
+          (release) =>
+            isSeasonPack(release, seasonNumber) &&
+            releaseMatchesSeason(release, seasonNumber),
+        );
+        const pick = pickRelease(
+          packs.map((release) =>
+            showReleaseCandidate(release, mappedEpisodeIds(release).length),
+          ),
+          pickPolicy(resolved),
+        );
+        // A below-threshold pack is worse than letting Sonarr search episode by
+        // episode, which can find well-seeded single episodes instead.
+        if (pick && pick.reason !== "below_threshold") {
+          await grabPickedRelease(client, pick, { seriesId });
+          scheduleSwarmWatch({
+            config,
+            events,
+            service: "sonarr",
+            mediaTitle,
+            target: { seriesId },
+            seasonNumber,
+            release: pick.release,
+            candidates: packs,
+            preferredTier: pickPolicy(resolved).preferredTier,
+            minSeeders: resolved.minSeeders,
+          });
+          downloads.push(toRequestDownload(pick, seasonNumber));
+          grabbed = true;
+        }
+      } catch {
+        grabbed = false;
+      }
+      if (!grabbed) {
+        await runSearchCommand(client, {
+          name: "SeasonSearch",
+          seriesId,
+          seasonNumber,
+        });
+      }
+    });
+  } catch {
+    await runSearchCommand(client, { name: "SeriesSearch", seriesId });
+  }
+
+  return downloads.sort(
+    (left, right) => (left.seasonNumber ?? 0) - (right.seasonNumber ?? 0),
+  );
+}
+
+/** A single-season pack, not an episode or a multi-season bundle. */
+function isSeasonPack(release: ServarrRelease, seasonNumber: number): boolean {
+  if (release.fullSeason !== true) {
+    return false;
+  }
+  const seasons = release.seasonNumbers;
+  if (seasons && seasons.length > 0) {
+    return seasons.length === 1 && seasons[0] === seasonNumber;
+  }
+  return release.seasonNumber === undefined || release.seasonNumber === seasonNumber;
+}
+
+async function grabPickedRelease(
+  client: ReturnType<typeof createArrClient>,
+  pick: ReleasePick<ServarrRelease>,
+  target: { seriesId?: number; movieId?: number },
+): Promise<void> {
+  const episodeIds = mappedEpisodeIds(pick.release);
+  const override = pick.requiresOverride || releaseNeedsOverride(pick.release);
+  await client.grabRelease(
+    buildReleaseGrabPayload(
+      pick.release,
+      target,
+      override ? { override: true, episodeIds } : {},
+    ),
+  );
+}
+
+function toRequestDownload(
+  pick: ReleasePick<ServarrRelease>,
+  seasonNumber?: number,
+): RequestDownload {
+  return {
+    title: pick.release.title?.trim() || "Release",
+    quality: pick.release.quality?.quality?.name,
+    seeders: pick.release.seeders,
+    sizeBytes: pick.release.size,
+    seasonNumber,
+    reason: pick.reason,
+    override: pick.requiresOverride || releaseNeedsOverride(pick.release),
+  };
+}
+
+interface ScheduleSwarmWatchOptions {
+  config: AppConfig;
+  events: ReleaseEventStore | undefined;
+  service: "sonarr" | "radarr";
+  mediaTitle: string;
+  target: { movieId?: number; seriesId?: number };
+  seasonNumber?: number;
+  release: ServarrRelease;
+  candidates: ServarrRelease[];
+  preferredTier?: number;
+  minSeeders: number;
+}
+
+/**
+ * Start a background check of the real swarm. It never blocks the request and
+ * only runs when the release list has a plausible better-seeded alternative.
+ */
+function scheduleSwarmWatch(options: ScheduleSwarmWatchOptions): void {
+  if (!options.config.qbittorrent.apiKey || !releaseIsTorrent(options.release)) {
+    return;
+  }
+
+  const currentTier = releaseTier(options.release);
+  const maxTier =
+    options.preferredTier === undefined ? undefined : options.preferredTier + 1;
+  const alternative = pickRepickRelease(
+    options.candidates.map((release) => toCandidate(options.service, release)),
+    {
+      current: options.release,
+      attempted: [],
+      currentTier,
+      preferredTier: options.preferredTier,
+      maxTier,
+      minSeeders: options.minSeeders,
+      gainFactor: DEFAULT_SWARM_POLICY.minSeederGainFactor,
+    },
+  );
+  if (!alternative) {
+    return;
+  }
+
+  const arr = createArrClient(
+    options.service,
+    options.config.services[options.service],
+    Math.max(options.config.requestTimeoutMs, RELEASE_SEARCH_TIMEOUT_MS),
+  );
+  const torrents = createQbittorrentClient(
+    options.config.qbittorrent,
+    Math.max(options.config.requestTimeoutMs, 5_000),
+  );
+
+  void watchSwarm(
+    {
+      service: options.service,
+      mediaTitle: options.mediaTitle,
+      target: options.target,
+      seasonNumber: options.seasonNumber,
+      release: options.release,
+      candidates: options.candidates,
+      preferredTier: options.preferredTier,
+      minSeeders: options.minSeeders,
+    },
+    {
+      getQueue: () => arr.getQueue(),
+      getTorrents: () => torrents.getTorrents(),
+      removeQueueRecord: (queueId) =>
+        arr.removeQueueRecord(queueId, {
+          blocklist: true,
+          skipRedownload: true,
+        }),
+      grab: async (release, override) => {
+        try {
+          await arr.grabRelease(
+            buildReleaseGrabPayload(
+              release,
+              options.target,
+              override
+                ? { override: true, episodeIds: mappedEpisodeIds(release) }
+                : {},
+            ),
+          );
+        } catch (error) {
+          // The stalled download is already gone; make sure the arr searches
+          // again instead of leaving the title with nothing queued.
+          await runSearchCommand(
+            arr,
+            options.service === "radarr"
+              ? { name: "MoviesSearch", movieIds: [options.target.movieId] }
+              : options.seasonNumber !== undefined
+                ? {
+                    name: "SeasonSearch",
+                    seriesId: options.target.seriesId,
+                    seasonNumber: options.seasonNumber,
+                  }
+                : { name: "SeriesSearch", seriesId: options.target.seriesId },
+          );
+          throw error;
+        }
+      },
+      onRepick: (event) => {
+        options.events?.record(event);
+      },
+    },
+  ).catch(() => {
+    // The watch is best effort; the download and the arr stay authoritative.
+  });
+}
+
+function toCandidate(service: "sonarr" | "radarr", release: ServarrRelease) {
+  return service === "sonarr"
+    ? showReleaseCandidate(release, mappedEpisodeIds(release).length)
+    : movieReleaseCandidate(release);
+}
+
+async function runSearchCommand(
+  client: ReturnType<typeof createArrClient>,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  try {
+    await client.runCommand(payload);
+  } catch {
+    // The title is already added; a failed search command must not fail the request.
+  }
+}
+
+interface ResolvedOptions {
+  qualityProfileId: number;
+  qualityProfileName?: string;
+  rootFolderPath: string;
+  searchOnAdd: boolean;
+  smartPick: boolean;
+  minSeeders: number;
 }
 
 function resolveOptions(
   profiles: ServarrQualityProfile[],
   folders: ServarrRootFolder[],
   options: RequestOptionsInput | undefined,
-): { qualityProfileId: number; rootFolderPath: string; searchOnAdd: boolean } {
+): ResolvedOptions {
   const defaultProfile = pickDefaultQualityProfile(profiles);
   const qualityProfileId = options?.qualityProfileId ?? defaultProfile?.id;
   if (qualityProfileId === undefined || !profiles.some((profile) => profile.id === qualityProfileId)) {
@@ -277,8 +649,18 @@ function resolveOptions(
 
   return {
     qualityProfileId,
+    qualityProfileName: profiles.find((profile) => profile.id === qualityProfileId)?.name,
     rootFolderPath: folder.path,
     searchOnAdd: options?.searchOnAdd ?? true,
+    smartPick: options?.smartPick ?? true,
+    minSeeders: options?.minSeeders ?? DEFAULT_MIN_SEEDERS,
+  };
+}
+
+function pickPolicy(resolved: ResolvedOptions) {
+  return {
+    preferredTier: qualityTierFromName(resolved.qualityProfileName),
+    minSeeders: resolved.minSeeders,
   };
 }
 
@@ -329,6 +711,27 @@ function parseRequestOptions(value: Record<string, unknown>): RequestOptionsInpu
       throw new ApiError(400, "invalid_search_on_add", "searchOnAdd must be a boolean");
     }
     options.searchOnAdd = value.searchOnAdd;
+  }
+  if (value.smartPick !== undefined) {
+    if (typeof value.smartPick !== "boolean") {
+      throw new ApiError(400, "invalid_smart_pick", "smartPick must be a boolean");
+    }
+    options.smartPick = value.smartPick;
+  }
+  if (value.minSeeders !== undefined) {
+    if (
+      typeof value.minSeeders !== "number" ||
+      !Number.isSafeInteger(value.minSeeders) ||
+      value.minSeeders < 0 ||
+      value.minSeeders > 1000
+    ) {
+      throw new ApiError(
+        400,
+        "invalid_min_seeders",
+        "minSeeders must be an integer between 0 and 1000",
+      );
+    }
+    options.minSeeders = value.minSeeders;
   }
   return options;
 }

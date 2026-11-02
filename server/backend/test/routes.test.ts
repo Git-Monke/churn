@@ -1139,8 +1139,9 @@ describe("search images", () => {
 });
 
 describe("create requests", () => {
-  it("adds a movie with resolved defaults", async () => {
+  it("adds a movie with resolved defaults and falls back to Radarr search", async () => {
     let posted: Record<string, unknown> | undefined;
+    let command: Record<string, unknown> | undefined;
     installFetch((url, init) => {
       if (url.includes("/movie/lookup")) return jsonResponse([movieLookup]);
       if (url.endsWith("/api/v3/movie")) {
@@ -1149,6 +1150,11 @@ describe("create requests", () => {
           return jsonResponse({ ...movieLookup, id: 7 });
         }
         return jsonResponse([]);
+      }
+      if (url.includes("/api/v3/release?movieId=7")) return jsonResponse([]);
+      if (url.endsWith("/api/v3/command") && init?.method === "POST") {
+        command = readBody(init);
+        return jsonResponse({ id: 1 });
       }
       if (url.includes("/qualityprofile")) return jsonResponse(profiles);
       if (url.includes("/rootfolder")) return jsonResponse(rootFolders);
@@ -1172,9 +1178,130 @@ describe("create requests", () => {
       rootFolderPath: "/data/media/tv",
       monitored: true,
       minimumAvailability: "released",
-      addOptions: { searchForMovie: true },
+      addOptions: { searchForMovie: false },
     });
     expect(posted).not.toHaveProperty("id");
+    expect(command).toMatchObject({ name: "MoviesSearch", movieIds: [7] });
+    await app.close();
+  });
+
+  it("grabs the well-seeded 1080p release over a dead 720p one", async () => {
+    let grabbed: Record<string, unknown> | undefined;
+    const releases = [
+      {
+        guid: "seventh-seal-720",
+        indexerId: 1,
+        indexer: "YTS",
+        title: "The.Seventh.Seal.1957.720p.BluRay.x264",
+        size: 800_000_000,
+        quality: { quality: { id: 4, name: "Bluray-720p" } },
+        approved: true,
+        rejected: false,
+        downloadAllowed: true,
+        rejections: [],
+        protocol: "torrent",
+        seeders: 1,
+        leechers: 4,
+      },
+      {
+        guid: "seventh-seal-1080",
+        indexerId: 2,
+        indexer: "YTS",
+        title: "The.Seventh.Seal.1957.1080p.BluRay.x264",
+        size: 2_000_000_000,
+        quality: { quality: { id: 7, name: "Bluray-1080p" } },
+        approved: false,
+        rejected: true,
+        downloadAllowed: false,
+        rejections: ["Quality Bluray-1080p is not wanted in profile"],
+        protocol: "torrent",
+        seeders: 84,
+        leechers: 2,
+      },
+    ];
+    installFetch((url, init) => {
+      if (url.includes("/movie/lookup")) return jsonResponse([movieLookup]);
+      if (url.endsWith("/api/v3/movie")) {
+        if (init?.method === "POST") {
+          return jsonResponse({ ...movieLookup, id: 7 });
+        }
+        return jsonResponse([]);
+      }
+      if (url.includes("/api/v3/release?movieId=7")) return jsonResponse(releases);
+      if (url.endsWith("/api/v3/release") && init?.method === "POST") {
+        grabbed = readBody(init);
+        return jsonResponse({ id: 1 });
+      }
+      if (url.includes("/qualityprofile")) return jsonResponse(profiles);
+      if (url.includes("/rootfolder")) return jsonResponse(rootFolders);
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildAuthedServer(makeConfig());
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/requests",
+      payload: {
+        kind: "movie",
+        tmdbId: 438631,
+        options: { minSeeders: 5 },
+      },
+    });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(body).toMatchObject({
+      status: "added",
+      downloads: [
+        {
+          title: "The.Seventh.Seal.1957.1080p.BluRay.x264",
+          quality: "Bluray-1080p",
+          seeders: 84,
+          reason: "tier_upgrade",
+          override: true,
+        },
+      ],
+    });
+    expect(grabbed).toMatchObject({
+      guid: "seventh-seal-1080",
+      indexerId: 2,
+      movieId: 7,
+      shouldOverride: true,
+      quality: { quality: { id: 7, name: "Bluray-1080p" } },
+    });
+    await app.close();
+  });
+
+  it("keeps Radarr's own search when smart picking is off", async () => {
+    let posted: Record<string, unknown> | undefined;
+    installFetch((url, init) => {
+      if (url.includes("/movie/lookup")) return jsonResponse([movieLookup]);
+      if (url.endsWith("/api/v3/movie")) {
+        if (init?.method === "POST") {
+          posted = readBody(init);
+          return jsonResponse({ ...movieLookup, id: 7 });
+        }
+        return jsonResponse([]);
+      }
+      if (url.includes("/qualityprofile")) return jsonResponse(profiles);
+      if (url.includes("/rootfolder")) return jsonResponse(rootFolders);
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildAuthedServer(makeConfig());
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/requests",
+      payload: {
+        kind: "movie",
+        tmdbId: 438631,
+        options: { smartPick: false },
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).not.toHaveProperty("downloads");
+    expect(posted).toMatchObject({ addOptions: { searchForMovie: true } });
     await app.close();
   });
 
@@ -1219,6 +1346,99 @@ describe("create requests", () => {
         { seasonNumber: 1, monitored: true },
       ],
       addOptions: { monitor: "firstSeason", searchForMissingEpisodes: false },
+    });
+    await app.close();
+  });
+
+  it("grabs a well-seeded season pack when a series is requested", async () => {
+    let grabbed: Record<string, unknown> | undefined;
+    const packs = [
+      {
+        guid: "severance-s01-720",
+        indexerId: 1,
+        indexer: "EZTV",
+        title: "Severance.S01.720p.WEB-DL",
+        size: 8_000_000_000,
+        quality: { quality: { id: 4, name: "WEBDL-720p" } },
+        approved: true,
+        rejected: false,
+        downloadAllowed: true,
+        rejections: [],
+        protocol: "torrent",
+        seeders: 1,
+        leechers: 4,
+        fullSeason: true,
+        seasonNumber: 1,
+        seasonNumbers: [1],
+        mappedEpisodeInfo: [{ id: 101, seasonNumber: 1, episodeNumber: 1 }],
+      },
+      {
+        guid: "severance-s01-1080",
+        indexerId: 2,
+        indexer: "EZTV",
+        title: "Severance.S01.1080p.WEB-DL",
+        size: 24_000_000_000,
+        quality: { quality: { id: 7, name: "WEBDL-1080p" } },
+        approved: false,
+        rejected: true,
+        downloadAllowed: false,
+        rejections: ["Quality WEBDL-1080p is not wanted in profile"],
+        protocol: "torrent",
+        seeders: 90,
+        leechers: 2,
+        fullSeason: true,
+        seasonNumber: 1,
+        seasonNumbers: [1],
+        mappedEpisodeInfo: [{ id: 101, seasonNumber: 1, episodeNumber: 1 }],
+      },
+    ];
+    installFetch((url, init) => {
+      if (url.includes("/series/lookup")) return jsonResponse([seriesLookup]);
+      if (url.endsWith("/api/v3/series")) {
+        if (init?.method === "POST") {
+          return jsonResponse({ ...seriesLookup, id: 11 });
+        }
+        return jsonResponse([]);
+      }
+      if (url.includes("/api/v3/release?seriesId=11&seasonNumber=1")) {
+        return jsonResponse(packs);
+      }
+      if (url.endsWith("/api/v3/release") && init?.method === "POST") {
+        grabbed = readBody(init);
+        return jsonResponse({ id: 1 });
+      }
+      if (url.includes("/qualityprofile")) return jsonResponse(profiles);
+      if (url.includes("/rootfolder")) return jsonResponse(rootFolders);
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildAuthedServer(makeConfig());
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/requests",
+      payload: { kind: "series", tvdbId: 371980 },
+    });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(body).toMatchObject({
+      status: "added",
+      service: "sonarr",
+      downloads: [
+        {
+          title: "Severance.S01.1080p.WEB-DL",
+          seasonNumber: 1,
+          reason: "tier_upgrade",
+          override: true,
+        },
+      ],
+    });
+    expect(grabbed).toMatchObject({
+      guid: "severance-s01-1080",
+      indexerId: 2,
+      seriesId: 11,
+      shouldOverride: true,
+      episodeIds: [101],
     });
     await app.close();
   });

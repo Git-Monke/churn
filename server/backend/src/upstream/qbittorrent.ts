@@ -15,9 +15,19 @@ export interface QbittorrentTorrent {
   amount_left?: number;
   /** Current download speed in bytes/second. */
   dlspeed?: number;
+  /** Current upload speed in bytes/second. */
+  upspeed?: number;
   /** Seconds remaining, or 8640000 when qBittorrent considers it infinite. */
   eta?: number;
   state?: string;
+  /** Seeds currently connected to this torrent (not the tracker's swarm count). */
+  num_seeds?: number;
+  /** Seeds the tracker reports for the swarm. */
+  num_complete?: number;
+  num_leechs?: number;
+  num_incomplete?: number;
+  /** Unix timestamp qBittorrent added the torrent. */
+  added_on?: number;
 }
 
 /**

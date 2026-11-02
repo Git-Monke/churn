@@ -1,5 +1,11 @@
 import { createHash } from "node:crypto";
 
+import {
+  DEFAULT_MIN_SEEDERS,
+  pickRelease,
+  showReleaseCandidate,
+  type ReleaseCandidate,
+} from "./release-pick.js";
 import type { ShowRelease } from "./types.js";
 import type { ServarrRelease } from "./upstream/servarr.js";
 
@@ -20,6 +26,45 @@ export function findRelease(
   id: string,
 ): ServarrRelease | undefined {
   return releases.find((release) => releaseId(release) === id);
+}
+
+/** Episode ids a release can be mapped to, used when overriding a rejection. */
+export function mappedEpisodeIds(release: ServarrRelease): number[] {
+  return (release.mappedEpisodeInfo ?? [])
+    .map((episode) => episode.id)
+    .filter((id): id is number => Number.isInteger(id));
+}
+
+/** True when the arr will only download this release after an override. */
+export function releaseNeedsOverride(release: ServarrRelease): boolean {
+  return release.rejected === true || release.downloadAllowed === false;
+}
+
+/** Build the `POST /api/v3/release` body for a Sonarr or Radarr grab. */
+export function buildReleaseGrabPayload(
+  release: ServarrRelease,
+  target: { seriesId?: number; movieId?: number },
+  options: { override?: boolean; episodeIds?: number[] } = {},
+): Record<string, unknown> {
+  const payload: Record<string, unknown> = {
+    guid: release.guid,
+    indexerId: release.indexerId,
+  };
+  if (target.seriesId !== undefined) {
+    payload.seriesId = target.seriesId;
+  }
+  if (target.movieId !== undefined) {
+    payload.movieId = target.movieId;
+  }
+  if (options.override) {
+    payload.shouldOverride = true;
+    if (options.episodeIds && options.episodeIds.length > 0) {
+      payload.episodeIds = options.episodeIds;
+    }
+    payload.quality = release.quality;
+    payload.languages = release.languages ?? [{ id: 0, name: "Unknown" }];
+  }
+  return payload;
 }
 
 /** Keep releases that can plausibly satisfy the requested season. */
@@ -59,22 +104,47 @@ export function releaseMatchesEpisode(
   return releaseEpisodeNumbers(release).includes(episodeNumber);
 }
 
-/** Map Sonarr releases into the smaller shape the browser needs. */
-export function toShowReleases(releases: ServarrRelease[]): ShowRelease[] {
-  const mapped = releases
-    .map(mapRelease)
-    .filter((release): release is ShowRelease => release !== null);
+/**
+ * Map Sonarr releases into the smaller shape the browser needs and mark the
+ * release that should be downloaded first. Unlike Sonarr's own picker, the
+ * recommendation weighs seeders: a well-seeded 1080p release beats a 720p
+ * release with one seeder when the callers allow a tier upgrade.
+ */
+export function toShowReleases(
+  releases: ServarrRelease[],
+  options: { minSeeders?: number } = {},
+): ShowRelease[] {
+  const mapped: Array<{ release: ShowRelease; candidate: ReleaseCandidate<ServarrRelease> }> = [];
+  for (const release of releases) {
+    const item = mapRelease(release);
+    if (!item) {
+      continue;
+    }
+    mapped.push({
+      release: item,
+      candidate: showReleaseCandidate(release, item.mappedEpisodeCount),
+    });
+  }
 
-  const approved = mapped.filter((release) => release.approved);
+  const approved = mapped.filter((entry) => entry.release.approved);
   const override = mapped
-    .filter((release) => !release.approved && release.canGrab)
-    .sort((left, right) => left.sizeBytes - right.sizeBytes);
-  const blocked = mapped.filter((release) => !release.approved && !release.canGrab);
-  const ordered = [...approved, ...override, ...blocked];
+    .filter((entry) => !entry.release.approved && entry.release.canGrab)
+    .sort((left, right) => left.release.sizeBytes - right.release.sizeBytes);
+  const blocked = mapped.filter(
+    (entry) => !entry.release.approved && !entry.release.canGrab,
+  );
+  const ordered = [...approved, ...override, ...blocked].map((entry) => entry.release);
 
-  const recommended = ordered.find((release) => release.approved) ?? ordered.find((release) => release.canGrab);
-  if (recommended) {
-    recommended.recommended = true;
+  const pick = pickRelease(
+    mapped.map((entry) => entry.candidate),
+    { minSeeders: options.minSeeders ?? DEFAULT_MIN_SEEDERS },
+  );
+  if (pick) {
+    const recommended = ordered.find((release) => release.id === releaseId(pick.release));
+    if (recommended) {
+      recommended.recommended = true;
+      recommended.recommendation = pick.reason;
+    }
   }
 
   return ordered;

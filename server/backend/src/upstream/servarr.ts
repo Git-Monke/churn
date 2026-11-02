@@ -250,11 +250,14 @@ export function createArrClient(service: ArrServiceId, config: ServiceConfig, ti
     },
 
     /** Cancel one queue record and remove the release from the download client. */
-    async removeQueueRecord(queueId: number): Promise<void> {
+    async removeQueueRecord(
+      queueId: number,
+      options: { blocklist?: boolean; skipRedownload?: boolean } = {},
+    ): Promise<void> {
       const query = new URLSearchParams({
         removeFromClient: "true",
-        blocklist: "false",
-        skipRedownload: "true",
+        blocklist: String(options.blocklist ?? false),
+        skipRedownload: String(options.skipRedownload ?? true),
         changeCategory: "false",
       });
       await deleteRequest(service, `${config.url}/api/v3/queue/${queueId}?${query.toString()}`, {
@@ -312,6 +315,19 @@ export function createArrClient(service: ArrServiceId, config: ServiceConfig, ti
         episodeId: String(episodeId),
       });
       return get<ServarrRelease[]>(`/api/v3/release?${query.toString()}`);
+    },
+
+    async getMovieReleases(movieId: number): Promise<ServarrRelease[]> {
+      const query = new URLSearchParams({ movieId: String(movieId) });
+      return get<ServarrRelease[]>(`/api/v3/release?${query.toString()}`);
+    },
+
+    /** Ask the arr to search itself (used when churn finds no usable release). */
+    async runCommand(payload: Record<string, unknown>): Promise<unknown> {
+      return postJson<unknown>(service, `${config.url}/api/v3/command`, payload, {
+        timeoutMs,
+        headers: authHeaders(),
+      });
     },
 
     async grabRelease(payload: Record<string, unknown>): Promise<unknown> {

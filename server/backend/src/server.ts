@@ -12,6 +12,7 @@ import {
 } from "./auth.js";
 import type { AppConfig } from "./config.js";
 import { ApiError, UpstreamError } from "./errors.js";
+import { createReleaseEventStore } from "./release-events.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerActivityRoutes } from "./routes/activity.js";
 import { registerHealthRoutes } from "./routes/health.js";
@@ -36,6 +37,7 @@ export async function buildServer(
   const app = Fastify({ logger: options.logger ?? false });
   const sessionStore = createMemorySessionStore({ ttlMs: config.sessionTtlMs });
   const loginThrottle = createLoginThrottle();
+  const releaseEvents = createReleaseEventStore();
 
   app.addHook("onClose", async () => {
     sessionStore.close();
@@ -113,8 +115,8 @@ export async function buildServer(
   registerPlaybackRoutes(app, config);
   registerRequestedLibraryRoutes(app, config);
   registerSearchRoutes(app, config);
-  registerRequestRoutes(app, config);
-  registerActivityRoutes(app, config);
+  registerRequestRoutes(app, config, releaseEvents);
+  registerActivityRoutes(app, config, releaseEvents);
   registerShowRoutes(app, config);
   registerServiceRoutes(app, config);
 

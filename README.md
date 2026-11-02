@@ -143,6 +143,35 @@ and TV monitoring, and start a download search immediately. The Request options
 popover has a **Prefer smaller files** switch (on by default) that picks a
 720p-only profile first, then 720p/1080p, so new downloads arrive faster.
 
+Size is not the only speed factor: a 720p release with one seeder can take
+longer than a 1080p release with eighty. The popover also has a **Seeders-aware
+pick** switch (on by default) and a **Minimum seeders** threshold (5 by
+default). With it on, churn searches the indexers itself, grabs the release
+with the best seeder count at the chosen quality tier, and climbs exactly one
+tier (720p → 1080p, never straight to 4K) when the chosen tier has no healthy
+torrents. A tier upgrade that the quality profile would reject is grabbed with
+an explicit override. Usenet releases always count as healthy because they have
+no seeders. If nothing can be grabbed, churn falls back to the arr's own search
+command (`MoviesSearch`, `SeasonSearch` or `SeriesSearch`), so requests still
+work when an indexer is slow or offline.
+
+Movie requests auto-grab the picked release. Show requests prefer well-seeded
+single-season packs for every monitored season and fall back to Sonarr's
+per-season search for seasons without one. The show release list also marks the
+seeders-aware pick as **Recommended**, including the reason (preferred tier,
+tier upgrade, or no release clearing the threshold), so you can override it
+before or after the automatic pick.
+
+The picker's seeders come from the indexer, and trackers routinely overstate
+them. After every smart grab, churn watches qBittorrent for about a minute. If
+fewer than the minimum seeders are **actually connected** and the speed stays
+under 300 KB/s before 25% completion, it blocklists the stalled release and
+grabs the best-seeded alternative from the same search — never a lower quality
+tier and never more than one tier above the profile. That is the case where a
+"20 seeder" 720p release is really serving 3 peers at 100 KB/s while a 1080p
+release has 80 reported seeders. Re-picks are capped at one per request, and
+the Library page shows a dismissible notice explaining each switch.
+
 The Library page merges titles already in Jellyfin with active Sonarr/Radarr
 downloads. Movies show progress and ETA on their card. Each arr-backed card has
 a trash button that cancels the download, removes the title and its files from
