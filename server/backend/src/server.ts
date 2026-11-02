@@ -23,6 +23,7 @@ import { registerSearchRoutes } from "./routes/search.js";
 import { registerServiceRoutes } from "./routes/services.js";
 import { registerShowRoutes } from "./routes/shows.js";
 import { registerStatusRoutes } from "./routes/status.js";
+import { registerVpnRoutes } from "./routes/vpn.js";
 
 interface BuildServerOptions {
   logger?: boolean;
@@ -107,6 +108,7 @@ export async function buildServer(
   registerHealthRoutes(app);
   registerAuthRoutes(app, config, { store: sessionStore, throttle: loginThrottle });
   registerStatusRoutes(app, config);
+  registerVpnRoutes(app, config);
   registerLibraryRoutes(app, config);
   registerPlaybackRoutes(app, config);
   registerRequestedLibraryRoutes(app, config);

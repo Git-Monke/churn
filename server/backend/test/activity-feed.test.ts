@@ -35,6 +35,10 @@ function makeConfig(): AppConfig {
     qbittorrent: {
       url: "http://qbittorrent.test:8080",
     },
+    vpn: {
+      statusUrl: "http://vpn-status.test:8098",
+      timeoutMs: 500,
+    },
   };
 }
 

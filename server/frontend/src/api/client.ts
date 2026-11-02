@@ -18,6 +18,7 @@ import type {
   ShowReleasesResponse,
   ShowSource,
   StatusResponse,
+  VpnStatusResponse,
 } from "./types";
 
 export class ApiClientError extends Error {
@@ -82,6 +83,10 @@ export function logout(): Promise<null> {
 
 export function fetchStatus(): Promise<StatusResponse> {
   return getJson<StatusResponse>("/api/status");
+}
+
+export function fetchVpnStatus(): Promise<VpnStatusResponse> {
+  return getJson<VpnStatusResponse>("/api/vpn");
 }
 
 export function fetchLibrary(): Promise<LibraryResponse> {

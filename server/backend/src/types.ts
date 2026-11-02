@@ -17,6 +17,49 @@ export interface StatusResponse {
   services: ServiceStatus[];
 }
 
+export type VpnCheckId =
+  | "mullvad_exit"
+  | "kill_switch"
+  | "dns"
+  | "ipv6"
+  | "firewall_exception";
+
+export interface VpnCheck {
+  id: VpnCheckId;
+  label: string;
+  passed: boolean;
+  detail: string;
+}
+
+export interface VpnExit {
+  ip?: string;
+  country?: string;
+  city?: string;
+  hostname?: string;
+  organization?: string;
+  serverType?: string;
+  mullvadExit: boolean;
+}
+
+export type VpnCoverageId = "qbittorrent" | "prowlarr" | "flaresolverr";
+
+export interface VpnCoverageEntry {
+  id: VpnCoverageId;
+  name: string;
+  reachable: boolean;
+}
+
+export interface VpnStatusResponse {
+  checkedAt: string;
+  durationMs: number;
+  secure: boolean;
+  exit: VpnExit;
+  checks: VpnCheck[];
+  coverage: VpnCoverageEntry[];
+  dnsNameservers: string[];
+  firewallException?: string;
+}
+
 export type LibraryState = "ok" | "setup_required" | "unconfigured" | "unauthorized" | "unreachable";
 
 export interface LibraryItem {

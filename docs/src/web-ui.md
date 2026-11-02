@@ -2,7 +2,8 @@
 
 The dashboard is a TypeScript app under `server/` with two workspaces. It has
 three pages — Services, Library and Search — selected by hash routes
-(`#/services`, `#/library`, `#/search`):
+(`#/services`, `#/library`, `#/search`). Services has **Services** and **VPN**
+tabs; the VPN tab runs a live leak test when opened and on demand.
 
 ```
 server/backend/    Fastify API, also serves frontend/dist
@@ -48,6 +49,8 @@ survive a rerun.
 | `JELLYFIN_ADMIN_PASSWORD` | — | Optional non-interactive setup password |
 | `SONARR_URL` / `RADARR_URL` | localhost ports | Arr base URLs |
 | `SONARR_API_KEY` / `RADARR_API_KEY` | `config.xml` | Optional overrides |
+| `VPN_STATUS_URL` | `http://127.0.0.1:8098` | Loopback address of the torrent stack's VPN status agent |
+| `VPN_STATUS_TIMEOUT_MS` | `25000` | Timeout for the agent's live checks |
 | `REQUEST_TIMEOUT_MS` | `5000` | Upstream timeout |
 | `CHURN_SESSION_TTL_MS` | `43200000` (12 hours) | Server-side idle session TTL; clamped to 5 minutes–30 days |
 | `CHURN_COOKIE_SECURE` | `auto` | `auto`, `true` or `false` for the session cookie's `Secure` flag |
@@ -100,6 +103,7 @@ token in `.env`, so resume positions and watched state are per user.
 | `POST /api/auth/logout` | Destroy the session and clear the cookie |
 | `GET /api/auth/session` | Current session state (200 when signed out) |
 | `GET /api/status` | Service health, version and latency |
+| `GET /api/vpn` | On-demand VPN leak test from the torrent stack's protected namespace |
 | `GET /api/library` | Jellyfin movies and series with provider ids, scoped to the user's library views |
 | `GET /api/library/images/:itemId` | Poster proxy |
 | `GET /api/library/requested` | Sonarr/Radarr library titles, including requested items not yet downloaded |
@@ -130,6 +134,27 @@ removed, and those records are still returned by a global
 (`/Users/{userId}/Views`, then `/Users/{userId}/Items?ParentId=...`) instead of
 querying all items globally. Items outside the user's current libraries, such as
 files from an in-progress download that was previously indexed, no longer appear.
+
+## VPN status
+
+The Services → VPN tab calls `GET /api/vpn`. The backend asks the torrent
+stack's `vpn-status` agent to run the same checks as `vpn-check`: the public
+exit must be Mullvad, direct `eth0` egress must be blocked, DNS must use
+Gluetun's resolver, IPv6 must be disabled, and the firewall exception must be a
+local address. The response also includes the exit IP, city/country, Mullvad
+server hostname, and whether qBittorrent, Prowlarr and FlareSolverr answer on
+their loopback ports inside the shared namespace.
+
+The agent listens on `127.0.0.1:8098` only and is never exposed on the LAN. If
+the torrent stack is not running, the tab shows an error with the command to
+start it:
+
+```bash
+cd torrent && docker compose up -d --no-deps --force-recreate vpn-status
+```
+
+If Gluetun itself was recreated, recreate the whole torrent stack:
+`docker compose down && docker compose up -d`.
 
 ## Search and requests
 

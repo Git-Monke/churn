@@ -38,6 +38,10 @@ function makeConfig(overrides: Partial<AppConfig["services"]> = {}): AppConfig {
     qbittorrent: {
       url: "http://qbittorrent.test:8080",
     },
+    vpn: {
+      statusUrl: "http://vpn-status.test:8098",
+      timeoutMs: 500,
+    },
   };
 }
 
@@ -130,6 +134,141 @@ describe("health", () => {
     const response = await app.inject({ method: "GET", url: "/api/health" });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ status: "ok" });
+    await app.close();
+  });
+});
+
+function vpnAgentPayload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    checkedAt: "2026-01-01T12:00:00.000Z",
+    durationMs: 1840,
+    secure: true,
+    checks: {
+      mullvadExit: true,
+      killSwitch: true,
+      dns: true,
+      ipv6: true,
+      firewallException: true,
+    },
+    mullvad: {
+      ip: "185.65.134.10",
+      country: "Netherlands",
+      city: "Amsterdam",
+      organization: "Mullvad VPN",
+      mullvad_exit_ip: true,
+      mullvad_exit_ip_hostname: "nl-ams-wg-001",
+      mullvad_server_type: "wireguard",
+    },
+    dns: { nameservers: ["127.0.0.1"] },
+    firewall: { directEgressBlocked: true, exception: "192.168.1.10/32" },
+    ipv6: { disabled: true },
+    coverage: [
+      { id: "qbittorrent", reachable: true },
+      { id: "prowlarr", reachable: true },
+      { id: "flaresolverr", reachable: false },
+    ],
+    ...overrides,
+  };
+}
+
+describe("vpn", () => {
+  it("requires a dashboard session", async () => {
+    const app = await buildServer(appConfig);
+    const response = await app.inject({ method: "GET", url: "/api/vpn" });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json().error.code).toBe("unauthenticated");
+    await app.close();
+  });
+
+  it("returns the exit identity, checks and coverage", async () => {
+    installFetch((url) => {
+      expect(url).toBe("http://vpn-status.test:8098/status");
+      return jsonResponse(vpnAgentPayload());
+    });
+
+    const app = await buildAuthedServer(appConfig);
+    const response = await app.inject({ method: "GET", url: "/api/vpn" });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(body).toMatchObject({
+      secure: true,
+      exit: {
+        ip: "185.65.134.10",
+        country: "Netherlands",
+        city: "Amsterdam",
+        hostname: "nl-ams-wg-001",
+        organization: "Mullvad VPN",
+        serverType: "wireguard",
+        mullvadExit: true,
+      },
+      dnsNameservers: ["127.0.0.1"],
+      firewallException: "192.168.1.10/32",
+    });
+    expect(body.checks).toHaveLength(5);
+    expect(body.checks.every((check: { passed: boolean }) => check.passed)).toBe(true);
+    expect(body.coverage).toEqual([
+      { id: "qbittorrent", name: "qBittorrent", reachable: true },
+      { id: "prowlarr", name: "Prowlarr", reachable: true },
+      { id: "flaresolverr", name: "FlareSolverr", reachable: false },
+    ]);
+    await app.close();
+  });
+
+  it("reports a leak without failing the request", async () => {
+    installFetch(() =>
+      jsonResponse(
+        vpnAgentPayload({
+          secure: false,
+          checks: {
+            mullvadExit: false,
+            killSwitch: false,
+            dns: true,
+            ipv6: true,
+            firewallException: true,
+          },
+          firewall: { directEgressBlocked: false, exception: "192.168.1.10/32" },
+        }),
+      ),
+    );
+
+    const app = await buildAuthedServer(appConfig);
+    const response = await app.inject({ method: "GET", url: "/api/vpn" });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(body.secure).toBe(false);
+    expect(body.checks).toContainEqual(
+      expect.objectContaining({ id: "kill_switch", passed: false }),
+    );
+    expect(body.checks).toContainEqual(
+      expect.objectContaining({ id: "mullvad_exit", passed: false }),
+    );
+    await app.close();
+  });
+
+  it("rejects a malformed agent response", async () => {
+    installFetch(() => jsonResponse({ checkedAt: "2026-01-01T12:00:00.000Z" }));
+
+    const app = await buildAuthedServer(appConfig);
+    const response = await app.inject({ method: "GET", url: "/api/vpn" });
+
+    expect(response.statusCode).toBe(502);
+    expect(response.json().error.code).toBe("invalid_response");
+    await app.close();
+  });
+
+  it("returns an upstream error when the agent is unreachable", async () => {
+    installFetch(() => {
+      throw new Error("connection refused");
+    });
+
+    const app = await buildAuthedServer(appConfig);
+    const response = await app.inject({ method: "GET", url: "/api/vpn" });
+
+    expect(response.statusCode).toBe(502);
+    expect(response.json().error.code).toBe("upstream_error");
     await app.close();
   });
 });

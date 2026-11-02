@@ -1,6 +1,6 @@
 import type { ServiceId } from "./config.js";
 
-export type UpstreamServiceId = ServiceId | "qbittorrent";
+export type UpstreamServiceId = ServiceId | "qbittorrent" | "vpn";
 
 export type UpstreamErrorKind = "unreachable" | "unauthorized" | "http" | "invalid_response";
 

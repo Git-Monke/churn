@@ -1,7 +1,8 @@
 # Churn server dashboard
 
 A small TypeScript app that puts the Jellyfin library, the health of Jellyfin,
-Sonarr and Radarr, and search/requests for new media in one place.
+Sonarr and Radarr, the live VPN leak status of the torrent stack, and
+search/requests for new media in one place.
 
 ```
 server/
@@ -68,6 +69,8 @@ preserves unknown keys, so hand-added settings survive a rerun.
 | `RADARR_API_KEY` | `server/config/radarr/config.xml` | Optional override |
 | `QBITTORRENT_URL` | `http://127.0.0.1:8080` | qBittorrent WebUI used for live torrent progress |
 | `QBITTORRENT_API_KEY` | `torrent/config/qbittorrent/qBittorrent/qBittorrent.conf` | Optional override for the read-only progress key |
+| `VPN_STATUS_URL` | `http://127.0.0.1:8098` | Loopback address of the torrent stack's `vpn-status` agent |
+| `VPN_STATUS_TIMEOUT_MS` | `25000` | Timeout for the agent's live test; checks include external requests |
 | `REQUEST_TIMEOUT_MS` | `5000` | Upstream request timeout |
 | `CHURN_SESSION_TTL_MS` | `43200000` (12 hours) | Server-side idle session TTL; clamped to 5 minutes–30 days |
 | `CHURN_COOKIE_SECURE` | `auto` | `auto`, `true` or `false`; controls the session cookie's `Secure` flag |
@@ -82,6 +85,26 @@ legacy `WebUI\APIKey` entry). Set `QBITTORRENT_API_KEY` to override it, or
 `http://127.0.0.1:8080`. The key is used server-side only, against the read-only
 `/api/v2/torrents/info` endpoint; it is never sent to the browser. If the key or
 qBittorrent is unavailable, Library falls back to Sonarr/Radarr's queue values.
+
+### VPN status
+
+The Services page has **Services** and **VPN** tabs. The VPN tab calls
+`GET /api/vpn`, which asks the torrent stack's `vpn-status` agent to run the
+same checks as the fail-closed `vpn-check` container. The agent shares
+Gluetun's network namespace, so the result describes qBittorrent's live path.
+It returns the Mullvad exit IP/location/server, the DNS resolver, the kill
+switch result, IPv6 state, the local firewall exception, and whether
+qBittorrent, Prowlarr and FlareSolverr answer on their loopback ports.
+
+The agent listens on `127.0.0.1:8098` only. If the torrent stack is not running,
+the tab shows an actionable error instead of failing. Start it with:
+
+```bash
+cd torrent && docker compose up -d --no-deps --force-recreate vpn-status
+```
+
+If Gluetun itself was recreated, recreate the whole torrent stack instead:
+`docker compose down && docker compose up -d`.
 
 ### Jellyfin setup and API key
 
@@ -148,6 +171,7 @@ static playback token is stored in `.env`.
 | `POST /api/auth/logout` | Destroy the session and clear the cookie |
 | `GET /api/auth/session` | Current session state (200 even when signed out) |
 | `GET /api/status` | Jellyfin/Sonarr/Radarr health, version and latency |
+| `GET /api/vpn` | On-demand VPN leak test from inside the torrent stack's network namespace |
 | `GET /api/library` | Jellyfin movies and series with backend-owned poster URLs and provider ids |
 | `GET /api/library/images/:itemId` | Poster proxy; no Jellyfin key reaches the browser |
 | `GET /api/library/requested` | Sonarr/Radarr library titles, including requested items not yet downloaded |
@@ -199,7 +223,8 @@ returned and an alert explains the unavailable service.
 ## Library and activity
 
 The dashboard is split into Services, Library and Search pages using lightweight
-hash routes (`#/services`, `#/library`, `#/search`).
+hash routes (`#/services`, `#/library`, `#/search`). Services has **Services**
+and **VPN** tabs; the VPN tab runs its test when opened and on demand.
 
 `/api/activity` reads the Sonarr and Radarr v3 queues in parallel and returns
 only active records: queued, downloading, importing, or waiting on import.

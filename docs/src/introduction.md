@@ -11,7 +11,7 @@ between them assumes they share one host.
 | Stack | Purpose | Services |
 | --- | --- | --- |
 | [Server](server.md) | Serves the media library and runs the automation apps | Jellyfin, Sonarr, Radarr |
-| [Torrent](torrent.md) | Finds releases and downloads them through a VPN | qBittorrent, Prowlarr, FlareSolverr, gluetun |
+| [Torrent](torrent.md) | Finds releases and downloads them through a VPN | qBittorrent, Prowlarr, FlareSolverr, gluetun, vpn-status |
 
 ## The two paths
 

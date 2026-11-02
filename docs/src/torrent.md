@@ -10,6 +10,7 @@ traffic are not allowed to start.
 | --- | --- | --- |
 | `gluetun` | Mullvad WireGuard client, firewall, DNS resolver, and port publisher | VPN namespace |
 | `vpn-check` | One-shot startup verification of VPN exit, DNS, and kill switch | Shares gluetun |
+| `vpn-status` | On-demand leak test for the dashboard's VPN tab | Shares gluetun |
 | `qbittorrent` | Download client | Shares gluetun |
 | `prowlarr` | Indexer manager | Shares gluetun |
 | `flaresolverr` | Solves Cloudflare challenges for indexers | Shares gluetun |
@@ -19,7 +20,8 @@ traffic are not allowed to start.
 Only `gluetun` joins a Docker network. The other network-capable containers use
 `network_mode: "service:gluetun"` and therefore have no independent route to
 the internet. Web UI ports `8080` (qBittorrent) and `9696` (Prowlarr) are
-published on the gluetun container.
+published on the gluetun container. Port `8098` is the dashboard's VPN status
+agent and is bound to the host loopback only.
 
 The qBittorrent WebUI is published on all host interfaces over plain HTTP and is
 protected by the API key seeded by `qbittorrent-init`. The churn backend reads
@@ -42,6 +44,10 @@ other machines, bind the published port to `127.0.0.1:8080:8080` in
 - `vpn-check` requires a Mullvad exit, verifies that direct `eth0` egress is
   blocked, and verifies the DNS configuration. qBittorrent, Prowlarr, and
   FlareSolverr wait for it to complete successfully.
+- `vpn-status` runs the same checks on demand from the same network namespace
+  and serves them as JSON on `127.0.0.1:8098`. The dashboard's Services → VPN
+  tab uses it to show the live exit IP, boundary checks, and which torrent apps
+  are reachable inside the protected namespace.
 
 ## Wiring and storage
 
@@ -61,5 +67,15 @@ cd torrent
 docker compose up -d                         # start the stack
 docker logs vpn-check                        # inspect the last VPN check
 docker compose up --force-recreate vpn-check # rerun the VPN check
-docker compose run --rm prowlarr-init        # re-apply the wiring
+docker compose up -d --no-deps --force-recreate vpn-status  # restart the check agent
+curl -s http://127.0.0.1:8098/status                         # run the live check directly
+docker compose run --rm prowlarr-init                        # re-apply the wiring
+```
+
+Do not recreate `gluetun` by itself: qBittorrent, Prowlarr, FlareSolverr and
+`vpn-status` share its network namespace. If Gluetun is recreated, recreate the
+whole stack:
+
+```bash
+docker compose down && docker compose up -d
 ```

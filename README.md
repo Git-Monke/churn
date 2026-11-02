@@ -7,7 +7,7 @@ Two roles, one machine each (or both on the same box):
 | stack     | what it runs                                  | ports |
 | --------- | --------------------------------------------- | ----- |
 | `server`  | Jellyfin + Sonarr + Radarr                    | 8096, 8989, 7878 |
-| `torrent` | qBittorrent + Prowlarr + FlareSolverr tunnelled through Mullvad WireGuard | 8080, 9696 |
+| `torrent` | qBittorrent + Prowlarr + FlareSolverr tunnelled through Mullvad WireGuard | 8080, 9696, 8098 (localhost) |
 
 ## Usage
 
@@ -107,6 +107,12 @@ Sonarr/Radarr requests and cancel/delete actions; Jellyfin's own library
 restrictions still apply because
 library calls use the user's token. See `server/README.md` for session settings
 and the full-access warning.
+
+The Services page has **Services** and **VPN** tabs. The VPN tab runs an
+on-demand leak test from the torrent stack's `vpn-status` agent and shows the
+verdict, the Mullvad exit IP/location, DNS and kill-switch checks, IPv6 state,
+and whether qBittorrent, Prowlarr and FlareSolverr are sharing the protected
+network namespace.
 
 ```bash
 cd server
@@ -257,12 +263,17 @@ The torrent stack is designed to fail closed, not merely to prefer the VPN:
   the public exit is a Mullvad exit, that `eth0` cannot reach the internet
   directly, and that DNS is using Gluetun's resolver. A failure stops the
   dependent containers from starting.
+- `vpn-status` stays running beside the apps and exposes the same live checks as
+  JSON on `127.0.0.1:8098`. It shares Gluetun's namespace, so the dashboard's
+  Services → VPN tab tests the same path qBittorrent uses. The port is bound to
+  the host loopback only and is not reachable from the LAN.
 - `churn` validates the effective `docker compose config --format json` before
   `compose up` and refuses to start `torrent` if any service could bypass the
-  VPN namespace, publish its own ports, use a non-Gluetun network, or if the
-  firewall/DNS/IPv6 settings are unsafe.
+  VPN namespace, publish its own ports, use a non-Gluetun network, expose the
+  status agent beyond localhost, or if the firewall/DNS/IPv6 settings are
+  unsafe.
 
-Re-run the runtime check at any time:
+Re-run the startup check at any time:
 
 ```bash
 cd torrent && docker compose up --force-recreate vpn-check
@@ -270,6 +281,21 @@ cd torrent && docker compose up --force-recreate vpn-check
 
 A passing run ends with `PASS: torrent egress is confined to the VPN`. Check
 `docker logs vpn-check` for the result of the last automatic startup check.
+
+Re-run the dashboard's VPN test by opening Services → VPN and pressing **Run
+test again**, or restart the agent:
+
+```bash
+cd torrent && docker compose up -d --no-deps --force-recreate vpn-status
+curl -s http://127.0.0.1:8098/status
+```
+
+Do not recreate `gluetun` by itself. Every torrent app shares its network
+namespace, so if Gluetun is recreated the apps must be recreated too:
+
+```bash
+cd torrent && docker compose down && docker compose up -d
+```
 
 ## Sonarr and Radarr
 

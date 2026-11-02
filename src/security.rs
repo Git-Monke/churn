@@ -11,6 +11,7 @@ const GLUETUN: &str = "gluetun";
 const GLUETUN_NETNS: &str = "service:gluetun";
 const FILTERED_NETWORK: &str = "none";
 const GLUETUN_DNS: &str = "127.0.0.1";
+const LOOPBACK_HOST: &str = "127.0.0.1";
 const FIREWALL_ENABLED: &str = "FIREWALL_ENABLED_DISABLING_IT_SHOOTS_YOU_IN_YOUR_FOOT";
 
 /// Validate the effective `docker compose config --format json` for the
@@ -25,7 +26,9 @@ pub fn verify_torrent_isolation(config: &Value) -> Result<(), Vec<String>> {
 
     let mut problems = Vec::new();
     check_gluetun(gluetun, &mut problems);
+    check_status_port(gluetun, &mut problems);
     check_vpn_gate(services, &mut problems);
+    check_vpn_status(services, &mut problems);
 
     for (name, service) in services {
         if name != GLUETUN {
@@ -178,6 +181,13 @@ fn check_vpn_gate(services: &Map<String, Value>, problems: &mut Vec<String>) {
     ) {
         problems.push("vpn-check must mount its check script read-only".to_string());
     }
+    if !has_read_only_mount(
+        vpn_check,
+        "/scripts/vpn-lib.sh",
+        "/torrent/scripts/vpn-lib.sh",
+    ) {
+        problems.push("vpn-check must mount its shared check library read-only".to_string());
+    }
 
     for (name, service) in services {
         if matches!(name.as_str(), GLUETUN | "vpn-check" | "qbittorrent-init") {
@@ -189,6 +199,49 @@ fn check_vpn_gate(services: &Map<String, Value>, problems: &mut Vec<String>) {
             problems.push(format!(
                 "{name} must wait for vpn-check with condition service_completed_successfully"
             ));
+        }
+    }
+}
+
+/// The dashboard check agent must share Gluetun's namespace and must not be
+/// reachable without the script mounts it needs.
+fn check_vpn_status(services: &Map<String, Value>, problems: &mut Vec<String>) {
+    let Some(vpn_status) = services.get("vpn-status") else {
+        problems.push("the torrent stack has no vpn-status dashboard agent".to_string());
+        return;
+    };
+    if vpn_status.get("network_mode").and_then(Value::as_str) != Some(GLUETUN_NETNS) {
+        problems.push("vpn-status must share Gluetun's network namespace".to_string());
+    }
+    if !has_read_only_mount(
+        vpn_status,
+        "/scripts/vpn-status.sh",
+        "/torrent/scripts/vpn-status.sh",
+    ) {
+        problems.push("vpn-status must mount its server script read-only".to_string());
+    }
+    if !has_read_only_mount(
+        vpn_status,
+        "/scripts/vpn-lib.sh",
+        "/torrent/scripts/vpn-lib.sh",
+    ) {
+        problems.push("vpn-status must mount the shared check library read-only".to_string());
+    }
+}
+
+/// The status agent returns security details. If Gluetun publishes it, the host
+/// side must be loopback so it is not exposed to the LAN.
+fn check_status_port(gluetun: &Value, problems: &mut Vec<String>) {
+    let Some(ports) = gluetun.get("ports").and_then(Value::as_array) else {
+        return;
+    };
+    for port in ports {
+        if port.get("target").and_then(Value::as_i64) != Some(8098) {
+            continue;
+        }
+        if port.get("host_ip").and_then(Value::as_str) != Some(LOOPBACK_HOST) {
+            problems
+                .push("the vpn-status port must bind 127.0.0.1, not a LAN interface".to_string());
         }
     }
 }
@@ -300,6 +353,34 @@ mod tests {
         })
     }
 
+    fn lib_mount() -> Value {
+        json!({
+            "type": "bind",
+            "source": "/repo/torrent/scripts/vpn-lib.sh",
+            "target": "/scripts/vpn-lib.sh",
+            "read_only": true
+        })
+    }
+
+    fn status_script_mount(target: &str) -> Value {
+        json!({
+            "type": "bind",
+            "source": "/repo/torrent/scripts/vpn-status.sh",
+            "target": target,
+            "read_only": true
+        })
+    }
+
+    fn status_port() -> Value {
+        json!({
+            "mode": "ingress",
+            "target": 8098,
+            "published": "8098",
+            "protocol": "tcp",
+            "host_ip": "127.0.0.1"
+        })
+    }
+
     fn safe_config() -> Value {
         json!({
             "services": {
@@ -315,11 +396,23 @@ mod tests {
                         "DNS_UPSTREAM_RESOLVER_TYPE": "dot"
                     },
                     "networks": { "default": null },
+                    "ports": [status_port()],
                     "sysctls": { "net.ipv6.conf.all.disable_ipv6": 1 }
                 },
                 "vpn-check": {
                     "network_mode": "service:gluetun",
-                    "volumes": [resolv_mount(), script_mount()]
+                    "volumes": [resolv_mount(), script_mount(), lib_mount()]
+                },
+                "vpn-status": {
+                    "network_mode": "service:gluetun",
+                    "volumes": [
+                        resolv_mount(),
+                        lib_mount(),
+                        status_script_mount("/scripts/vpn-status.sh")
+                    ],
+                    "depends_on": {
+                        "vpn-check": { "condition": "service_completed_successfully" }
+                    }
                 },
                 "qbittorrent": {
                     "network_mode": "service:gluetun",
@@ -441,6 +534,41 @@ mod tests {
             .remove("vpn-check");
         let problems = verify_torrent_isolation(&config).unwrap_err();
         assert!(problems.iter().any(|p| p.contains("vpn-check")));
+    }
+
+    #[test]
+    fn rejects_a_missing_vpn_status_agent() {
+        let mut config = safe_config();
+        config["services"]
+            .as_object_mut()
+            .unwrap()
+            .remove("vpn-status");
+        let problems = verify_torrent_isolation(&config).unwrap_err();
+        assert!(problems.iter().any(|p| p.contains("vpn-status")));
+    }
+
+    #[test]
+    fn rejects_a_vpn_status_agent_on_a_separate_network() {
+        let mut config = safe_config();
+        config["services"]["vpn-status"]["network_mode"] = json!("bridge");
+        let problems = verify_torrent_isolation(&config).unwrap_err();
+        assert!(problems.iter().any(|p| p.contains("vpn-status")));
+    }
+
+    #[test]
+    fn rejects_a_vpn_status_port_exposed_on_the_lan() {
+        let mut config = safe_config();
+        config["services"]["gluetun"]["ports"] = json!([
+            {
+                "mode": "ingress",
+                "target": 8098,
+                "published": "8098",
+                "protocol": "tcp",
+                "host_ip": "0.0.0.0"
+            }
+        ]);
+        let problems = verify_torrent_isolation(&config).unwrap_err();
+        assert!(problems.iter().any(|p| p.contains("vpn-status port")));
     }
 
     #[test]

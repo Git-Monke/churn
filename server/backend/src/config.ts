@@ -19,6 +19,13 @@ export interface QbittorrentConfig {
   apiKey?: string;
 }
 
+export interface VpnConfig {
+  /** Loopback-only address of the torrent stack's vpn-status agent. */
+  statusUrl: string;
+  /** The agent runs external curl probes, so this is longer than a normal API timeout. */
+  timeoutMs: number;
+}
+
 export interface AppConfig {
   host: string;
   port: number;
@@ -30,6 +37,7 @@ export interface AppConfig {
   jellyfinPublicUrl: string;
   services: Record<ServiceId, ServiceConfig>;
   qbittorrent: QbittorrentConfig;
+  vpn: VpnConfig;
 }
 
 interface LoadConfigOptions {
@@ -45,6 +53,7 @@ const SERVICE_DEFAULTS: Record<ServiceId, { name: string; url: string }> = {
 };
 
 const QBITTORRENT_DEFAULT_URL = "http://127.0.0.1:8080";
+const VPN_STATUS_DEFAULT_URL = "http://127.0.0.1:8098";
 
 /** Resolve the `server/` directory from this module, under both src/ and dist/. */
 export function resolveServerDir(): string {
@@ -150,6 +159,11 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
     apiKey: cleanApiKey(values.QBITTORRENT_API_KEY) ?? readQbittorrentApiKey(serverDir),
   };
 
+  const vpn: VpnConfig = {
+    statusUrl: normalizeUrl(values.VPN_STATUS_URL, VPN_STATUS_DEFAULT_URL),
+    timeoutMs: parseVpnTimeout(values.VPN_STATUS_TIMEOUT_MS),
+  };
+
   return {
     host: nonEmpty(values.HOST) ?? "127.0.0.1",
     port: parsePort(values.PORT),
@@ -164,6 +178,7 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
     ),
     services,
     qbittorrent,
+    vpn,
   };
 }
 
@@ -220,6 +235,25 @@ function parseTimeout(value: string | undefined): number {
   const timeout = Number.parseInt(value, 10);
   if (!Number.isInteger(timeout) || timeout < 250 || timeout > 60_000) {
     throw new Error(`invalid REQUEST_TIMEOUT_MS: ${value}`);
+  }
+  return timeout;
+}
+
+const DEFAULT_VPN_STATUS_TIMEOUT_MS = 25_000;
+const MIN_VPN_STATUS_TIMEOUT_MS = 1_000;
+const MAX_VPN_STATUS_TIMEOUT_MS = 120_000;
+
+function parseVpnTimeout(value: string | undefined): number {
+  if (!value?.trim()) {
+    return DEFAULT_VPN_STATUS_TIMEOUT_MS;
+  }
+  const timeout = Number.parseInt(value, 10);
+  if (
+    !Number.isInteger(timeout) ||
+    timeout < MIN_VPN_STATUS_TIMEOUT_MS ||
+    timeout > MAX_VPN_STATUS_TIMEOUT_MS
+  ) {
+    throw new Error(`invalid VPN_STATUS_TIMEOUT_MS: ${value}`);
   }
   return timeout;
 }

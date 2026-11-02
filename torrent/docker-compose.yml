@@ -10,6 +10,7 @@ services:
     ports:
       - "8080:8080"                      # qBittorrent web UI (published here, not on qbittorrent)
       - "9696:9696"                      # Prowlarr web UI (published here, not on prowlarr)
+      - "127.0.0.1:${VPN_STATUS_PORT:-8098}:${VPN_STATUS_PORT:-8098}"  # dashboard VPN check, loopback only
     environment:
       - VPN_SERVICE_PROVIDER=mullvad
       - VPN_TYPE=wireguard
@@ -51,9 +52,37 @@ services:
         condition: service_healthy
     volumes:
       - ./resolv.conf:/etc/resolv.conf:ro    # Gluetun's local DNS
+      - ./scripts/vpn-lib.sh:/scripts/vpn-lib.sh:ro
       - ./scripts/vpn-check.sh:/scripts/vpn-check.sh:ro
     entrypoint: ["/bin/sh", "/scripts/vpn-check.sh"]
     restart: "no"
+
+  # On-demand leak test for the dashboard. Shares Gluetun's namespace, so the
+  # checks run from the same network namespace as qBittorrent. Its port is
+  # published on the host loopback only; the churn backend is the only client.
+  vpn-status:
+    image: curlimages/curl:8.23.0
+    container_name: vpn-status
+    network_mode: "service:gluetun"
+    user: "0:0"
+    environment:
+      - HOST_IP=${HOST_IP:-}
+      - TZ=${TZ:-UTC}
+      - VPN_STATUS_PORT=${VPN_STATUS_PORT:-8098}
+      - QBITTORRENT_URL=http://127.0.0.1:8080
+      - PROWLARR_URL=http://127.0.0.1:9696
+      - FLARESOLVERR_URL=${FLARESOLVERR_URL:-http://localhost:8191}
+    depends_on:
+      gluetun:
+        condition: service_healthy
+      vpn-check:
+        condition: service_completed_successfully
+    volumes:
+      - ./resolv.conf:/etc/resolv.conf:ro    # Gluetun's local DNS
+      - ./scripts/vpn-lib.sh:/scripts/vpn-lib.sh:ro
+      - ./scripts/vpn-status.sh:/scripts/vpn-status.sh:ro
+    entrypoint: ["/bin/sh", "/scripts/vpn-status.sh", "serve"]
+    restart: unless-stopped
 
   # Bypasses Cloudflare/DDoS-GUARD challenges for indexers such as EZTV.
   # Shares Gluetun's network namespace so browser traffic also exits the VPN.

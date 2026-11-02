@@ -60,7 +60,8 @@ same machine.
 
 The optional TypeScript app in `server/backend` and `server/frontend` serves a
 single dashboard for the Jellyfin library, the health of Jellyfin, Sonarr and
-Radarr, and searching and requesting new media. Requests are added through the
+Radarr, the torrent stack's live VPN leak status, and searching and requesting
+new media. Requests are added through the
 Sonarr/Radarr APIs so the existing Prowlarr and qBittorrent pipeline starts the
 download. The app binds to `127.0.0.1` and the browser only calls the backend;
 upstream keys and URLs stay server-side.

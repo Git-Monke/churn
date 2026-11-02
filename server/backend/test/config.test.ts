@@ -47,6 +47,10 @@ describe("config loading", () => {
     expect(config.services.sonarr.url).toBe("http://127.0.0.1:8989");
     expect(config.services.sonarr.apiKey).toBe("sonarr-key");
     expect(config.services.radarr.apiKey).toBe("radarr-key");
+    expect(config.vpn).toEqual({
+      statusUrl: "http://127.0.0.1:8098",
+      timeoutMs: 25_000,
+    });
   });
 
   it("reads the qBittorrent key from env or the seeded config file", () => {
@@ -117,6 +121,8 @@ describe("config loading", () => {
         SONARR_API_KEY: "env-key",
         CHURN_SESSION_TTL_MS: "3600000",
         CHURN_COOKIE_SECURE: "true",
+        VPN_STATUS_URL: "http://vpn-status:8098/",
+        VPN_STATUS_TIMEOUT_MS: "30000",
       },
       readDotEnv: false,
     });
@@ -130,6 +136,10 @@ describe("config loading", () => {
     expect(config.services.sonarr.apiKey).toBe("env-key");
     expect(config.sessionTtlMs).toBe(3_600_000);
     expect(config.cookieSecure).toBe(true);
+    expect(config.vpn).toEqual({
+      statusUrl: "http://vpn-status:8098",
+      timeoutMs: 30_000,
+    });
   });
 
   it("loads server/.env but lets process environment win", () => {
@@ -167,6 +177,20 @@ describe("config loading", () => {
     expect(() => loadConfig({ serverDir, env: { PORT: "99999" }, readDotEnv: false })).toThrow(
       /invalid PORT/,
     );
+    expect(() =>
+      loadConfig({
+        serverDir,
+        env: { VPN_STATUS_TIMEOUT_MS: "soon" },
+        readDotEnv: false,
+      }),
+    ).toThrow(/VPN_STATUS_TIMEOUT_MS/);
+    expect(() =>
+      loadConfig({
+        serverDir,
+        env: { VPN_STATUS_TIMEOUT_MS: "10" },
+        readDotEnv: false,
+      }),
+    ).toThrow(/VPN_STATUS_TIMEOUT_MS/);
   });
 
   it("clamps the session TTL and parses the cookie secure setting", () => {
