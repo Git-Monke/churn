@@ -13,6 +13,22 @@ export interface JellyfinSystemInfo extends JellyfinPublicInfo {
   OperatingSystemDisplayName?: string;
 }
 
+export interface JellyfinUserPolicy {
+  IsAdministrator?: boolean;
+}
+
+export interface JellyfinUser {
+  Id?: string;
+  Name?: string;
+  Policy?: JellyfinUserPolicy;
+}
+
+export interface JellyfinAuthenticationResult {
+  User?: JellyfinUser;
+  AccessToken?: string;
+  ServerId?: string;
+}
+
 export interface JellyfinItem {
   Id?: string;
   Name?: string;
@@ -47,7 +63,12 @@ export interface JellyfinImage {
   contentType: string;
 }
 
-const LIBRARY_PATH = "/Items";
+const CLIENT_NAME = "Churn";
+const DEVICE_NAME = "Churn Web";
+const DEVICE_ID = "churn-web";
+const CLIENT_VERSION = "0.1.0";
+const AUTHORIZATION_HEADER = `MediaBrowser Client="${CLIENT_NAME}", Device="${DEVICE_NAME}", DeviceId="${DEVICE_ID}", Version="${CLIENT_VERSION}"`;
+
 const LIBRARY_QUERY = new URLSearchParams({
   Recursive: "true",
   IncludeItemTypes: "Movie,Series",
@@ -59,11 +80,47 @@ const LIBRARY_QUERY = new URLSearchParams({
 });
 const DETAIL_FIELDS = "ProductionYear,RunTimeTicks,CommunityRating,OfficialRating,Genres,Overview,ProviderIds";
 
-export function createJellyfinClient(config: ServiceConfig, timeoutMs: number) {
+export function createJellyfinClient(
+  config: ServiceConfig,
+  timeoutMs: number,
+  token: string | undefined = config.apiKey,
+) {
+  const deviceHeaders = (): Record<string, string> => ({
+    "X-Emby-Client": CLIENT_NAME,
+    "X-Emby-Device-Name": DEVICE_NAME,
+    "X-Emby-Device-Id": DEVICE_ID,
+    "X-Emby-Client-Version": CLIENT_VERSION,
+  });
+
   const authHeaders = (): Record<string, string> =>
-    config.apiKey ? { "X-Emby-Token": config.apiKey } : {};
+    token ? { "X-Emby-Token": token, ...deviceHeaders() } : deviceHeaders();
 
   return {
+    async authenticate(username: string, password: string): Promise<JellyfinAuthenticationResult> {
+      return fetchJson<JellyfinAuthenticationResult>(
+        "jellyfin",
+        `${config.url}/Users/AuthenticateByName`,
+        {
+          timeoutMs,
+          method: "POST",
+          headers: { Authorization: AUTHORIZATION_HEADER, ...deviceHeaders() },
+          body: { Username: username, Pw: password },
+        },
+      );
+    },
+
+    async logout(accessToken: string): Promise<void> {
+      await fetchWithTimeout(
+        "jellyfin",
+        `${config.url}/Sessions/Logout`,
+        {
+          method: "POST",
+          headers: { "X-Emby-Token": accessToken, ...deviceHeaders() },
+        },
+        timeoutMs,
+      );
+    },
+
     async getPublicInfo(): Promise<JellyfinPublicInfo> {
       return fetchJson<JellyfinPublicInfo>("jellyfin", `${config.url}/System/Info/Public`, {
         timeoutMs,
@@ -71,7 +128,7 @@ export function createJellyfinClient(config: ServiceConfig, timeoutMs: number) {
     },
 
     async getSystemInfo(): Promise<JellyfinSystemInfo> {
-      if (!config.apiKey) {
+      if (!token) {
         throw new UpstreamError("jellyfin", "unauthorized", "Jellyfin API key is not configured");
       }
       return fetchJson<JellyfinSystemInfo>("jellyfin", `${config.url}/System/Info`, {
@@ -80,20 +137,57 @@ export function createJellyfinClient(config: ServiceConfig, timeoutMs: number) {
       });
     },
 
-    async listLibrary(): Promise<JellyfinItem[]> {
-      if (!config.apiKey) {
+    async listUserViews(userId: string): Promise<JellyfinItem[]> {
+      if (!token) {
         throw new UpstreamError("jellyfin", "unauthorized", "Jellyfin API key is not configured");
       }
       const response = await fetchJson<JellyfinItemsResponse>(
         "jellyfin",
-        `${config.url}${LIBRARY_PATH}?${LIBRARY_QUERY.toString()}`,
+        `${config.url}/Users/${encodeURIComponent(userId)}/Views`,
         { timeoutMs, headers: authHeaders() },
       );
       return response.Items ?? [];
     },
 
+    /**
+     * Lists only items that are still reachable through one of the user's
+     * library views. A global `/Items?Recursive=true` query also returns
+     * orphaned records that Jellyfin keeps after a library path is removed,
+     * which made in-progress download files look like library items.
+     */
+    async listLibrary(userId: string): Promise<JellyfinItem[]> {
+      if (!token) {
+        throw new UpstreamError("jellyfin", "unauthorized", "Jellyfin API key is not configured");
+      }
+      const views = await this.listUserViews(userId);
+      const libraries = views.filter(
+        (view): view is JellyfinItem & { Id: string } => typeof view.Id === "string" && view.Id.length > 0,
+      );
+      const itemsByView = await Promise.all(
+        libraries.map(async (view) => {
+          const query = new URLSearchParams(LIBRARY_QUERY);
+          query.set("ParentId", view.Id);
+          const response = await fetchJson<JellyfinItemsResponse>(
+            "jellyfin",
+            `${config.url}/Users/${encodeURIComponent(userId)}/Items?${query.toString()}`,
+            { timeoutMs, headers: authHeaders() },
+          );
+          return response.Items ?? [];
+        }),
+      );
+      const seen = new Set<string>();
+      return itemsByView.flat().filter((item) => {
+        const key = item.Id ?? `${item.Type ?? ""}:${item.Name ?? ""}`;
+        if (seen.has(key)) {
+          return false;
+        }
+        seen.add(key);
+        return true;
+      });
+    },
+
     async getItem(itemId: string): Promise<JellyfinItem> {
-      if (!config.apiKey) {
+      if (!token) {
         throw new UpstreamError("jellyfin", "unauthorized", "Jellyfin API key is not configured");
       }
       const query = new URLSearchParams({ Fields: DETAIL_FIELDS });
@@ -105,7 +199,7 @@ export function createJellyfinClient(config: ServiceConfig, timeoutMs: number) {
     },
 
     async getSeasons(seriesId: string): Promise<JellyfinItem[]> {
-      if (!config.apiKey) {
+      if (!token) {
         throw new UpstreamError("jellyfin", "unauthorized", "Jellyfin API key is not configured");
       }
       const query = new URLSearchParams({
@@ -122,7 +216,7 @@ export function createJellyfinClient(config: ServiceConfig, timeoutMs: number) {
     },
 
     async getEpisodes(seriesId: string): Promise<JellyfinItem[]> {
-      if (!config.apiKey) {
+      if (!token) {
         throw new UpstreamError("jellyfin", "unauthorized", "Jellyfin API key is not configured");
       }
       const query = new URLSearchParams({
@@ -139,7 +233,7 @@ export function createJellyfinClient(config: ServiceConfig, timeoutMs: number) {
     },
 
     async getPrimaryImage(itemId: string, query: JellyfinImageQuery): Promise<JellyfinImage | null> {
-      if (!config.apiKey) {
+      if (!token) {
         throw new UpstreamError("jellyfin", "unauthorized", "Jellyfin API key is not configured");
       }
       const params = new URLSearchParams();

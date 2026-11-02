@@ -1,6 +1,8 @@
-import { RefreshCwIcon } from "lucide-react";
+import { LogOutIcon, RefreshCwIcon } from "lucide-react";
 
+import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { useAuth } from "@/features/auth/AuthProvider";
 import type { AppRoute } from "@/hooks/use-hash-route";
 import { cn } from "@/lib/utils";
 
@@ -18,7 +20,9 @@ const NAV_ITEMS = [
 ] as const;
 
 export function AppHeader({ route, checkedAt, refreshing, onRefresh }: AppHeaderProps) {
+  const { session, logout, isPending } = useAuth();
   const activePage = route.page === "show" ? "library" : route.page;
+  const user = session?.user;
 
   return (
     <header className="flex flex-col gap-4">
@@ -34,10 +38,26 @@ export function AppHeader({ route, checkedAt, refreshing, onRefresh }: AppHeader
             )}
           </p>
         </div>
-        <Button variant="outline" onClick={onRefresh} disabled={refreshing}>
-          <RefreshCwIcon data-icon="inline-start" className={refreshing ? "animate-spin" : undefined} />
-          Refresh
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          {user ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <span>Signed in as {user.name}</span>
+              {user.isAdmin ? <Badge variant="secondary">Admin</Badge> : null}
+            </div>
+          ) : null}
+          <Button
+            variant="outline"
+            onClick={() => void logout()}
+            disabled={isPending}
+          >
+            <LogOutIcon data-icon="inline-start" />
+            Sign out
+          </Button>
+          <Button variant="outline" onClick={onRefresh} disabled={refreshing}>
+            <RefreshCwIcon data-icon="inline-start" className={refreshing ? "animate-spin" : undefined} />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       <nav aria-label="Primary" className="flex flex-wrap items-center gap-1 border-b pb-2">

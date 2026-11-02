@@ -44,6 +44,23 @@ describe("isActiveQueueRecord", () => {
     ).toBe(true);
   });
 
+  it("keeps warning records that are still downloading", () => {
+    expect(
+      isActiveQueueRecord(
+        record({
+          status: "warning",
+          trackedDownloadStatus: "ok",
+          trackedDownloadState: "downloading",
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      isActiveQueueRecord(
+        record({ status: "warning", trackedDownloadState: "importPending" }),
+      ),
+    ).toBe(true);
+  });
+
   it("drops failed and already imported records", () => {
     expect(isActiveQueueRecord(record({ status: "failed" }))).toBe(false);
     expect(

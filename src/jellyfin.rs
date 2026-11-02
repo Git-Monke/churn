@@ -16,6 +16,15 @@ use crate::envfile;
 
 pub const API_KEY_ENV: &str = "JELLYFIN_API_KEY";
 const API_KEY_NAME: &str = "churn";
+/// Jellyfin runs with the same DATA_DIR mounted at /data as the other stacks.
+const DATA_ROOT: &str = "/data";
+/// Media libraries must point at the media folders, never at DATA_ROOT: the
+/// download clients save under /data, so a root-level library indexes files
+/// that are still downloading.
+const MEDIA_LIBRARIES: &[(&str, &str, &str)] = &[
+    ("Movies", "movies", "/data/media/movies"),
+    ("Shows", "tvshows", "/data/media/tv"),
+];
 const AUTH_HEADER: &str = concat!(
     "MediaBrowser Client=\"churn\", Device=\"installer\", ",
     "DeviceId=\"churn-installer\", Version=\"0.1.0\""
@@ -62,6 +71,17 @@ struct ApiKeyInfo {
 struct ApiKeyList {
     #[serde(default)]
     items: Vec<ApiKeyInfo>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct VirtualFolderInfo {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    locations: Option<Vec<String>>,
+    #[serde(default)]
+    collection_type: Option<String>,
 }
 
 struct HttpResponse {
@@ -268,6 +288,126 @@ impl Jellyfin {
             .ok_or_else(|| io::Error::other("Jellyfin created an API key but did not return it"))
     }
 
+    /// Create the movie and TV libraries at the media root and remove any
+    /// library path that points at DATA_ROOT itself. Download clients save
+    /// under DATA_ROOT, so a root-level library makes Jellyfin index files that
+    /// are still downloading.
+    pub fn ensure_libraries(&self, api_key: &str) -> io::Result<Vec<String>> {
+        let folders = self.list_virtual_folders(api_key)?;
+        let mut changes = Vec::new();
+
+        for (name, collection_type, path) in MEDIA_LIBRARIES {
+            let existing = folders.iter().find(|folder| {
+                folder
+                    .collection_type
+                    .as_deref()
+                    .is_some_and(|value| value.eq_ignore_ascii_case(collection_type))
+                    || folder
+                        .name
+                        .as_deref()
+                        .is_some_and(|value| value.eq_ignore_ascii_case(name))
+            });
+
+            match existing {
+                None => {
+                    self.add_virtual_folder(api_key, name, collection_type, path)?;
+                    changes.push(format!("created Jellyfin library {name} at {path}"));
+                }
+                Some(folder) => {
+                    let folder_name = folder.name.as_deref().unwrap_or(name);
+                    let locations = folder.locations.as_deref().unwrap_or_default();
+                    if !locations
+                        .iter()
+                        .any(|location| normalize_path(location) == normalize_path(path))
+                    {
+                        self.add_media_path(api_key, folder_name, path)?;
+                        changes.push(format!("added {path} to Jellyfin library {folder_name}"));
+                    }
+                }
+            }
+        }
+
+        for folder in &folders {
+            let Some(folder_name) = folder.name.as_deref() else {
+                continue;
+            };
+            for location in folder.locations.as_deref().unwrap_or_default() {
+                if normalize_path(location) == normalize_path(DATA_ROOT) {
+                    self.remove_media_path(api_key, folder_name, location)?;
+                    changes.push(format!(
+                        "removed {location} from Jellyfin library {folder_name} (downloads must not be indexed)"
+                    ));
+                }
+            }
+        }
+
+        if !changes.is_empty() {
+            self.refresh_library(api_key)?;
+        }
+        Ok(changes)
+    }
+
+    fn list_virtual_folders(&self, api_key: &str) -> io::Result<Vec<VirtualFolderInfo>> {
+        let response = self.send(
+            ureq::get(&format!("{}/Library/VirtualFolders", self.base_url))
+                .set("X-Emby-Token", api_key),
+        )?;
+        if response.status != 200 {
+            return Err(http_error("list Jellyfin libraries", &response));
+        }
+        decode(&response, "Jellyfin library list")
+    }
+
+    fn add_virtual_folder(
+        &self,
+        api_key: &str,
+        name: &str,
+        collection_type: &str,
+        path: &str,
+    ) -> io::Result<()> {
+        let response = self.send_json(
+            ureq::post(&format!("{}/Library/VirtualFolders", self.base_url))
+                .query("name", name)
+                .query("collectionType", collection_type)
+                .query("paths", path)
+                .query("refreshLibrary", "false")
+                .set("X-Emby-Token", api_key),
+            json!({}),
+        )?;
+        expect_no_content(response, "create a Jellyfin library")
+    }
+
+    fn add_media_path(&self, api_key: &str, name: &str, path: &str) -> io::Result<()> {
+        let response = self.send_json(
+            ureq::post(&format!("{}/Library/VirtualFolders/Paths", self.base_url))
+                .query("refreshLibrary", "false")
+                .set("X-Emby-Token", api_key),
+            json!({ "Name": name, "PathInfo": { "Path": path } }),
+        )?;
+        expect_no_content(response, "add a Jellyfin library path")
+    }
+
+    fn remove_media_path(&self, api_key: &str, name: &str, path: &str) -> io::Result<()> {
+        let response = self.send(
+            ureq::request(
+                "DELETE",
+                &format!("{}/Library/VirtualFolders/Paths", self.base_url),
+            )
+            .query("name", name)
+            .query("path", path)
+            .query("refreshLibrary", "false")
+            .set("X-Emby-Token", api_key),
+        )?;
+        expect_no_content(response, "remove a Jellyfin library path")
+    }
+
+    fn refresh_library(&self, api_key: &str) -> io::Result<()> {
+        let response = self.send(
+            ureq::post(&format!("{}/Library/Refresh", self.base_url)).set("X-Emby-Token", api_key),
+        )?;
+        expect_no_content(response, "refresh the Jellyfin library")
+    }
+
     fn list_api_keys(&self, token: &str) -> io::Result<Vec<ApiKeyInfo>> {
         let response = self
             .send(ureq::get(&format!("{}/Auth/Keys", self.base_url)).set("X-Emby-Token", token))?;
@@ -305,6 +445,11 @@ impl Jellyfin {
             ))),
         }
     }
+}
+
+fn normalize_path(path: &str) -> &str {
+    let trimmed = path.trim_end_matches('/');
+    if trimmed.is_empty() { "/" } else { trimmed }
 }
 
 fn usable_key(info: ApiKeyInfo) -> Option<String> {

@@ -312,7 +312,9 @@ function EpisodeRow({
         <div className="flex min-w-0 flex-1 flex-col gap-2">
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="font-medium">{episode.title}</h3>
-            <AvailabilityBadge availability={episode.availability} />
+            {episode.availability !== "missing" || !download ? (
+              <AvailabilityBadge availability={episode.availability} />
+            ) : null}
             {download ? <DownloadBadge download={download} /> : null}
             {onChooseRelease ? (
               <Button

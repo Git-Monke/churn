@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 
 export type ServiceId = "jellyfin" | "sonarr" | "radarr";
+export type CookieSecureSetting = "auto" | boolean;
 
 export interface ServiceConfig {
   id: ServiceId;
@@ -19,6 +20,8 @@ export interface AppConfig {
   serverDir: string;
   frontendDist: string;
   requestTimeoutMs: number;
+  sessionTtlMs: number;
+  cookieSecure: CookieSecureSetting;
   services: Record<ServiceId, ServiceConfig>;
 }
 
@@ -93,6 +96,8 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
     serverDir,
     frontendDist: path.join(serverDir, "frontend", "dist"),
     requestTimeoutMs: parseTimeout(values.REQUEST_TIMEOUT_MS),
+    sessionTtlMs: parseSessionTtl(values.CHURN_SESSION_TTL_MS),
+    cookieSecure: parseCookieSecure(values.CHURN_COOKIE_SECURE),
     services,
   };
 }
@@ -152,4 +157,33 @@ function parseTimeout(value: string | undefined): number {
     throw new Error(`invalid REQUEST_TIMEOUT_MS: ${value}`);
   }
   return timeout;
+}
+
+const DEFAULT_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+const MIN_SESSION_TTL_MS = 5 * 60 * 1000;
+const MAX_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+function parseSessionTtl(value: string | undefined): number {
+  if (!value?.trim()) {
+    return DEFAULT_SESSION_TTL_MS;
+  }
+  const ttl = Number.parseInt(value, 10);
+  if (!Number.isInteger(ttl) || ttl <= 0) {
+    throw new Error(`invalid CHURN_SESSION_TTL_MS: ${value}`);
+  }
+  return Math.min(Math.max(ttl, MIN_SESSION_TTL_MS), MAX_SESSION_TTL_MS);
+}
+
+function parseCookieSecure(value: string | undefined): CookieSecureSetting {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized || normalized === "auto") {
+    return "auto";
+  }
+  if (normalized === "true" || normalized === "1") {
+    return true;
+  }
+  if (normalized === "false" || normalized === "0") {
+    return false;
+  }
+  throw new Error(`invalid CHURN_COOKIE_SECURE: ${value}`);
 }

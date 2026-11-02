@@ -1,5 +1,8 @@
 import type {
   ActivityResponse,
+  AuthSessionResponse,
+  LoginInput,
+  LoginResponse,
   CreateRequestInput,
   CreateRequestResponse,
   GrabShowReleaseInput,
@@ -33,6 +36,9 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   });
   const body: unknown = await response.json().catch(() => null);
   if (!response.ok) {
+    if (response.status === 401 && !path.startsWith("/api/auth/login")) {
+      window.dispatchEvent(new Event("churn:unauthorized"));
+    }
     const error = isErrorEnvelope(body) ? body.error : undefined;
     throw new ApiClientError(
       error?.message ?? `Request failed with HTTP ${response.status}`,
@@ -53,6 +59,18 @@ function postJson<T>(path: string, body: unknown): Promise<T> {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
+}
+
+export function fetchSession(): Promise<AuthSessionResponse> {
+  return getJson<AuthSessionResponse>("/api/auth/session");
+}
+
+export function login(input: LoginInput): Promise<LoginResponse> {
+  return postJson<LoginResponse>("/api/auth/login", input);
+}
+
+export function logout(): Promise<null> {
+  return postJson<null>("/api/auth/logout", {});
 }
 
 export function fetchStatus(): Promise<StatusResponse> {

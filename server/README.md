@@ -9,15 +9,17 @@ server/
   frontend/   React + Vite SPA
 ```
 
-The backend is a stateless BFF: it reads Jellyfin, Sonarr and Radarr APIs, keeps
-no database, and never exposes upstream URLs or API keys to the browser. The
-frontend only calls `/api/*` on the backend.
+The backend is a BFF: it reads Jellyfin, Sonarr and Radarr APIs, keeps no
+database, and never exposes upstream URLs or API keys to the browser. The
+frontend only calls `/api/*` on the backend. Login sessions are held in process
+memory, so restarting the backend signs everyone out.
 
 ## Requirements
 
 - Node.js 22 or newer
 - The `server` stack running (Jellyfin, Sonarr, Radarr)
 - Churn to finish Jellyfin setup and create the API key (see below)
+- A Jellyfin user account to sign in with
 
 ## Install and run
 
@@ -40,8 +42,10 @@ npm start
 # open http://127.0.0.1:4000 — Fastify serves the built SPA
 ```
 
-The app binds to `127.0.0.1` by default. There is no login screen in v1; do not
-expose the port directly to the internet without a reverse proxy and auth.
+The app binds to `127.0.0.1` by default and requires a Jellyfin login. For
+access from other machines, put it behind a reverse proxy with TLS; set
+`CHURN_COOKIE_SECURE=true` (or rely on `auto` with forwarded HTTPS) so the
+session cookie is marked `Secure`.
 
 ## Configuration
 
@@ -62,6 +66,8 @@ preserves unknown keys, so hand-added settings survive a rerun.
 | `SONARR_API_KEY` | `server/config/sonarr/config.xml` | Optional override |
 | `RADARR_API_KEY` | `server/config/radarr/config.xml` | Optional override |
 | `REQUEST_TIMEOUT_MS` | `5000` | Upstream request timeout |
+| `CHURN_SESSION_TTL_MS` | `43200000` (12 hours) | Server-side idle session TTL; clamped to 5 minutes–30 days |
+| `CHURN_COOKIE_SECURE` | `auto` | `auto`, `true` or `false`; controls the session cookie's `Secure` flag |
 | `CHURN_SERVER_DIR` | resolved from the backend module | Override the `server/` root |
 
 ### Jellyfin setup and API key
@@ -73,7 +79,11 @@ first-run setup:
    configured yet. The password is not saved by churn.
 2. It creates the first admin, completes the startup wizard locally with remote
    access disabled, authenticates, and creates an API key named `churn`.
-3. It writes the key to `server/.env` as `JELLYFIN_API_KEY`. The backend reads
+3. It creates or repairs the `Movies` and `Shows` libraries at
+   `/data/media/movies` and `/data/media/tv`. Any `/data` library path is
+   removed, because qBittorrent downloads under `/data` and Jellyfin would
+   otherwise index files that are still downloading.
+4. It writes the key to `server/.env` as `JELLYFIN_API_KEY`. The backend reads
    that file on startup; restart it if it is already running.
 
 Reruns are idempotent: a valid existing key is reused. If the key is missing or
@@ -87,11 +97,42 @@ only installer inputs, not backend settings; the password is never written back.
 If you configure Jellyfin manually, create a key under Dashboard → API Keys and
 put it in `server/.env`, then restart the backend.
 
+## Authentication and sessions
+
+Every page except the login screen is behind a Jellyfin login. Churn validates
+the username and password with Jellyfin (`/Users/AuthenticateByName`), stores
+the returned user access token in a server-side session, and writes an opaque
+`churn_session` cookie. The cookie is `HttpOnly`, `SameSite=Lax`, path-scoped
+and set with `Secure` when Churn is served over HTTPS. Passwords and Jellyfin
+access tokens never reach the browser for normal API calls.
+
+Sessions live in a TTL Map in the backend process, keyed by a SHA-256 hash of
+the cookie value. There is no database and no session file: restarting the
+backend signs everyone out. The default idle TTL is 12 hours; the cookie itself
+is kept for 7 days and is replaced on the next login. `POST /api/auth/logout`
+clears the cookie, destroys the session and makes a best-effort Jellyfin logout
+call.
+
+All logged-in Jellyfin users get the full dashboard. That means any valid
+Jellyfin account can search, request media and grab releases, which changes
+global Sonarr/Radarr state. Jellyfin still enforces its own library access
+because library and show requests use the user's token, but Churn adds no
+admin-only gate of its own. Use separate Jellyfin accounts with non-admin
+permissions if you want to limit library visibility.
+
+Auth responses are `no-store`. Failed logins are throttled to 10 attempts per
+15 minutes per IP and username. Cross-origin state-changing requests are
+rejected in addition to `SameSite=Lax`. Playback, when it lands, will use this
+per-user session identity instead of a static token in `.env`.
+
 ## API
 
 | Route | Purpose |
 | --- | --- |
-| `GET /api/health` | Backend liveness |
+| `GET /api/health` | Backend liveness (no session required) |
+| `POST /api/auth/login` | Validate Jellyfin credentials and set the session cookie |
+| `POST /api/auth/logout` | Destroy the session and clear the cookie |
+| `GET /api/auth/session` | Current session state (200 even when signed out) |
 | `GET /api/status` | Jellyfin/Sonarr/Radarr health, version and latency |
 | `GET /api/library` | Jellyfin movies and series with backend-owned poster URLs and provider ids |
 | `GET /api/library/images/:itemId` | Poster proxy; no Jellyfin key reaches the browser |
@@ -106,7 +147,9 @@ put it in `server/.env`, then restart the backend.
 | `POST /api/requests` | Add a movie or series and optionally start a search |
 | `GET /api/services/:id/open` | Redirect to a service's native UI |
 
-Errors use `{ "error": { "code": "...", "message": "..." } }`.
+Errors use `{ "error": { "code": "...", "message": "..." } }`. Protected API
+routes return `401 unauthenticated` without a session and `401 session_expired`
+when Jellyfin rejects the stored user token.
 
 ## Search and requests
 
@@ -199,8 +242,9 @@ required.
 1. **Library + service status dashboard** — done
 2. **Search + media requests** — done
 3. **Active downloads in Library** — done
-4. Download history and queue actions — next
-5. Jellyfin playback/session controls
+4. **Jellyfin login and per-user sessions** — done
+5. Download history and queue actions — next
+6. Jellyfin playback/session controls
 
 ## Container later
 

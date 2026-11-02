@@ -50,13 +50,13 @@ export function isActiveQueueRecord(record: ServarrQueueRecord): boolean {
   if (INACTIVE_STATES.has(state) || status === "failed") {
     return false;
   }
-  if (ACTIVE_STATUSES.has(status)) {
+  if (ACTIVE_STATUSES.has(status) || ACTIVE_IMPORT_STATES.has(state)) {
     return true;
   }
-  if (status === "completed") {
-    return ACTIVE_IMPORT_STATES.has(state);
-  }
-  return ACTIVE_IMPORT_STATES.has(state);
+  // Sonarr reports status "warning" for some records that are still
+  // downloading, for example when the download client reports a non-fatal
+  // warning. Keep those records unless their tracked state is terminal.
+  return status === "warning";
 }
 
 export function filterActiveQueueRecords(records: ServarrQueueRecord[]): ServarrQueueRecord[] {

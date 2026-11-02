@@ -9,10 +9,11 @@ server/backend/    Fastify API, also serves frontend/dist
 server/frontend/   React + Vite SPA
 ```
 
-The backend is a stateless BFF. It calls Jellyfin, Sonarr and Radarr and keeps
-no database. The browser only requests `/api/*`; API keys and upstream URLs are
-never sent to it. The app binds to `127.0.0.1` by default and has no login
-screen in this version.
+The backend is a BFF. It calls Jellyfin, Sonarr and Radarr and keeps no
+database. The browser only requests `/api/*`; API keys and upstream service URLs
+are never sent to it. Login sessions live in process memory, so restarting the
+backend signs everyone out. The app binds to `127.0.0.1` by default and requires
+a Jellyfin login.
 
 ## Running it
 
@@ -47,6 +48,8 @@ survive a rerun.
 | `SONARR_URL` / `RADARR_URL` | localhost ports | Arr base URLs |
 | `SONARR_API_KEY` / `RADARR_API_KEY` | `config.xml` | Optional overrides |
 | `REQUEST_TIMEOUT_MS` | `5000` | Upstream timeout |
+| `CHURN_SESSION_TTL_MS` | `43200000` (12 hours) | Server-side idle session TTL; clamped to 5 minutes–30 days |
+| `CHURN_COOKIE_SECURE` | `auto` | `auto`, `true` or `false` for the session cookie's `Secure` flag |
 | `CHURN_SERVER_DIR` | module-relative | Override `server/` root |
 
 Churn completes Jellyfin's first-run setup after starting the server stack. It
@@ -62,13 +65,41 @@ The admin password is not written to `.env`. Set `JELLYFIN_ADMIN_USER` and
 `JELLYFIN_ADMIN_PASSWORD` in the environment for non-interactive setup. Reruns
 reuse a valid existing key.
 
+## Authentication
+
+Churn uses Jellyfin as its account system. The login form posts a username and
+password to the backend, which calls Jellyfin's `/Users/AuthenticateByName` and
+stores the returned user access token in a server-side session. The browser gets
+only an opaque `churn_session` cookie: `HttpOnly`, `SameSite=Lax`, path-scoped,
+and `Secure` when served over HTTPS.
+
+Sessions are a TTL Map in backend memory, keyed by a SHA-256 hash of the cookie
+value. There is no database or session file. The default idle TTL is 12 hours;
+restarting the backend signs everyone out. Signing out clears the cookie,
+destroys the session and makes a best-effort Jellyfin logout call.
+
+Library, show and image requests use the signed-in user's Jellyfin token, so
+Jellyfin still enforces that user's library access. The Jellyfin API key remains
+server-side for status checks. Every logged-in Jellyfin user gets the full
+dashboard, including search, requests and release grabs, which mutate global
+Sonarr/Radarr state. Churn does not add an admin-only gate; use Jellyfin user
+permissions to limit library visibility.
+
+Failed logins are throttled to 10 attempts per 15 minutes per IP and username.
+Auth responses are `no-store`, and cross-origin mutating requests are rejected.
+Future playback work will use this per-user session identity rather than a
+static token in `.env`.
+
 ## API
 
 | Route | Purpose |
 | --- | --- |
-| `GET /api/health` | Backend liveness |
+| `GET /api/health` | Backend liveness (no session required) |
+| `POST /api/auth/login` | Validate Jellyfin credentials and set the session cookie |
+| `POST /api/auth/logout` | Destroy the session and clear the cookie |
+| `GET /api/auth/session` | Current session state (200 when signed out) |
 | `GET /api/status` | Service health, version and latency |
-| `GET /api/library` | Jellyfin movies and series with provider ids |
+| `GET /api/library` | Jellyfin movies and series with provider ids, scoped to the user's library views |
 | `GET /api/library/images/:itemId` | Poster proxy |
 | `GET /api/library/requested` | Sonarr/Radarr library titles, including requested items not yet downloaded |
 | `GET /api/library/shows/:source/:id` | Show seasons, episodes and download overlays |
@@ -84,6 +115,13 @@ reuse a valid existing key.
 Errors use `{ "error": { "code": "...", "message": "..." } }`. The library route
 returns HTTP 200 with an empty list and a setup state when Jellyfin is not ready;
 unexpected backend failures are 5xx.
+
+Jellyfin can keep orphaned items in its database after a library folder is
+removed, and those records are still returned by a global
+`/Items?Recursive=true` query. The backend therefore lists items per user view
+(`/Users/{userId}/Views`, then `/Users/{userId}/Items?ParentId=...`) instead of
+querying all items globally. Items outside the user's current libraries, such as
+files from an in-progress download that was previously indexed, no longer appear.
 
 ## Search and requests
 
@@ -161,8 +199,9 @@ open with a retry action if no releases are returned.
 1. Library + service status dashboard — done
 2. Search and media requests — done
 3. Active downloads in Library — done
-4. Download history and queue actions — next
-5. Jellyfin playback/session controls
+4. Jellyfin login and per-user sessions — done
+5. Download history and queue actions — next
+6. Jellyfin playback/session controls
 
 ## Container note
 

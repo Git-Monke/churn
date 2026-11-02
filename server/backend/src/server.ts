@@ -1,11 +1,18 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 
+import cookie from "@fastify/cookie";
 import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyInstance } from "fastify";
 
+import {
+  createLoginThrottle,
+  createMemorySessionStore,
+  SESSION_COOKIE_NAME,
+} from "./auth.js";
 import type { AppConfig } from "./config.js";
 import { ApiError, UpstreamError } from "./errors.js";
+import { registerAuthRoutes } from "./routes/auth.js";
 import { registerActivityRoutes } from "./routes/activity.js";
 import { registerHealthRoutes } from "./routes/health.js";
 import { registerLibraryRoutes } from "./routes/library.js";
@@ -25,6 +32,12 @@ export async function buildServer(
   options: BuildServerOptions = {},
 ): Promise<FastifyInstance> {
   const app = Fastify({ logger: options.logger ?? false });
+  const sessionStore = createMemorySessionStore({ ttlMs: config.sessionTtlMs });
+  const loginThrottle = createLoginThrottle();
+
+  app.addHook("onClose", async () => {
+    sessionStore.close();
+  });
 
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof ApiError) {
@@ -43,7 +56,55 @@ export async function buildServer(
       .send({ error: { code: "internal_error", message: "Internal server error" } });
   });
 
+  await app.register(cookie);
+
+  const publicApiPaths = new Set([
+    "/api/health",
+    "/api/auth/login",
+    "/api/auth/logout",
+    "/api/auth/session",
+  ]);
+  app.decorateRequest("auth", null);
+  app.addHook("onRequest", async (request, reply) => {
+    const pathname = request.url.split("?")[0] ?? request.url;
+    if (!pathname.startsWith("/api/")) {
+      return;
+    }
+
+    if (
+      request.method !== "GET" &&
+      request.method !== "HEAD" &&
+      request.method !== "OPTIONS" &&
+      isCrossOriginRequest(request)
+    ) {
+      reply.header("cache-control", "no-store");
+      return reply.code(403).send({
+        error: { code: "cross_origin_request", message: "Cross-origin request rejected" },
+      });
+    }
+
+    if (publicApiPaths.has(pathname)) {
+      return;
+    }
+
+    const cookieValue = request.cookies[SESSION_COOKIE_NAME];
+    const record = cookieValue ? sessionStore.get(cookieValue) : undefined;
+    if (!record || !cookieValue) {
+      reply.header("cache-control", "no-store");
+      return reply.code(401).send({
+        error: { code: "unauthenticated", message: "Sign in to continue" },
+      });
+    }
+    request.auth = {
+      user: record.user,
+      accessToken: record.accessToken,
+      sessionId: cookieValue,
+      destroySession: () => sessionStore.destroy(cookieValue),
+    };
+  });
+
   registerHealthRoutes(app);
+  registerAuthRoutes(app, config, { store: sessionStore, throttle: loginThrottle });
   registerStatusRoutes(app, config);
   registerLibraryRoutes(app, config);
   registerRequestedLibraryRoutes(app, config);
@@ -86,4 +147,52 @@ export async function buildServer(
   });
 
   return app;
+}
+
+function isCrossOriginRequest(request: {
+  headers: {
+    origin?: string;
+    "sec-fetch-site"?: string;
+    host?: string;
+    "x-forwarded-host"?: string;
+    forwarded?: string;
+  };
+}): boolean {
+  const origin = request.headers.origin;
+  if (origin) {
+    try {
+      return !requestHosts(request).includes(new URL(origin).host);
+    } catch {
+      return true;
+    }
+  }
+  const fetchSite = request.headers["sec-fetch-site"];
+  return typeof fetchSite === "string" && fetchSite !== "same-origin" && fetchSite !== "none";
+}
+
+/** Hosts the browser may have used, including the reverse-proxy public host. */
+function requestHosts(request: {
+  headers: { host?: string; "x-forwarded-host"?: string; forwarded?: string };
+}): string[] {
+  const hosts = new Set<string>();
+  const add = (value: string | undefined) => {
+    const host = value?.split(",")[0]?.trim();
+    if (host) {
+      hosts.add(host);
+    }
+  };
+  if (request.headers.host) {
+    add(request.headers.host);
+  }
+  if (typeof request.headers["x-forwarded-host"] === "string") {
+    add(request.headers["x-forwarded-host"]);
+  }
+  const forwarded = request.headers.forwarded;
+  if (typeof forwarded === "string") {
+    const match = forwarded.match(/(?:^|;)\s*host="?([^";,]+)"?/i);
+    if (match?.[1]) {
+      add(match[1]);
+    }
+  }
+  return [...hosts];
 }

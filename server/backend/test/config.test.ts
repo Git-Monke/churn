@@ -29,6 +29,8 @@ describe("config loading", () => {
 
     expect(config.host).toBe("127.0.0.1");
     expect(config.port).toBe(4000);
+    expect(config.sessionTtlMs).toBe(12 * 60 * 60 * 1000);
+    expect(config.cookieSecure).toBe("auto");
     expect(config.services.jellyfin.url).toBe("http://127.0.0.1:8096");
     expect(config.services.jellyfin.apiKey).toBeUndefined();
     expect(config.services.sonarr.url).toBe("http://127.0.0.1:8989");
@@ -49,6 +51,8 @@ describe("config loading", () => {
         JELLYFIN_API_KEY: "jellyfin-key",
         SONARR_URL: "http://sonarr:8989",
         SONARR_API_KEY: "env-key",
+        CHURN_SESSION_TTL_MS: "3600000",
+        CHURN_COOKIE_SECURE: "true",
       },
       readDotEnv: false,
     });
@@ -59,6 +63,8 @@ describe("config loading", () => {
     expect(config.services.jellyfin.apiKey).toBe("jellyfin-key");
     expect(config.services.sonarr.url).toBe("http://sonarr:8989");
     expect(config.services.sonarr.apiKey).toBe("env-key");
+    expect(config.sessionTtlMs).toBe(3_600_000);
+    expect(config.cookieSecure).toBe(true);
   });
 
   it("loads server/.env but lets process environment win", () => {
@@ -96,5 +102,51 @@ describe("config loading", () => {
     expect(() => loadConfig({ serverDir, env: { PORT: "99999" }, readDotEnv: false })).toThrow(
       /invalid PORT/,
     );
+  });
+
+  it("clamps the session TTL and parses the cookie secure setting", () => {
+    const serverDir = tempServerDir();
+    expect(
+      loadConfig({
+        serverDir,
+        env: { CHURN_SESSION_TTL_MS: "1" },
+        readDotEnv: false,
+      }).sessionTtlMs,
+    ).toBe(5 * 60 * 1000);
+    expect(
+      loadConfig({
+        serverDir,
+        env: { CHURN_SESSION_TTL_MS: "999999999999" },
+        readDotEnv: false,
+      }).sessionTtlMs,
+    ).toBe(30 * 24 * 60 * 60 * 1000);
+    expect(
+      loadConfig({
+        serverDir,
+        env: { CHURN_COOKIE_SECURE: "false" },
+        readDotEnv: false,
+      }).cookieSecure,
+    ).toBe(false);
+    expect(
+      loadConfig({
+        serverDir,
+        env: { CHURN_COOKIE_SECURE: "auto" },
+        readDotEnv: false,
+      }).cookieSecure,
+    ).toBe("auto");
+    expect(() =>
+      loadConfig({
+        serverDir,
+        env: { CHURN_COOKIE_SECURE: "sometimes" },
+        readDotEnv: false,
+      }),
+    ).toThrow(/CHURN_COOKIE_SECURE/);
+    expect(() =>
+      loadConfig({
+        serverDir,
+        env: { CHURN_SESSION_TTL_MS: "soon" },
+        readDotEnv: false,
+      }),
+    ).toThrow(/CHURN_SESSION_TTL_MS/);
   });
 });

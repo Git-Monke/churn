@@ -337,3 +337,92 @@ fn fallback_finds_key_after_a_204_create_response() {
 
     fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn libraries_are_created_at_the_media_root_and_data_root_is_removed() {
+    let added_movie_path = Arc::new(AtomicBool::new(false));
+    let created_shows = Arc::new(AtomicBool::new(false));
+    let removed_data_root = Arc::new(AtomicBool::new(false));
+    let refreshed = Arc::new(AtomicBool::new(false));
+
+    let added_movie_path_for_handler = Arc::clone(&added_movie_path);
+    let created_shows_for_handler = Arc::clone(&created_shows);
+    let removed_data_root_for_handler = Arc::clone(&removed_data_root);
+    let refreshed_for_handler = Arc::clone(&refreshed);
+
+    let server = mock_server(
+        move |request| match (request.method.as_str(), request.path()) {
+            ("GET", "/Library/VirtualFolders") => (
+                200,
+                r#"[{"Name":"Movies","Locations":["/data"],"CollectionType":"movies"}]"#.into(),
+            ),
+            ("POST", "/Library/VirtualFolders/Paths") => {
+                assert!(request.body.contains("/data/media/movies"));
+                added_movie_path_for_handler.store(true, Ordering::Relaxed);
+                (204, String::new())
+            }
+            ("POST", "/Library/VirtualFolders") => {
+                assert!(request.target.contains("name=Shows"));
+                assert!(request.target.contains("collectionType=tvshows"));
+                assert!(request.target.contains("paths=%2Fdata%2Fmedia%2Ftv"));
+                created_shows_for_handler.store(true, Ordering::Relaxed);
+                (204, String::new())
+            }
+            ("DELETE", "/Library/VirtualFolders/Paths") => {
+                assert!(request.target.contains("name=Movies"));
+                assert!(request.target.contains("path=%2Fdata"));
+                removed_data_root_for_handler.store(true, Ordering::Relaxed);
+                (204, String::new())
+            }
+            ("POST", "/Library/Refresh") => {
+                refreshed_for_handler.store(true, Ordering::Relaxed);
+                (204, String::new())
+            }
+            _ => (404, "{}".into()),
+        },
+    );
+
+    let client = Jellyfin::new(&server.base_url, Duration::from_secs(2));
+    let changes = client
+        .ensure_libraries("api-key")
+        .expect("library setup should succeed");
+
+    assert!(added_movie_path.load(Ordering::Relaxed));
+    assert!(created_shows.load(Ordering::Relaxed));
+    assert!(removed_data_root.load(Ordering::Relaxed));
+    assert!(refreshed.load(Ordering::Relaxed));
+    assert_eq!(changes.len(), 3);
+    assert!(
+        changes
+            .iter()
+            .any(|change| change.contains("created Jellyfin library Shows"))
+    );
+    assert!(
+        changes
+            .iter()
+            .any(|change| change.contains("removed /data from Jellyfin library Movies"))
+    );
+}
+
+#[test]
+fn library_setup_is_a_noop_when_media_paths_are_already_correct() {
+    let server = mock_server(|request| match (request.method.as_str(), request.path()) {
+        ("GET", "/Library/VirtualFolders") => (
+            200,
+            r#"[
+                {"Name":"Movies","Locations":["/data/media/movies"],"CollectionType":"movies"},
+                {"Name":"Shows","Locations":["/data/media/tv"],"CollectionType":"tvshows"}
+            ]"#
+            .into(),
+        ),
+        _ => (404, "{}".into()),
+    });
+
+    let client = Jellyfin::new(&server.base_url, Duration::from_secs(2));
+    assert!(
+        client
+            .ensure_libraries("api-key")
+            .expect("library check should succeed")
+            .is_empty()
+    );
+}

@@ -96,8 +96,16 @@ host. Keys churn does not manage are preserved on rerun, so hand edits survive.
 `server/backend` and `server/frontend` hold an optional dashboard for the
 Jellyfin library, the health of Jellyfin, Sonarr and Radarr, and searching,
 requesting and tracking new media. It has three pages — Services, Library and
-Search. It is a stateless BFF: it reads the service APIs, stores no database,
-and the browser only talks to the backend. It binds to `127.0.0.1` by default.
+Search. It is a BFF: it reads the service APIs, stores no database, and the
+browser only talks to the backend. It binds to `127.0.0.1` by default.
+
+The dashboard now requires a Jellyfin login. Churn validates the account with
+Jellyfin, keeps the resulting user token in an in-memory session, and sends only
+an HttpOnly session cookie to the browser. Restarting the backend signs everyone
+out. Every logged-in Jellyfin user gets full access to the dashboard, including
+Sonarr/Radarr requests; Jellyfin's own library restrictions still apply because
+library calls use the user's token. See `server/README.md` for session settings
+and the full-access warning.
 
 ```bash
 cd server
@@ -107,9 +115,12 @@ npm run dev        # UI http://127.0.0.1:5173, API http://127.0.0.1:4000
 
 After the server stack starts, churn completes Jellyfin's first-run setup,
 creates an API key named `churn`, and writes it to `server/.env` as
-`JELLYFIN_API_KEY`. The installer asks for a Jellyfin admin username and
-password when needed; the password is not saved. Reruns reuse a valid key.
-Sonarr and Radarr keys are read automatically from `server/config/*/config.xml`.
+`JELLYFIN_API_KEY`. It also creates or repairs the `Movies` and `Shows`
+libraries at `/data/media/movies` and `/data/media/tv`, and removes any `/data`
+library path so Jellyfin does not index qBittorrent's in-progress downloads. The
+installer asks for a Jellyfin admin username and password when needed; the
+password is not saved. Reruns reuse a valid key. Sonarr and Radarr keys are read
+automatically from `server/config/*/config.xml`.
 
 Production build:
 
@@ -128,8 +139,9 @@ downloads. Movies show progress and ETA on their card. Shows open a season and
 episode view with per-episode availability and download progress, including
 season-pack handling. See `server/README.md` for configuration and container
 notes. Development is planned in this order: library/status dashboard, search
-and media requests (done), active downloads in Library (done), download history
-and queue actions, then Jellyfin playback controls.
+and media requests (done), active downloads in Library (done), Jellyfin login
+and per-user sessions (done), download history and queue actions, then Jellyfin
+playback controls.
 
 ## Running a stack
 
@@ -175,8 +187,10 @@ The wiring is automatic on first `docker compose up`:
    everything else.
 
 Because every container mounts the same `${DATA_DIR}` at `/data`, download
-paths line up without translation. qBittorrent saves to `/data/` and Prowlarr
-tags its downloads with the `prowlarr` category.
+paths line up without translation. qBittorrent saves to `/data/` (incomplete
+files under `/data/incomplete`) and Prowlarr tags its downloads with the
+`prowlarr` category. Media lives in `/data/media`, which is what Jellyfin's
+libraries point at; never add `/data` itself as a Jellyfin library.
 
 Re-run the one-shots by recreating the stack (a plain `docker compose up -d`
 leaves already-exited one-shots alone):

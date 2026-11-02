@@ -1,3 +1,26 @@
+export interface AuthUser {
+  id: string;
+  name: string;
+  isAdmin: boolean;
+}
+
+export interface AuthSessionResponse {
+  authenticated: boolean;
+  user?: AuthUser;
+  expiresAt?: string;
+}
+
+export interface LoginInput {
+  username: string;
+  password: string;
+}
+
+export interface LoginResponse {
+  authenticated: true;
+  user: AuthUser;
+  expiresAt: string;
+}
+
 export type ServiceId = "jellyfin" | "sonarr" | "radarr";
 export type ServiceState = "ok" | "unconfigured" | "unauthorized" | "unreachable";
 

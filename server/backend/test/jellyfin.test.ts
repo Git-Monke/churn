@@ -1,6 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { mapJellyfinItem } from "../src/upstream/jellyfin.js";
+import { createJellyfinClient, mapJellyfinItem } from "../src/upstream/jellyfin.js";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("Jellyfin item mapping", () => {
   it("maps movies and series to the frontend contract", () => {
@@ -38,5 +42,69 @@ describe("Jellyfin item mapping", () => {
     expect(mapJellyfinItem({ Id: "x", Name: "Song", Type: "Audio" })).toBeNull();
     expect(mapJellyfinItem({ Name: "No id", Type: "Movie" })).toBeNull();
     expect(mapJellyfinItem({ Id: "x", Type: "Movie" })).toBeNull();
+  });
+});
+
+
+describe("Jellyfin authentication client", () => {
+  const config = {
+    id: "jellyfin" as const,
+    name: "Jellyfin",
+    url: "http://jellyfin.test:8096",
+    apiKey: "api-key",
+  };
+
+  it("authenticates with the device header and returns the user", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      expect(String(input)).toBe("http://jellyfin.test:8096/Users/AuthenticateByName");
+      expect(init?.method).toBe("POST");
+      expect(init?.headers).toMatchObject({
+        Authorization:
+          'MediaBrowser Client="Churn", Device="Churn Web", DeviceId="churn-web", Version="0.1.0"',
+        "X-Emby-Device-Id": "churn-web",
+      });
+      expect(JSON.parse(String(init?.body))).toEqual({
+        Username: "admin",
+        Pw: "secret",
+      });
+      return new Response(
+        JSON.stringify({
+          AccessToken: "user-token",
+          User: { Id: "user-1", Name: "admin", Policy: { IsAdministrator: true } },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await createJellyfinClient(config, 500).authenticate("admin", "secret");
+    expect(result.AccessToken).toBe("user-token");
+    expect(result.User).toMatchObject({ Id: "user-1", Name: "admin" });
+  });
+
+  it("uses an explicit token for user-scoped calls", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      expect(init?.headers).toMatchObject({
+        "X-Emby-Token": "user-token",
+        "X-Emby-Device-Id": "churn-web",
+      });
+      const url = String(input);
+      if (url.endsWith("/Users/user-1/Views")) {
+        return new Response(
+          JSON.stringify({ Items: [{ Id: "view-1", CollectionType: "movies" }] }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      expect(url).toContain("/Users/user-1/Items?");
+      expect(url).toContain("ParentId=view-1");
+      return new Response(JSON.stringify({ Items: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createJellyfinClient(config, 500, "user-token").listLibrary("user-1");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

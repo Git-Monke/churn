@@ -2,7 +2,8 @@ import type { FastifyInstance } from "fastify";
 
 import type { AppConfig, ServiceConfig } from "../config.js";
 import { filterActiveQueueRecords } from "../activity.js";
-import { ApiError, UpstreamError } from "../errors.js";
+import { requireAuth, type AuthContext } from "../auth.js";
+import { ApiError, isUnauthorized, UpstreamError } from "../errors.js";
 import {
   findRelease,
   releaseId,
@@ -36,7 +37,8 @@ export function registerShowRoutes(app: FastifyInstance, config: AppConfig): voi
       reply.header("cache-control", "no-store");
       const source = parseSource(request.params.source);
       if (source === "jellyfin") {
-        return loadJellyfinShow(config, parseJellyfinId(request.params.id));
+        const auth = requireAuth(request);
+        return loadJellyfinShow(config, parseJellyfinId(request.params.id), auth);
       }
       return loadSonarrShow(config, parseSonarrId(request.params.id));
     },
@@ -78,13 +80,17 @@ export function registerShowRoutes(app: FastifyInstance, config: AppConfig): voi
   );
 }
 
-async function loadJellyfinShow(config: AppConfig, itemId: string): Promise<ShowDetailResponse> {
+async function loadJellyfinShow(
+  config: AppConfig,
+  itemId: string,
+  auth: AuthContext,
+): Promise<ShowDetailResponse> {
   const service = config.services.jellyfin;
   if (!service.apiKey) {
     return emptyShow("jellyfin", "unconfigured", "Set JELLYFIN_API_KEY in server/.env");
   }
 
-  const client = createJellyfinClient(service, config.requestTimeoutMs);
+  const client = createJellyfinClient(service, config.requestTimeoutMs, auth.accessToken);
   let item: JellyfinItem;
   let seasons: JellyfinItem[];
   let episodes: JellyfinItem[];
@@ -95,6 +101,14 @@ async function loadJellyfinShow(config: AppConfig, itemId: string): Promise<Show
       client.getEpisodes(itemId),
     ]);
   } catch (error) {
+    if (isUnauthorized(error)) {
+      auth.destroySession();
+      throw new ApiError(
+        401,
+        "session_expired",
+        "Your Jellyfin session expired. Sign in again.",
+      );
+    }
     if (
       error instanceof UpstreamError &&
       (error.status === 400 || error.status === 404)

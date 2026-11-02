@@ -10,6 +10,8 @@ function makeConfig(overrides: Partial<AppConfig["services"]> = {}): AppConfig {
     serverDir: "/tmp/churn-test",
     frontendDist: "/tmp/churn-test/frontend/dist",
     requestTimeoutMs: 500,
+    sessionTtlMs: 12 * 60 * 60 * 1000,
+    cookieSecure: "auto",
     services: {
       jellyfin: {
         id: "jellyfin",
@@ -42,14 +44,74 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+const testAuthResult = {
+  AccessToken: "test-user-token",
+  User: { Id: "test-user", Name: "tester", Policy: { IsAdministrator: true } },
+};
+
 function installFetch(
   handler: (url: string, init?: RequestInit) => Response | Promise<Response>,
 ): ReturnType<typeof vi.fn> {
-  const mock = vi.fn(async (input: string | URL | Request, init?: RequestInit) =>
-    handler(String(input), init),
-  );
+  const mock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/Users/AuthenticateByName")) {
+      return jsonResponse(testAuthResult);
+    }
+    return handler(url, init);
+  });
   vi.stubGlobal("fetch", mock);
   return mock;
+}
+
+async function login(app: Awaited<ReturnType<typeof buildServer>>): Promise<string> {
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/auth/login",
+    payload: { username: "tester", password: "test-password" },
+  });
+  expect(response.statusCode).toBe(200);
+  const setCookie = response.headers["set-cookie"];
+  const cookieHeader = Array.isArray(setCookie) ? setCookie[0] : setCookie;
+  if (!cookieHeader) {
+    throw new Error("login did not set a session cookie");
+  }
+  const cookie = cookieHeader.split(";")[0] ?? cookieHeader;
+  const fetchMock = globalThis.fetch as unknown as { mockClear?: () => void };
+  fetchMock.mockClear?.();
+  return cookie;
+}
+
+/** Build an app, sign in once, and attach the session cookie to every inject. */
+async function buildAuthedServer(config: AppConfig): Promise<Awaited<ReturnType<typeof buildServer>>> {
+  if (!vi.isMockFunction(globalThis.fetch)) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = String(input);
+        if (url.endsWith("/Users/AuthenticateByName")) {
+          return jsonResponse(testAuthResult);
+        }
+        throw new Error(`unexpected fetch ${url}`);
+      }),
+    );
+  }
+  const app = await buildServer(config);
+  const cookie = await login(app);
+
+  const originalInject = app.inject.bind(app) as unknown as (
+    opts: Record<string, unknown>,
+  ) => Promise<unknown>;
+  app.inject = ((opts: string | Record<string, unknown>) => {
+    const options: Record<string, unknown> =
+      typeof opts === "string" ? { method: "GET", url: opts } : { ...opts };
+    const headers = {
+      ...((options.headers as Record<string, string> | undefined) ?? {}),
+      cookie,
+    };
+    return originalInject({ ...options, headers });
+  }) as unknown as typeof app.inject;
+
+  return app;
 }
 
 const appConfig = makeConfig();
@@ -86,7 +148,7 @@ describe("status", () => {
       throw new Error(`unexpected URL ${url}`);
     });
 
-    const app = await buildServer(appConfig);
+    const app = await buildAuthedServer(appConfig);
     const response = await app.inject({ method: "GET", url: "/api/status" });
 
     expect(response.statusCode).toBe(200);
@@ -113,7 +175,7 @@ describe("status", () => {
       return jsonResponse({ appName: "Sonarr", version: "4.0.20" });
     });
 
-    const app = await buildServer(appConfig);
+    const app = await buildAuthedServer(appConfig);
     const response = await app.inject({ method: "GET", url: "/api/status" });
     const body = response.json();
 
@@ -131,7 +193,7 @@ describe("status", () => {
       return jsonResponse({}, 401);
     });
 
-    const app = await buildServer(appConfig);
+    const app = await buildAuthedServer(appConfig);
     const response = await app.inject({ method: "GET", url: "/api/status" });
     const body = response.json();
 
@@ -145,7 +207,7 @@ describe("library", () => {
   it("returns setup_required when Jellyfin's wizard is incomplete", async () => {
     installFetch(() => jsonResponse({ Version: "10.11.11", StartupWizardCompleted: false }));
 
-    const app = await buildServer(appConfig);
+    const app = await buildAuthedServer(appConfig);
     const response = await app.inject({ method: "GET", url: "/api/library" });
 
     expect(response.statusCode).toBe(200);
@@ -161,7 +223,7 @@ describe("library", () => {
   it("returns unconfigured when the wizard is complete but no key is set", async () => {
     installFetch(() => jsonResponse({ Version: "10.11.11", StartupWizardCompleted: true }));
 
-    const app = await buildServer(makeConfig());
+    const app = await buildAuthedServer(makeConfig());
     const response = await app.inject({ method: "GET", url: "/api/library" });
 
     expect(response.json().state).toBe("unconfigured");
@@ -182,7 +244,16 @@ describe("library", () => {
       if (url.endsWith("/System/Info/Public")) {
         return jsonResponse({ Version: "10.11.11", StartupWizardCompleted: true });
       }
-      if (url.includes("/Items?")) {
+      if (url.endsWith("/Users/test-user/Views")) {
+        return jsonResponse({
+          Items: [
+            { Id: "movies-view", Name: "Movies", CollectionType: "movies" },
+            { Id: "shows-view", Name: "Shows", CollectionType: "tvshows" },
+          ],
+        });
+      }
+      if (url.includes("/Users/test-user/Items?")) {
+        expect(url).toMatch(/[?&]ParentId=(movies-view|shows-view)(&|$)/);
         return jsonResponse({
           Items: [
             {
@@ -201,7 +272,7 @@ describe("library", () => {
       throw new Error(`unexpected URL ${url}`);
     });
 
-    const app = await buildServer(config);
+    const app = await buildAuthedServer(config);
     const response = await app.inject({ method: "GET", url: "/api/library" });
     const body = response.json();
 
@@ -220,7 +291,58 @@ describe("library", () => {
     await app.close();
   });
 
-  it("returns unauthorized when Jellyfin rejects the key", async () => {
+  it("excludes orphaned Jellyfin records that are no longer in a library view", async () => {
+    const config = makeConfig({
+      jellyfin: {
+        id: "jellyfin",
+        name: "Jellyfin",
+        url: "http://jellyfin.test:8096",
+        apiKey: "jellyfin-key",
+      },
+    });
+    const requestedUrls: string[] = [];
+
+    installFetch((url) => {
+      requestedUrls.push(url);
+      if (url.endsWith("/System/Info/Public")) {
+        return jsonResponse({ Version: "10.11.11", StartupWizardCompleted: true });
+      }
+      if (url.endsWith("/Users/test-user/Views")) {
+        return jsonResponse({
+          Items: [{ Id: "movies-view", Name: "Movies", CollectionType: "movies" }],
+        });
+      }
+      if (url.includes("/Users/test-user/Items?")) {
+        // A phantom record from a removed /data path is not part of this view.
+        return jsonResponse({
+          Items: [{ Id: "real-movie", Name: "Real Movie", Type: "Movie" }],
+        });
+      }
+      if (url.includes("/Items?Recursive=true")) {
+        return jsonResponse({
+          Items: [
+            { Id: "real-movie", Name: "Real Movie", Type: "Movie" },
+            { Id: "phantom", Name: "Downloading Episode", Type: "Movie" },
+          ],
+        });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildAuthedServer(config);
+    const response = await app.inject({ method: "GET", url: "/api/library" });
+    const body = response.json();
+
+    expect(body.items.map((item: { id: string }) => item.id)).toEqual(["real-movie"]);
+    expect(
+      requestedUrls
+        .filter((url) => url.includes("/Items?"))
+        .every((url) => url.includes("ParentId=")),
+    ).toBe(true);
+    await app.close();
+  });
+
+  it("expires the session when Jellyfin rejects the user token", async () => {
     const config = makeConfig({
       jellyfin: {
         id: "jellyfin",
@@ -237,10 +359,14 @@ describe("library", () => {
       return jsonResponse({}, 401);
     });
 
-    const app = await buildServer(config);
+    const app = await buildAuthedServer(config);
     const response = await app.inject({ method: "GET", url: "/api/library" });
 
-    expect(response.json().state).toBe("unauthorized");
+    expect(response.statusCode).toBe(401);
+    expect(response.json().error.code).toBe("session_expired");
+    const next = await app.inject({ method: "GET", url: "/api/status" });
+    expect(next.statusCode).toBe(401);
+    expect(next.json().error.code).toBe("unauthenticated");
     await app.close();
   });
 });
@@ -291,7 +417,7 @@ describe("requested library", () => {
       throw new Error(`unexpected URL ${url}`);
     });
 
-    const app = await buildServer(appConfig);
+    const app = await buildAuthedServer(appConfig);
     const response = await app.inject({ method: "GET", url: "/api/library/requested" });
     const body = response.json();
 
@@ -342,7 +468,7 @@ describe("requested library", () => {
       throw new Error(`unexpected URL ${url}`);
     });
 
-    const app = await buildServer(appConfig);
+    const app = await buildAuthedServer(appConfig);
     const response = await app.inject({ method: "GET", url: "/api/library/requested" });
     const body = response.json();
 
@@ -375,7 +501,7 @@ describe("library images", () => {
       });
     });
 
-    const app = await buildServer(config);
+    const app = await buildAuthedServer(config);
     const response = await app.inject({
       method: "GET",
       url: "/api/library/images/movie-1?tag=poster-tag&maxWidth=400",
@@ -390,7 +516,7 @@ describe("library images", () => {
   });
 
   it("rejects invalid ids and query parameters", async () => {
-    const app = await buildServer(makeConfig());
+    const app = await buildAuthedServer(makeConfig());
     const badId = await app.inject({ method: "GET", url: "/api/library/images/bad!id" });
     expect(badId.statusCode).toBe(400);
     expect(badId.json().error.code).toBe("invalid_item_id");
@@ -421,7 +547,7 @@ describe("library images", () => {
     });
     installFetch(() => jsonResponse({}, 404));
 
-    const app = await buildServer(config);
+    const app = await buildAuthedServer(config);
     const response = await app.inject({ method: "GET", url: "/api/library/images/movie-1" });
     expect(response.statusCode).toBe(404);
     await app.close();
@@ -430,7 +556,7 @@ describe("library images", () => {
 
 describe("service links and unknown routes", () => {
   it("redirects known services and rejects unknown ids", async () => {
-    const app = await buildServer(makeConfig());
+    const app = await buildAuthedServer(makeConfig());
     const known = await app.inject({ method: "GET", url: "/api/services/sonarr/open" });
     expect(known.statusCode).toBe(302);
     expect(known.headers.location).toBe("http://sonarr.test:8989");
@@ -442,7 +568,7 @@ describe("service links and unknown routes", () => {
   });
 
   it("returns a JSON envelope for unknown API routes", async () => {
-    const app = await buildServer(makeConfig());
+    const app = await buildAuthedServer(makeConfig());
     const response = await app.inject({ method: "GET", url: "/api/nope" });
     expect(response.statusCode).toBe(404);
     expect(response.json().error.code).toBe("not_found");
@@ -496,7 +622,7 @@ describe("request options", () => {
       throw new Error(`unexpected URL ${url}`);
     });
 
-    const app = await buildServer(makeConfig());
+    const app = await buildAuthedServer(makeConfig());
     const response = await app.inject({ method: "GET", url: "/api/requests/options" });
     const body = response.json();
 
@@ -525,7 +651,7 @@ describe("request options", () => {
       if (url.includes("/rootfolder")) return jsonResponse(rootFolders);
       throw new Error(`unexpected URL ${url}`);
     });
-    const app = await buildServer(
+    const app = await buildAuthedServer(
       makeConfig({
         sonarr: { id: "sonarr", name: "Sonarr", url: "http://sonarr.test:8989", apiKey: undefined },
       }),
@@ -556,7 +682,7 @@ describe("search", () => {
       throw new Error(`unexpected URL ${url}`);
     });
 
-    const app = await buildServer(makeConfig());
+    const app = await buildAuthedServer(makeConfig());
     const response = await app.inject({ method: "GET", url: "/api/search?q=dune" });
     const body = response.json();
 
@@ -607,7 +733,7 @@ describe("search", () => {
       throw new Error(`unexpected URL ${url}`);
     });
 
-    const app = await buildServer(makeConfig());
+    const app = await buildAuthedServer(makeConfig());
     const response = await app.inject({ method: "GET", url: "/api/search?q=dune" });
     const body = response.json();
 
@@ -633,7 +759,7 @@ describe("search", () => {
       throw new Error("connection refused");
     });
 
-    const app = await buildServer(makeConfig());
+    const app = await buildAuthedServer(makeConfig());
     const response = await app.inject({ method: "GET", url: "/api/search?q=severance" });
     const body = response.json();
 
@@ -653,7 +779,7 @@ describe("search", () => {
       return jsonResponse([]);
     });
 
-    const app = await buildServer(makeConfig());
+    const app = await buildAuthedServer(makeConfig());
     const response = await app.inject({ method: "GET", url: "/api/search?q=severance" });
     const body = response.json();
 
@@ -664,7 +790,7 @@ describe("search", () => {
   });
 
   it("validates the query", async () => {
-    const app = await buildServer(makeConfig());
+    const app = await buildAuthedServer(makeConfig());
     expect((await app.inject({ method: "GET", url: "/api/search?q=a" })).statusCode).toBe(400);
     expect((await app.inject({ method: "GET", url: "/api/search" })).statusCode).toBe(400);
     expect(
@@ -684,7 +810,7 @@ describe("search images", () => {
       });
     });
 
-    const app = await buildServer(makeConfig());
+    const app = await buildAuthedServer(makeConfig());
     const response = await app.inject({
       method: "GET",
       url: "/api/search/images/sonarr?url=https%3A%2F%2Fimage.tmdb.org%2Ft%2Fp%2Foriginal%2Fabc-poster.jpg",
@@ -699,7 +825,7 @@ describe("search images", () => {
   });
 
   it("rejects unknown services and non-allowlisted URLs", async () => {
-    const app = await buildServer(makeConfig());
+    const app = await buildAuthedServer(makeConfig());
     const unknown = await app.inject({
       method: "GET",
       url: "/api/search/images/jellyfin?url=https%3A%2F%2Fimage.tmdb.org%2Ft%2Fp%2Foriginal%2Fabc-poster.jpg",
@@ -724,7 +850,7 @@ describe("search images", () => {
 
   it("returns 404 for a missing image", async () => {
     installFetch(() => new Response(null, { status: 404 }));
-    const app = await buildServer(makeConfig());
+    const app = await buildAuthedServer(makeConfig());
     const response = await app.inject({
       method: "GET",
       url: "/api/search/images/sonarr?url=https%3A%2F%2Fimage.tmdb.org%2Ft%2Fp%2Foriginal%2Fabc-poster.jpg",
@@ -751,7 +877,7 @@ describe("create requests", () => {
       throw new Error(`unexpected URL ${url}`);
     });
 
-    const app = await buildServer(makeConfig());
+    const app = await buildAuthedServer(makeConfig());
     const response = await app.inject({
       method: "POST",
       url: "/api/requests",
@@ -790,7 +916,7 @@ describe("create requests", () => {
       throw new Error(`unexpected URL ${url}`);
     });
 
-    const app = await buildServer(makeConfig());
+    const app = await buildAuthedServer(makeConfig());
     const response = await app.inject({
       method: "POST",
       url: "/api/requests",
@@ -831,7 +957,7 @@ describe("create requests", () => {
       throw new Error(`unexpected URL ${url}`);
     });
 
-    const app = await buildServer(makeConfig());
+    const app = await buildAuthedServer(makeConfig());
     const response = await app.inject({
       method: "POST",
       url: "/api/requests",
@@ -861,7 +987,7 @@ describe("create requests", () => {
       throw new Error(`unexpected URL ${url}`);
     });
 
-    const app = await buildServer(makeConfig());
+    const app = await buildAuthedServer(makeConfig());
     const badKind = await app.inject({
       method: "POST",
       url: "/api/requests",
@@ -909,7 +1035,7 @@ describe("create requests", () => {
       throw new Error(`unexpected URL ${url}`);
     });
 
-    const app = await buildServer(makeConfig());
+    const app = await buildAuthedServer(makeConfig());
     const response = await app.inject({
       method: "POST",
       url: "/api/requests",
@@ -991,7 +1117,7 @@ describe("activity", () => {
       throw new Error(`unexpected URL ${url}`);
     });
 
-    const app = await buildServer(makeConfig());
+    const app = await buildAuthedServer(makeConfig());
     const response = await app.inject({ method: "GET", url: "/api/activity" });
     const body = response.json();
 
@@ -1036,7 +1162,7 @@ describe("activity", () => {
       throw new Error(`unexpected URL ${url}`);
     });
 
-    const app = await buildServer(makeConfig());
+    const app = await buildAuthedServer(makeConfig());
     const response = await app.inject({ method: "GET", url: "/api/activity" });
     const body = response.json();
 
@@ -1052,7 +1178,7 @@ describe("activity", () => {
       throw new Error("fetch should not be called");
     });
 
-    const app = await buildServer(
+    const app = await buildAuthedServer(
       makeConfig({
         sonarr: { id: "sonarr", name: "Sonarr", url: "http://sonarr.test:8989", apiKey: undefined },
         radarr: { id: "radarr", name: "Radarr", url: "http://radarr.test:7878", apiKey: undefined },
@@ -1155,7 +1281,7 @@ describe("show detail", () => {
       throw new Error(`unexpected URL ${url}`);
     });
 
-    const app = await buildServer(jellyfinConfig);
+    const app = await buildAuthedServer(jellyfinConfig);
     const response = await app.inject({
       method: "GET",
       url: "/api/library/shows/jellyfin/series-1",
@@ -1186,7 +1312,7 @@ describe("show detail", () => {
   it("returns 404 for a missing Jellyfin show", async () => {
     installFetch(() => jsonResponse({ error: "not found" }, 400));
 
-    const app = await buildServer(jellyfinConfig);
+    const app = await buildAuthedServer(jellyfinConfig);
     const response = await app.inject({
       method: "GET",
       url: "/api/library/shows/jellyfin/missing-show",
@@ -1248,7 +1374,7 @@ describe("show detail", () => {
       throw new Error(`unexpected URL ${url}`);
     });
 
-    const app = await buildServer(makeConfig());
+    const app = await buildAuthedServer(makeConfig());
     const response = await app.inject({
       method: "GET",
       url: "/api/library/shows/sonarr/42",
@@ -1319,7 +1445,7 @@ describe("show releases", () => {
       throw new Error(`unexpected URL ${url}`);
     });
 
-    const app = await buildServer(makeConfig());
+    const app = await buildAuthedServer(makeConfig());
     const response = await app.inject({
       method: "GET",
       url: "/api/library/shows/sonarr/42/releases?season=1",
@@ -1364,7 +1490,7 @@ describe("show releases", () => {
       throw new Error(`unexpected URL ${url}`);
     });
 
-    const app = await buildServer(makeConfig());
+    const app = await buildAuthedServer(makeConfig());
     const list = await app.inject({
       method: "GET",
       url: "/api/library/shows/sonarr/42/releases?season=1",
@@ -1418,7 +1544,7 @@ describe("show releases", () => {
       throw new Error(`unexpected URL ${url}`);
     });
 
-    const app = await buildServer(makeConfig());
+    const app = await buildAuthedServer(makeConfig());
     const response = await app.inject({
       method: "GET",
       url: "/api/library/shows/sonarr/42/releases?season=1&episode=1",
@@ -1469,7 +1595,7 @@ describe("show releases", () => {
       throw new Error(`unexpected URL ${url}`);
     });
 
-    const app = await buildServer(makeConfig());
+    const app = await buildAuthedServer(makeConfig());
     const response = await app.inject({
       method: "GET",
       url: "/api/library/shows/sonarr/42/releases?season=2&scope=all",
@@ -1513,7 +1639,7 @@ describe("show releases", () => {
       throw new Error(`unexpected URL ${url}`);
     });
 
-    const app = await buildServer(makeConfig());
+    const app = await buildAuthedServer(makeConfig());
     const list = await app.inject({
       method: "GET",
       url: "/api/library/shows/sonarr/42/releases?season=1&episode=1",
@@ -1558,7 +1684,7 @@ describe("show releases", () => {
       throw new Error(`unexpected URL ${url}`);
     });
 
-    const app = await buildServer(makeConfig());
+    const app = await buildAuthedServer(makeConfig());
     const list = await app.inject({
       method: "GET",
       url: "/api/library/shows/sonarr/42/releases?season=2&scope=all",
@@ -1601,7 +1727,7 @@ describe("show releases", () => {
       throw new Error(`unexpected URL ${url}`);
     });
 
-    const app = await buildServer(makeConfig());
+    const app = await buildAuthedServer(makeConfig());
     const list = await app.inject({
       method: "GET",
       url: "/api/library/shows/sonarr/42/releases?season=1",

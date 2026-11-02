@@ -16,8 +16,8 @@ by the torrent stack.
 ## Storage
 
 Every service mounts the same host directory as `${DATA_DIR}` at `/data`.
-Jellyfin reads the media library from there, and Sonarr/Radarr use the same
-paths for their libraries and completed downloads. Keeping one path layout
+Jellyfin reads the media library from `/data/media`, and Sonarr/Radarr use the
+same paths for their libraries and completed downloads. Keeping one path layout
 avoids translation between the two stacks.
 
 `server-init` creates:
@@ -34,6 +34,13 @@ Sonarr and Radarr root folders. The one-shot is idempotent and can be rerun:
 cd server
 docker compose run --rm server-init
 ```
+
+Do **not** add `/data` itself as a Jellyfin library root. qBittorrent saves
+downloads under `/data` and incomplete files under `/data/incomplete`, so a
+root-level library makes Jellyfin index media that is still downloading.
+Churn creates or repairs the `Movies` and `Shows` libraries at
+`/data/media/movies` and `/data/media/tv`, removes any `/data` library path it
+finds, and is safe to rerun.
 
 ## Configuration
 
@@ -70,7 +77,14 @@ creates an API key named `churn`, and writes it to `server/.env` as
 needed; the password is not stored. Sonarr and Radarr API keys are read from
 `server/config/*/config.xml` unless overridden.
 
+The dashboard requires a Jellyfin login. Churn stores the returned user token in
+an in-memory session and sends only an HttpOnly session cookie to the browser;
+restarting the backend signs everyone out. Library calls use the user's token,
+while the installer's API key stays server-side for status checks. All
+logged-in Jellyfin users get the full dashboard, including Sonarr/Radarr
+requests.
+
 The planned order is: library/status dashboard, search and media requests
-(done), active downloads in Library (done), download history and queue actions,
-then Jellyfin playback controls. See [Web dashboard](web-ui.md) for the current
-API and configuration.
+(done), active downloads in Library (done), Jellyfin login and per-user sessions
+(done), download history and queue actions, then Jellyfin playback controls. See
+[Web dashboard](web-ui.md) for the current API and configuration.

@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 
+import { expireSession, requireAuth } from "../auth.js";
 import type { AppConfig } from "../config.js";
 import { ApiError, isUnauthorized, UpstreamError } from "../errors.js";
 import type { LibraryItem, LibraryResponse, LibraryState } from "../types.js";
@@ -10,10 +11,11 @@ import {
 } from "../upstream/jellyfin.js";
 
 export function registerLibraryRoutes(app: FastifyInstance, config: AppConfig): void {
-  app.get("/api/library", async (_request, reply) => {
+  app.get("/api/library", async (request, reply) => {
     reply.header("cache-control", "no-store");
+    const auth = requireAuth(request);
     const service = config.services.jellyfin;
-    const client = createJellyfinClient(service, config.requestTimeoutMs);
+    const client = createJellyfinClient(service, config.requestTimeoutMs, auth.accessToken);
 
     let publicInfo;
     try {
@@ -31,7 +33,7 @@ export function registerLibraryRoutes(app: FastifyInstance, config: AppConfig): 
     }
 
     try {
-      const upstreamItems = await client.listLibrary();
+      const upstreamItems = await client.listLibrary(auth.user.id);
       const items = upstreamItems
         .map(mapJellyfinItem)
         .filter((item): item is LibraryItem => item !== null);
@@ -43,6 +45,14 @@ export function registerLibraryRoutes(app: FastifyInstance, config: AppConfig): 
       };
       return response;
     } catch (error) {
+      if (isUnauthorized(error)) {
+        expireSession(request);
+        throw new ApiError(
+          401,
+          "session_expired",
+          "Your Jellyfin session expired. Sign in again.",
+        );
+      }
       if (error instanceof UpstreamError) {
         return emptyLibrary(libraryStateForError(error), error.message);
       }
@@ -53,6 +63,7 @@ export function registerLibraryRoutes(app: FastifyInstance, config: AppConfig): 
   app.get<{ Params: { itemId: string }; Querystring: Record<string, unknown> }>(
     "/api/library/images/:itemId",
     async (request, reply) => {
+      const auth = requireAuth(request);
       const itemId = request.params.itemId;
       if (!/^[A-Za-z0-9-]{1,64}$/.test(itemId)) {
         throw new ApiError(400, "invalid_item_id", "Invalid library item id");
@@ -63,7 +74,7 @@ export function registerLibraryRoutes(app: FastifyInstance, config: AppConfig): 
         throw new ApiError(503, "jellyfin_unconfigured", "Set JELLYFIN_API_KEY in server/.env");
       }
 
-      const client = createJellyfinClient(service, config.requestTimeoutMs);
+      const client = createJellyfinClient(service, config.requestTimeoutMs, auth.accessToken);
       try {
         const image = await client.getPrimaryImage(itemId, query);
         if (!image) {
@@ -74,6 +85,14 @@ export function registerLibraryRoutes(app: FastifyInstance, config: AppConfig): 
       } catch (error) {
         if (error instanceof ApiError) {
           throw error;
+        }
+        if (isUnauthorized(error)) {
+          expireSession(request);
+          throw new ApiError(
+            401,
+            "session_expired",
+            "Your Jellyfin session expired. Sign in again.",
+          );
         }
         if (error instanceof UpstreamError) {
           if (error.status === 404) {

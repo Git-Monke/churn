@@ -343,40 +343,66 @@ fn setup_jellyfin(dry_run: bool) -> io::Result<()> {
         .ok()
         .filter(|value| !value.trim().is_empty())
         .or_else(|| env.get(jellyfin::API_KEY_ENV).cloned());
-    if let Some(key) = existing_key {
-        match client.validate_api_key(&key) {
+    let existing_key = match existing_key {
+        Some(key) => match client.validate_api_key(&key) {
             Ok(true) => {
                 log::success("Jellyfin is already configured and its API key is valid")?;
-                return Ok(());
+                Some(key)
             }
             Ok(false) => {
                 log::warning("the existing Jellyfin API key is invalid — creating a new one")?;
+                None
             }
             Err(err) => return Err(err),
-        }
-    }
+        },
+        None => None,
+    };
 
-    let credentials = jellyfin_credentials(&env)?;
-    let progress = spinner();
-    progress.start("setting up Jellyfin and creating an API key");
-    match client.provision(&env_path, &credentials, &public) {
-        Ok(result) => {
-            if result.completed_setup {
-                progress.stop("Jellyfin setup complete; API key saved to server/.env");
-            } else {
-                progress.stop("Jellyfin API key saved to server/.env");
+    let api_key = match existing_key {
+        Some(key) => key,
+        None => {
+            let credentials = jellyfin_credentials(&env)?;
+            let progress = spinner();
+            progress.start("setting up Jellyfin and creating an API key");
+            match client.provision(&env_path, &credentials, &public) {
+                Ok(result) => {
+                    if result.completed_setup {
+                        progress.stop("Jellyfin setup complete; API key saved to server/.env");
+                    } else {
+                        progress.stop("Jellyfin API key saved to server/.env");
+                    }
+                    log::info(format!(
+                        "Jellyfin admin user: {} (keep the password you entered)",
+                        credentials.username
+                    ))?;
+                    result.api_key
+                }
+                Err(err) => {
+                    progress.stop("Jellyfin setup failed");
+                    return Err(err);
+                }
             }
-            log::info(format!(
-                "Jellyfin admin user: {} (keep the password you entered)",
-                credentials.username
-            ))?;
-            Ok(())
+        }
+    };
+
+    let progress = spinner();
+    progress.start("checking Jellyfin libraries");
+    match client.ensure_libraries(&api_key) {
+        Ok(changes) if changes.is_empty() => {
+            progress.stop("Jellyfin libraries are already configured");
+        }
+        Ok(changes) => {
+            progress.stop("Jellyfin libraries are configured");
+            for change in changes {
+                log::info(change)?;
+            }
         }
         Err(err) => {
-            progress.stop("Jellyfin setup failed");
-            Err(err)
+            progress.stop("could not configure Jellyfin libraries");
+            return Err(err);
         }
     }
+    Ok(())
 }
 
 fn jellyfin_credentials(env: &envfile::EnvMap) -> io::Result<Credentials> {
