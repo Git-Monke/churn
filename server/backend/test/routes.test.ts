@@ -10,6 +10,7 @@ function makeConfig(overrides: Partial<AppConfig["services"]> = {}): AppConfig {
     serverDir: "/tmp/churn-test",
     frontendDist: "/tmp/churn-test/frontend/dist",
     requestTimeoutMs: 500,
+    searchTimeoutMs: 2_000,
     sessionTtlMs: 12 * 60 * 60 * 1000,
     cookieSecure: "auto",
     jellyfinPublicUrl: "http://jellyfin.test:8096",
@@ -923,6 +924,24 @@ describe("request options", () => {
     await app.close();
   });
 
+  it("waits past the quick status timeout for slow Sonarr options", async () => {
+    installFetch(async (url) => {
+      await new Promise((resolve) => setTimeout(resolve, 650));
+      if (url.includes("/qualityprofile")) return jsonResponse(profiles);
+      if (url.includes("/rootfolder")) return jsonResponse(rootFolders);
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildAuthedServer(makeConfig());
+    const response = await app.inject({ method: "GET", url: "/api/requests/options" });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(body.services.sonarr.state).toBe("ok");
+    expect(body.services.radarr.state).toBe("ok");
+    await app.close();
+  });
+
   it("degrades cleanly when one app has no API key", async () => {
     installFetch((url) => {
       if (url.includes("/qualityprofile")) return jsonResponse(profiles);
@@ -1064,6 +1083,30 @@ describe("search", () => {
     expect(body.results[0].inLibrary).toBeNull();
     expect(body.services[0].state).toBe("ok");
     expect(body.services[0].detail).toContain("Could not check");
+    await app.close();
+  });
+
+  it("waits past the quick status timeout for a slow Sonarr lookup", async () => {
+    installFetch(async (url) => {
+      if (url.includes("sonarr.test")) {
+        await new Promise((resolve) => setTimeout(resolve, 650));
+        if (url.includes("/series/lookup")) return jsonResponse([seriesLookup]);
+        if (url.endsWith("/api/v3/series")) return jsonResponse([]);
+      }
+      if (url.includes("radarr.test")) {
+        if (url.includes("/movie/lookup")) return jsonResponse([]);
+        if (url.endsWith("/api/v3/movie")) return jsonResponse([]);
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildAuthedServer(makeConfig());
+    const response = await app.inject({ method: "GET", url: "/api/search?q=severance" });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(body.services[0]).toMatchObject({ id: "sonarr", state: "ok", count: 1 });
+    expect(body.results).toHaveLength(1);
     await app.close();
   });
 

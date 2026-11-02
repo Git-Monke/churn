@@ -51,7 +51,8 @@ survive a rerun.
 | `SONARR_API_KEY` / `RADARR_API_KEY` | `config.xml` | Optional overrides |
 | `VPN_STATUS_URL` | `http://127.0.0.1:8098` | Loopback address of the torrent stack's VPN status agent |
 | `VPN_STATUS_TIMEOUT_MS` | `25000` | Timeout for the agent's live checks |
-| `REQUEST_TIMEOUT_MS` | `5000` | Upstream timeout |
+| `REQUEST_TIMEOUT_MS` | `5000` | Upstream timeout for status probes and normal API calls |
+| `SEARCH_TIMEOUT_MS` | `20000` | Timeout for media search and request-option lookups |
 | `CHURN_SESSION_TTL_MS` | `43200000` (12 hours) | Server-side idle session TTL; clamped to 5 minutes–30 days |
 | `CHURN_COOKIE_SECURE` | `auto` | `auto`, `true` or `false` for the session cookie's `Secure` flag |
 | `CHURN_SERVER_DIR` | module-relative | Override `server/` root |

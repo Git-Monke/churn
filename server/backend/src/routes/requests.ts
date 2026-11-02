@@ -66,9 +66,10 @@ export function registerRequestRoutes(
   app.get("/api/requests/options", async (_request, reply) => {
     reply.header("cache-control", "no-store");
     const checkedAt = new Date().toISOString();
+    const timeoutMs = Math.max(config.requestTimeoutMs, config.searchTimeoutMs);
     const [sonarr, radarr] = await Promise.all([
-      loadRequestOptions("sonarr", config.services.sonarr, config.requestTimeoutMs),
-      loadRequestOptions("radarr", config.services.radarr, config.requestTimeoutMs),
+      loadRequestOptions("sonarr", config.services.sonarr, timeoutMs),
+      loadRequestOptions("radarr", config.services.radarr, timeoutMs),
     ]);
     const response: RequestOptionsResponse = {
       checkedAt,
@@ -91,12 +92,11 @@ export function registerRequestRoutes(
     }
 
     const smartPick = input.options?.smartPick ?? true;
+    const lookupTimeoutMs = Math.max(config.requestTimeoutMs, config.searchTimeoutMs);
     const client = createArrClient(
       service,
       serviceConfig,
-      smartPick
-        ? Math.max(config.requestTimeoutMs, RELEASE_SEARCH_TIMEOUT_MS)
-        : config.requestTimeoutMs,
+      smartPick ? Math.max(lookupTimeoutMs, RELEASE_SEARCH_TIMEOUT_MS) : lookupTimeoutMs,
     );
     const term = input.kind === "movie" ? `tmdb:${input.tmdbId}` : `tvdb:${input.tvdbId}`;
     const [lookupResult, libraryResult, profileResult, folderResult] = await Promise.allSettled([

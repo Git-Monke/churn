@@ -71,7 +71,8 @@ preserves unknown keys, so hand-added settings survive a rerun.
 | `QBITTORRENT_API_KEY` | `torrent/config/qbittorrent/qBittorrent/qBittorrent.conf` | Optional override for the read-only progress key |
 | `VPN_STATUS_URL` | `http://127.0.0.1:8098` | Loopback address of the torrent stack's `vpn-status` agent |
 | `VPN_STATUS_TIMEOUT_MS` | `25000` | Timeout for the agent's live test; checks include external requests |
-| `REQUEST_TIMEOUT_MS` | `5000` | Upstream request timeout |
+| `REQUEST_TIMEOUT_MS` | `5000` | Upstream request timeout for status probes and normal API calls |
+| `SEARCH_TIMEOUT_MS` | `20000` | Timeout for media search and request-option lookups; Sonarr can be slow on large libraries |
 | `CHURN_SESSION_TTL_MS` | `43200000` (12 hours) | Server-side idle session TTL; clamped to 5 minutes–30 days |
 | `CHURN_COOKIE_SECURE` | `auto` | `auto`, `true` or `false`; controls the session cookie's `Secure` flag |
 | `CHURN_SERVER_DIR` | resolved from the backend module | Override the `server/` root |

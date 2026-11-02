@@ -30,6 +30,7 @@ function makeConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     serverDir: "/tmp/churn-auth-test",
     frontendDist: "/tmp/churn-auth-test/frontend/dist",
     requestTimeoutMs: 500,
+    searchTimeoutMs: 2_000,
     sessionTtlMs: 12 * 60 * 60 * 1000,
     cookieSecure: "auto",
     jellyfinPublicUrl: "http://jellyfin.test:8096",

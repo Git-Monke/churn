@@ -32,6 +32,12 @@ export interface AppConfig {
   serverDir: string;
   frontendDist: string;
   requestTimeoutMs: number;
+  /**
+   * Timeout for media search and request-option lookups. Sonarr can take
+   * several seconds to answer a lookup on a large library, so this is more
+   * forgiving than `requestTimeoutMs`.
+   */
+  searchTimeoutMs: number;
   sessionTtlMs: number;
   cookieSecure: CookieSecureSetting;
   jellyfinPublicUrl: string;
@@ -170,6 +176,7 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
     serverDir,
     frontendDist: path.join(serverDir, "frontend", "dist"),
     requestTimeoutMs: parseTimeout(values.REQUEST_TIMEOUT_MS),
+    searchTimeoutMs: parseSearchTimeout(values.SEARCH_TIMEOUT_MS),
     sessionTtlMs: parseSessionTtl(values.CHURN_SESSION_TTL_MS),
     cookieSecure: parseCookieSecure(values.CHURN_COOKIE_SECURE),
     jellyfinPublicUrl: normalizeUrl(
@@ -235,6 +242,25 @@ function parseTimeout(value: string | undefined): number {
   const timeout = Number.parseInt(value, 10);
   if (!Number.isInteger(timeout) || timeout < 250 || timeout > 60_000) {
     throw new Error(`invalid REQUEST_TIMEOUT_MS: ${value}`);
+  }
+  return timeout;
+}
+
+const DEFAULT_SEARCH_TIMEOUT_MS = 20_000;
+const MIN_SEARCH_TIMEOUT_MS = 1_000;
+const MAX_SEARCH_TIMEOUT_MS = 120_000;
+
+function parseSearchTimeout(value: string | undefined): number {
+  if (!value?.trim()) {
+    return DEFAULT_SEARCH_TIMEOUT_MS;
+  }
+  const timeout = Number.parseInt(value, 10);
+  if (
+    !Number.isInteger(timeout) ||
+    timeout < MIN_SEARCH_TIMEOUT_MS ||
+    timeout > MAX_SEARCH_TIMEOUT_MS
+  ) {
+    throw new Error(`invalid SEARCH_TIMEOUT_MS: ${value}`);
   }
   return timeout;
 }

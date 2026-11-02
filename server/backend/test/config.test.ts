@@ -39,6 +39,8 @@ describe("config loading", () => {
 
     expect(config.host).toBe("127.0.0.1");
     expect(config.port).toBe(4000);
+    expect(config.requestTimeoutMs).toBe(5_000);
+    expect(config.searchTimeoutMs).toBe(20_000);
     expect(config.sessionTtlMs).toBe(12 * 60 * 60 * 1000);
     expect(config.cookieSecure).toBe("auto");
     expect(config.services.jellyfin.url).toBe("http://127.0.0.1:8096");
@@ -123,6 +125,7 @@ describe("config loading", () => {
         CHURN_COOKIE_SECURE: "true",
         VPN_STATUS_URL: "http://vpn-status:8098/",
         VPN_STATUS_TIMEOUT_MS: "30000",
+        SEARCH_TIMEOUT_MS: "15000",
       },
       readDotEnv: false,
     });
@@ -134,6 +137,7 @@ describe("config loading", () => {
     expect(config.services.jellyfin.apiKey).toBe("jellyfin-key");
     expect(config.services.sonarr.url).toBe("http://sonarr:8989");
     expect(config.services.sonarr.apiKey).toBe("env-key");
+    expect(config.searchTimeoutMs).toBe(15_000);
     expect(config.sessionTtlMs).toBe(3_600_000);
     expect(config.cookieSecure).toBe(true);
     expect(config.vpn).toEqual({
@@ -191,6 +195,20 @@ describe("config loading", () => {
         readDotEnv: false,
       }),
     ).toThrow(/VPN_STATUS_TIMEOUT_MS/);
+    expect(() =>
+      loadConfig({
+        serverDir,
+        env: { SEARCH_TIMEOUT_MS: "soon" },
+        readDotEnv: false,
+      }),
+    ).toThrow(/SEARCH_TIMEOUT_MS/);
+    expect(() =>
+      loadConfig({
+        serverDir,
+        env: { SEARCH_TIMEOUT_MS: "500" },
+        readDotEnv: false,
+      }),
+    ).toThrow(/SEARCH_TIMEOUT_MS/);
   });
 
   it("clamps the session TTL and parses the cookie secure setting", () => {

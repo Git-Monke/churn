@@ -10,6 +10,7 @@ function makeConfig(): AppConfig {
     serverDir: "/tmp/churn-test",
     frontendDist: "/tmp/churn-test/frontend/dist",
     requestTimeoutMs: 500,
+    searchTimeoutMs: 2_000,
     sessionTtlMs: 12 * 60 * 60 * 1000,
     cookieSecure: "auto",
     jellyfinPublicUrl: "http://jellyfin.test:8096",

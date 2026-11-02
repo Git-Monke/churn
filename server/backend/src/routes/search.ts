@@ -23,9 +23,10 @@ export function registerSearchRoutes(app: FastifyInstance, config: AppConfig): v
   app.get<{ Querystring: { q?: unknown } }>("/api/search", async (request, reply) => {
     reply.header("cache-control", "no-store");
     const query = parseSearchQuery(request.query.q);
+    const timeoutMs = Math.max(config.requestTimeoutMs, config.searchTimeoutMs);
     const [sonarr, radarr] = await Promise.all([
-      searchSonarr(config.services.sonarr, query, config.requestTimeoutMs),
-      searchRadarr(config.services.radarr, query, config.requestTimeoutMs),
+      searchSonarr(config.services.sonarr, query, timeoutMs),
+      searchRadarr(config.services.radarr, query, timeoutMs),
     ]);
 
     const response: SearchResponse = {
