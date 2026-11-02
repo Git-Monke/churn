@@ -7,7 +7,8 @@
 #
 #   * creates the qBittorrent categories (`prowlarr`, `tv`, `movies`),
 #   * registers qBittorrent as a Prowlarr download client,
-#   * enables a few public indexers (EZTV, YTS, The Pirate Bay) so searches
+#   * enables a set of public indexers (EZTV, YTS, The Pirate Bay, 1337x,
+#     LimeTorrents, Torrent Downloads, TorrentDownload and Uindex) so searches
 #     work immediately,
 #   * registers Sonarr and Radarr as Prowlarr applications (so Prowlarr pushes
 #     its indexers to them) and keeps their sync categories free of adult
@@ -438,8 +439,14 @@ EOF
     fi
 }
 
+# Cloudflare returns HTTP 451 (Unavailable For Legal Reasons) for some sites
+# from countries with court-ordered blocks (for example EZTV, 1337x, YTS and
+# The Pirate Bay from a Dutch exit). FlareSolverr cannot solve a 451, so those
+# indexers only work when the VPN exit country has no such block. churn derives
+# SERVER_COUNTRIES from the selected Mullvad config; override it in torrent/.env.
+#
 # Override with PROWLARR_INDEXERS in torrent/.env, e.g. "eztv,yts".
-indexers=$(printf '%s' "${PROWLARR_INDEXERS:-eztv,yts,thepiratebay}" | tr -d '[:space:]')
+indexers=$(printf '%s' "${PROWLARR_INDEXERS:-eztv,yts,thepiratebay,1337x,limetorrents,torrentdownloads,torrentdownload,uindex}" | tr -d '[:space:]')
 old_ifs=$IFS
 IFS=,
 for indexer in $indexers; do
@@ -449,6 +456,9 @@ for indexer in $indexers; do
         yts) name=YTS; base_url=https://yts.gg/ ;;
         thepiratebay) name="The Pirate Bay"; base_url=https://thepiratebay.org/ ;;
         limetorrents) name=LimeTorrents; base_url=https://www.limetorrents.fun/ ;;
+        torrentdownloads) name="Torrent Downloads"; base_url=https://www.torrentdownloads.pro/ ;;
+        torrentdownload) name=TorrentDownload; base_url=https://www.torrentdownload.info/ ;;
+        uindex) name=Uindex; base_url=https://uindex.org/ ;;
         "") continue ;;
         *)
             echo "unknown indexer '$indexer' in PROWLARR_INDEXERS; skipping" >&2

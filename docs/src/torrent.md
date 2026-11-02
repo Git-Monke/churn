@@ -53,12 +53,21 @@ other machines, bind the published port to `127.0.0.1:8080:8080` in
 
 `prowlarr-init` is idempotent. It creates the `prowlarr`, `tv`, and `movies`
 qBittorrent categories, registers qBittorrent in Prowlarr, adds enabled public
-indexers, connects FlareSolverr, and links Sonarr and Radarr. It reads their API
-keys from `../server/config`, so the current setup expects both stacks on the
-same host. The Sonarr/Radarr application sync categories only include normal TV
-and movie categories, excluding the adult XXX (`6000`-series) categories.
-Prowlarr's own Search page has no equivalent global filter. Filtering is by
-category, so miscategorised adult releases can still appear.
+indexers, connects FlareSolverr, and links Sonarr and Radarr. The default
+indexers are EZTV, YTS, The Pirate Bay, 1337x, LimeTorrents, Torrent Downloads,
+TorrentDownload and Uindex; override them with `PROWLARR_INDEXERS`. It reads
+their API keys from `../server/config`, so the current setup expects both
+stacks on the same host. The Sonarr/Radarr application sync categories only
+include normal TV and movie categories, excluding the adult XXX (`6000`-series)
+categories. Prowlarr's own Search page has no equivalent global filter.
+Filtering is by category, so miscategorised adult releases can still appear.
+
+Indexer results also depend on where the VPN exits. Some countries have
+court-ordered blocks for sites such as EZTV, 1337x, YTS, The Pirate Bay and
+LimeTorrents; Cloudflare serves those as HTTP 451, which FlareSolverr cannot
+bypass. churn derives `SERVER_COUNTRIES` from the selected Mullvad config
+filename (for example `us-atl-wg-001.conf` becomes `USA`). Set
+`SERVER_COUNTRIES` in `torrent/.env` to pin an exit country explicitly.
 
 The stack shares `${DATA_DIR}` with the server stack at `/data`, so completed
 downloads are visible to Sonarr, Radarr, and Jellyfin without path translation.

@@ -15,6 +15,79 @@ use crate::question::{validate_wireguard_address, validate_wireguard_key};
 
 pub const CONFIG_EXTENSION: &str = ".conf";
 
+/// Mullvad's ISO country codes mapped to the country names Gluetun accepts in
+/// `SERVER_COUNTRIES`. Mullvad encodes the country in each config filename, so
+/// the selected `.conf` tells us where the tunnel should exit.
+const COUNTRY_NAMES: [(&str, &str); 50] = [
+    ("al", "Albania"),
+    ("ar", "Argentina"),
+    ("at", "Austria"),
+    ("au", "Australia"),
+    ("be", "Belgium"),
+    ("bg", "Bulgaria"),
+    ("br", "Brazil"),
+    ("ca", "Canada"),
+    ("ch", "Switzerland"),
+    ("cl", "Chile"),
+    ("co", "Colombia"),
+    ("cy", "Cyprus"),
+    ("cz", "Czech Republic"),
+    ("de", "Germany"),
+    ("dk", "Denmark"),
+    ("ee", "Estonia"),
+    ("es", "Spain"),
+    ("fi", "Finland"),
+    ("fr", "France"),
+    ("gb", "UK"),
+    ("gr", "Greece"),
+    ("hk", "Hong Kong"),
+    ("hr", "Croatia"),
+    ("hu", "Hungary"),
+    ("id", "Indonesia"),
+    ("ie", "Ireland"),
+    ("il", "Israel"),
+    ("it", "Italy"),
+    ("jp", "Japan"),
+    ("mx", "Mexico"),
+    ("my", "Malaysia"),
+    ("ng", "Nigeria"),
+    ("nl", "Netherlands"),
+    ("no", "Norway"),
+    ("nz", "New Zealand"),
+    ("pe", "Peru"),
+    ("ph", "Philippines"),
+    ("pl", "Poland"),
+    ("pt", "Portugal"),
+    ("rs", "Serbia"),
+    ("ro", "Romania"),
+    ("se", "Sweden"),
+    ("sg", "Singapore"),
+    ("si", "Slovenia"),
+    ("sk", "Slovakia"),
+    ("th", "Thailand"),
+    ("tr", "Turkey"),
+    ("ua", "Ukraine"),
+    ("us", "USA"),
+    ("za", "South Africa"),
+];
+
+/// Country name for a Mullvad config entry such as `us-atl-wg-001.conf`.
+///
+/// Entries may include a directory prefix; only the filename is inspected.
+/// Unknown or non-ISO prefixes return `None` so callers can keep an explicit
+/// `SERVER_COUNTRIES` value instead of guessing.
+pub fn country_for_entry(entry: &str) -> Option<&'static str> {
+    let name = Path::new(entry).file_name()?.to_str()?;
+    let code = name.split(['-', '.']).next()?.to_ascii_lowercase();
+    if code.len() != 2 {
+        return None;
+    }
+    COUNTRY_NAMES
+        .iter()
+        .find(|(known, _)| *known == code)
+        .map(|(_, country)| *country)
+}
+
 /// Credentials pulled out of a Mullvad WireGuard config file.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WireguardConfig {

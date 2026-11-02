@@ -169,7 +169,7 @@ services:
     environment:
       - HOST_IP=${HOST_IP:-}
       - FLARESOLVERR_URL=${FLARESOLVERR_URL:-http://localhost:8191}
-      - PROWLARR_INDEXERS=${PROWLARR_INDEXERS:-eztv,yts,thepiratebay}
+      - PROWLARR_INDEXERS=${PROWLARR_INDEXERS:-eztv,yts,thepiratebay,1337x,limetorrents,torrentdownloads,torrentdownload,uindex}
     depends_on:
       gluetun:
         condition: service_healthy

@@ -10,11 +10,17 @@ use crate::security;
 
 pub type Answers = HashMap<Question, String>;
 
-/// Default Mullvad location written to `SERVER_COUNTRIES`.
+/// Fallback Mullvad location written to `SERVER_COUNTRIES` when the selected
+/// config does not identify a known country.
 ///
-/// Country selection is intentionally not a prompt right now; change the
-/// value in `torrent/.env` (or this default) when that becomes configurable.
-pub const DEFAULT_SERVER_COUNTRIES: &str = "Netherlands";
+/// Country selection is intentionally not a prompt: churn derives the exit
+/// country from the Mullvad config filename (`us-atl-wg-001.conf` -> `USA`).
+/// Set `SERVER_COUNTRIES` in `torrent/.env` to override it.
+pub const FALLBACK_SERVER_COUNTRIES: &str = "Netherlands";
+
+/// The value older churn releases wrote regardless of the selected config.
+/// Reruns treat it as generated state so they can adopt the config's country.
+const LEGACY_SERVER_COUNTRIES: &str = "Netherlands";
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Stack {
@@ -153,11 +159,15 @@ impl Stack {
                     managed.push((question.env_key(), value.clone()));
                 }
             }
-            // No country prompt for now: keep a previous choice, else default.
+            // No country prompt for now: keep a hand-edited choice, else use
+            // the country encoded in the selected Mullvad config filename.
+            let env = envfile::read(&self.env_path());
+            let config_entry = answers
+                .get(&Question::WireguardConfig)
+                .or_else(|| env.get("WIREGUARD_CONFIG"));
             let countries = server_countries(
-                envfile::read(&self.env_path())
-                    .get("SERVER_COUNTRIES")
-                    .map(String::as_str),
+                env.get("SERVER_COUNTRIES").map(String::as_str),
+                config_entry.map(String::as_str),
             );
             managed.push(("SERVER_COUNTRIES", countries));
             // Prowlarr and Sonarr/Radarr live in different network namespaces;
@@ -184,8 +194,18 @@ pub fn start_order(mut chosen: Vec<Stack>) -> Vec<Stack> {
     chosen
 }
 
-fn server_countries(existing: Option<&str>) -> String {
-    existing.unwrap_or(DEFAULT_SERVER_COUNTRIES).to_string()
+fn server_countries(existing: Option<&str>, config_entry: Option<&str>) -> String {
+    let existing = existing.map(str::trim).filter(|value| !value.is_empty());
+    // `Netherlands` was hardcoded by older releases; migrate it instead of
+    // preserving the bug on rerun. Any other value is an explicit override.
+    if let Some(value) = existing.filter(|value| *value != LEGACY_SERVER_COUNTRIES) {
+        return value.to_string();
+    }
+    config_entry
+        .and_then(crate::mullvad::country_for_entry)
+        .map(str::to_string)
+        .or_else(|| existing.map(str::to_string))
+        .unwrap_or_else(|| FALLBACK_SERVER_COUNTRIES.to_string())
 }
 
 /// Every unique question across the chosen stacks, VPN before Storage.
@@ -229,9 +249,36 @@ mod tests {
     }
 
     #[test]
-    fn server_country_defaults_when_not_configured() {
-        assert_eq!(server_countries(None), DEFAULT_SERVER_COUNTRIES);
-        assert_eq!(server_countries(Some("Sweden")), "Sweden");
+    fn server_country_comes_from_the_selected_config() {
+        assert_eq!(server_countries(None, Some("us-atl-wg-001.conf")), "USA");
+        assert_eq!(
+            server_countries(Some(""), Some("se-sto-wg-002.conf")),
+            "Sweden"
+        );
+    }
+
+    #[test]
+    fn explicit_country_overrides_the_config_and_legacy_default_is_migrated() {
+        assert_eq!(
+            server_countries(Some("Switzerland"), Some("us-atl-wg-001.conf")),
+            "Switzerland"
+        );
+        assert_eq!(
+            server_countries(Some(LEGACY_SERVER_COUNTRIES), Some("us-atl-wg-001.conf")),
+            "USA"
+        );
+    }
+
+    #[test]
+    fn unknown_config_falls_back_to_existing_or_default() {
+        assert_eq!(
+            server_countries(None, Some("readme.conf")),
+            FALLBACK_SERVER_COUNTRIES
+        );
+        assert_eq!(
+            server_countries(Some(LEGACY_SERVER_COUNTRIES), None),
+            LEGACY_SERVER_COUNTRIES
+        );
     }
 
     #[test]

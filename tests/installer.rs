@@ -158,6 +158,30 @@ fn env_upsert_updates_one_key_without_reformatting_the_file() {
     fs::remove_dir_all(&dir).unwrap();
 }
 
+#[test]
+fn derives_the_exit_country_from_the_config_filename() {
+    assert_eq!(
+        mullvad::country_for_entry("us-atl-wg-001.conf"),
+        Some("USA")
+    );
+    assert_eq!(
+        mullvad::country_for_entry("nl-ams-wg-002.conf"),
+        Some("Netherlands")
+    );
+    assert_eq!(mullvad::country_for_entry("gb-lon-wg-101.conf"), Some("UK"));
+    assert_eq!(
+        mullvad::country_for_entry("some/nested/gb-man-wg-003.conf"),
+        Some("UK")
+    );
+}
+
+#[test]
+fn unknown_config_filenames_do_not_guess_a_country() {
+    assert_eq!(mullvad::country_for_entry("readme.conf"), None);
+    assert_eq!(mullvad::country_for_entry("zz-place-wg-001.conf"), None);
+    assert_eq!(mullvad::country_for_entry(""), None);
+}
+
 const CONF: &str = "\
 [Interface]
 # Device: Square Dragon

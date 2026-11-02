@@ -222,7 +222,9 @@ The wiring is automatic on first `docker compose up`:
    APIs (all steps are idempotent):
    - creates the qBittorrent categories `prowlarr`, `tv` and `movies`;
    - registers qBittorrent in Prowlarr as a download client (category `prowlarr`);
-   - adds and enables the public indexers `EZTV`, `YTS` and `The Pirate Bay`;
+   - adds and enables the public indexers `EZTV`, `YTS`, `The Pirate Bay`,
+     `1337x`, `LimeTorrents`, `Torrent Downloads`, `TorrentDownload` and
+     `Uindex`;
    - registers FlareSolverr as a Prowlarr indexer proxy and tags the managed
      indexers so Cloudflare-protected sites such as EZTV work;
    - registers Sonarr and Radarr as Prowlarr applications, so Prowlarr pushes
@@ -261,16 +263,28 @@ The default public indexers need no accounts and are enough to get started.
 Override them with a comma-separated list in `torrent/.env`:
 
 ```bash
-PROWLARR_INDEXERS=eztv,yts,thepiratebay
+PROWLARR_INDEXERS=eztv,yts,thepiratebay,1337x,limetorrents,torrentdownloads,torrentdownload,uindex
 ```
 
-Supported keys are `1337x`, `eztv`, `yts`, `thepiratebay` and `limetorrents`;
-unknown names are skipped. Indexers named in `PROWLARR_INDEXERS` are added to
-Prowlarr and tagged for FlareSolverr automatically. They are enabled even when
-Prowlarr's immediate connectivity test fails (for example, Cloudflare blocking
-EZTV); Prowlarr can then back off that indexer until it responds. Re-run the
-one-shot to re-apply the enabled state and proxy tag after changing an indexer
-in the UI.
+Supported keys are `1337x`, `eztv`, `yts`, `thepiratebay`, `limetorrents`,
+`torrentdownloads`, `torrentdownload` and `uindex`; unknown names are skipped.
+Indexers named in `PROWLARR_INDEXERS` are added to Prowlarr and tagged for
+FlareSolverr automatically. They are enabled even when Prowlarr's immediate
+connectivity test fails; Prowlarr can then back off that indexer until it
+responds. Re-run the one-shot to re-apply the enabled state and proxy tag after
+changing an indexer in the UI.
+
+Indexer availability depends on the VPN exit country. Courts in some countries
+order blocks for specific sites, and Cloudflare answers those with **HTTP 451
+(Unavailable For Legal Reasons)** — a legal block, not a challenge, so
+FlareSolverr cannot solve it. The Netherlands, for example, blocks EZTV, 1337x,
+YTS, The Pirate Bay and LimeTorrents. churn derives `SERVER_COUNTRIES` from the
+selected Mullvad config filename (`us-atl-wg-001.conf` -> `USA`) instead of
+hardcoding a country. To pin a different exit, set it in `torrent/.env`:
+
+```bash
+SERVER_COUNTRIES=USA
+```
 
 Prowlarr does not have a global "hide adult categories" setting. churn filters
 adult releases where it can do so reliably: the Sonarr and Radarr applications
@@ -284,8 +298,7 @@ still slip through.
 FlareSolverr only runs when Prowlarr detects a Cloudflare challenge, so ordinary
 indexers do not pay the Chromium startup cost. Its network traffic shares
 Gluetun's namespace and therefore exits through Mullvad like the other torrent
-containers. `1337x` is supported and can be enabled with
-`PROWLARR_INDEXERS=1337x,eztv,yts,thepiratebay`.
+containers.
 
 ## VPN leak protection
 
