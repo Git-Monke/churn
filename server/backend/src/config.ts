@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 
 import dotenv from "dotenv";
 
+import { detectLanAddress } from "./lan.js";
+
 export type ServiceId = "jellyfin" | "sonarr" | "radarr";
 export type CookieSecureSetting = "auto" | boolean;
 
@@ -40,7 +42,14 @@ export interface AppConfig {
   searchTimeoutMs: number;
   sessionTtlMs: number;
   cookieSecure: CookieSecureSetting;
+  /**
+   * Jellyfin URL handed to the browser for video streams. Defaults to the
+   * host's LAN address rather than loopback, so playback works from other
+   * devices and not only from the machine running the backend.
+   */
   jellyfinPublicUrl: string;
+  /** Address used as that default; undefined when no LAN interface was found. */
+  lanAddress?: string;
   services: Record<ServiceId, ServiceConfig>;
   qbittorrent: QbittorrentConfig;
   vpn: VpnConfig;
@@ -50,6 +59,8 @@ interface LoadConfigOptions {
   serverDir?: string;
   env?: NodeJS.ProcessEnv;
   readDotEnv?: boolean;
+  /** Override LAN detection; tests inject a stub to stay machine-independent. */
+  detectLan?: () => string | undefined;
 }
 
 const SERVICE_DEFAULTS: Record<ServiceId, { name: string; url: string }> = {
@@ -138,6 +149,8 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
   const fileEnv = options.readDotEnv === false ? {} : readDotEnv(serverDir);
   // Process environment wins over churn's generated .env file.
   const values: NodeJS.ProcessEnv = { ...fileEnv, ...env };
+  const detectLan = options.detectLan ?? (() => detectLanAddress(values));
+  const lanAddress = detectLan();
 
   const services: Record<ServiceId, ServiceConfig> = {
     jellyfin: {
@@ -179,10 +192,12 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
     searchTimeoutMs: parseSearchTimeout(values.SEARCH_TIMEOUT_MS),
     sessionTtlMs: parseSessionTtl(values.CHURN_SESSION_TTL_MS),
     cookieSecure: parseCookieSecure(values.CHURN_COOKIE_SECURE),
-    jellyfinPublicUrl: normalizeUrl(
+    jellyfinPublicUrl: resolveJellyfinPublicUrl(
       values.JELLYFIN_PUBLIC_URL,
       services.jellyfin.url,
+      lanAddress,
     ),
+    lanAddress,
     services,
     qbittorrent,
     vpn,
@@ -208,6 +223,52 @@ function nonEmpty(value: string | undefined): string | undefined {
 
 function cleanApiKey(value: string | undefined): string | undefined {
   return nonEmpty(value?.replace(/^["']|["']$/g, ""));
+}
+
+/**
+ * Resolve the URL the browser uses for video streams.
+ *
+ * An explicit `JELLYFIN_PUBLIC_URL` always wins. Otherwise a loopback address
+ * (or a single-label container/service host such as `jellyfin`) is replaced
+ * with the host's LAN address, keeping the scheme, port and base path. When no
+ * LAN address is available the Jellyfin URL is used unchanged, which keeps
+ * loopback-only installs and container setups working as before.
+ */
+function resolveJellyfinPublicUrl(
+  explicit: string | undefined,
+  jellyfinUrl: string,
+  lanAddress: string | undefined,
+): string {
+  if (nonEmpty(explicit)) {
+    return normalizeUrl(explicit, jellyfinUrl);
+  }
+  if (!lanAddress) {
+    return jellyfinUrl;
+  }
+
+  const url = new URL(jellyfinUrl);
+  if (!needsPublicHost(url.hostname)) {
+    return jellyfinUrl;
+  }
+  url.hostname = lanAddress;
+  return normalizeUrl(url.toString(), jellyfinUrl);
+}
+
+/** True when a browser on another machine cannot resolve this host. */
+function needsPublicHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (host === "localhost" || host.endsWith(".localhost") || host === "::1") {
+    return true;
+  }
+  if (/^127\./.test(host)) {
+    return true;
+  }
+  // Bare IPv6 literals are globally routable; leave them alone.
+  if (host.includes(":")) {
+    return false;
+  }
+  // A single-label name is a Docker service or compose host, not a LAN host.
+  return !host.includes(".");
 }
 
 function normalizeUrl(value: string | undefined, fallback: string): string {

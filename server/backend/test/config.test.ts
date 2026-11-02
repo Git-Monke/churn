@@ -35,7 +35,12 @@ describe("config loading", () => {
     writeConfigXml(serverDir, "sonarr", "sonarr-key");
     writeConfigXml(serverDir, "radarr", "radarr-key");
 
-    const config = loadConfig({ serverDir, env: {}, readDotEnv: false });
+    const config = loadConfig({
+      serverDir,
+      env: {},
+      readDotEnv: false,
+      detectLan: () => undefined,
+    });
 
     expect(config.host).toBe("127.0.0.1");
     expect(config.port).toBe(4000);
@@ -45,6 +50,7 @@ describe("config loading", () => {
     expect(config.cookieSecure).toBe("auto");
     expect(config.services.jellyfin.url).toBe("http://127.0.0.1:8096");
     expect(config.jellyfinPublicUrl).toBe("http://127.0.0.1:8096");
+    expect(config.lanAddress).toBeUndefined();
     expect(config.services.jellyfin.apiKey).toBeUndefined();
     expect(config.services.sonarr.url).toBe("http://127.0.0.1:8989");
     expect(config.services.sonarr.apiKey).toBe("sonarr-key");
@@ -53,6 +59,73 @@ describe("config loading", () => {
       statusUrl: "http://127.0.0.1:8098",
       timeoutMs: 25_000,
     });
+  });
+
+  it("defaults the browser-facing video URL to the LAN address", () => {
+    const serverDir = tempServerDir();
+
+    const config = loadConfig({
+      serverDir,
+      env: {},
+      readDotEnv: false,
+      detectLan: () => "192.168.0.97",
+    });
+
+    // The backend still talks to Jellyfin over loopback; only the URL handed
+    // to the browser moves to the LAN address.
+    expect(config.services.jellyfin.url).toBe("http://127.0.0.1:8096");
+    expect(config.lanAddress).toBe("192.168.0.97");
+    expect(config.jellyfinPublicUrl).toBe("http://192.168.0.97:8096");
+  });
+
+  it("keeps the scheme, port and base path when substituting the LAN address", () => {
+    const serverDir = tempServerDir();
+
+    const config = loadConfig({
+      serverDir,
+      env: { JELLYFIN_URL: "https://localhost:443/jellyfin/" },
+      readDotEnv: false,
+      detectLan: () => "10.1.2.3",
+    });
+
+    expect(config.jellyfinPublicUrl).toBe("https://10.1.2.3/jellyfin");
+  });
+
+  it("substitutes the LAN address for a container hostname", () => {
+    const serverDir = tempServerDir();
+
+    const config = loadConfig({
+      serverDir,
+      env: { JELLYFIN_URL: "http://jellyfin:8096" },
+      readDotEnv: false,
+      detectLan: () => "192.168.0.97",
+    });
+
+    expect(config.services.jellyfin.url).toBe("http://jellyfin:8096");
+    expect(config.jellyfinPublicUrl).toBe("http://192.168.0.97:8096");
+  });
+
+  it("leaves explicit and already-routable Jellyfin URLs alone", () => {
+    const serverDir = tempServerDir();
+
+    const explicit = loadConfig({
+      serverDir,
+      env: {
+        JELLYFIN_URL: "http://127.0.0.1:8096",
+        JELLYFIN_PUBLIC_URL: "https://media.example.test/jellyfin",
+      },
+      readDotEnv: false,
+      detectLan: () => "192.168.0.97",
+    });
+    expect(explicit.jellyfinPublicUrl).toBe("https://media.example.test/jellyfin");
+
+    const routable = loadConfig({
+      serverDir,
+      env: { JELLYFIN_URL: "http://media.example.test:8096" },
+      readDotEnv: false,
+      detectLan: () => "192.168.0.97",
+    });
+    expect(routable.jellyfinPublicUrl).toBe("http://media.example.test:8096");
   });
 
   it("reads the qBittorrent key from env or the seeded config file", () => {

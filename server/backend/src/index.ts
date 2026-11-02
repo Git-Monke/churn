@@ -4,6 +4,13 @@ import { buildServer } from "./server.js";
 const config = loadConfig();
 const app = await buildServer(config, { logger: true });
 
+// Video streams are handed to the browser as absolute Jellyfin URLs, so the
+// effective public address matters when playback fails on another device.
+app.log.info(
+  `video streams resolve to ${config.jellyfinPublicUrl}` +
+    (config.lanAddress ? ` (LAN address ${config.lanAddress})` : " (no LAN address detected)"),
+);
+
 try {
   await app.listen({ host: config.host, port: config.port });
 } catch (error) {

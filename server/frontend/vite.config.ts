@@ -11,7 +11,9 @@ export default defineConfig({
     },
   },
   server: {
-    host: "127.0.0.1",
+    // Bind all interfaces so the dev UI is reachable from the LAN (and the
+    // tailnet). Override with `--host 127.0.0.1` for a loopback-only session.
+    host: true,
     port: 5173,
     proxy: {
       // Preserve the browser's Host header so the backend's same-origin CSRF

@@ -43,10 +43,14 @@ npm start
 # open http://127.0.0.1:4000 — Fastify serves the built SPA
 ```
 
-The app binds to `127.0.0.1` by default and requires a Jellyfin login. For
-access from other machines, put it behind a reverse proxy with TLS; set
-`CHURN_COOKIE_SECURE=true` (or rely on `auto` with forwarded HTTPS) so the
-session cookie is marked `Secure`.
+The app binds to `127.0.0.1` by default and requires a Jellyfin login. The
+browser-facing video URL defaults to the host's LAN address, so playback works
+from other devices on the LAN; the backend still reaches Jellyfin over
+loopback. For access from other machines, put the app behind a reverse proxy
+with TLS; set `CHURN_COOKIE_SECURE=true` (or rely on `auto` with forwarded
+HTTPS) so the session cookie is marked `Secure`. The Vite dev server is also
+reachable from the LAN (`host: true` in `frontend/vite.config.ts`); pass
+`--host 127.0.0.1` to keep a session loopback-only.
 
 ## Configuration
 
@@ -59,7 +63,7 @@ preserves unknown keys, so hand-added settings survive a rerun.
 | `HOST` | `127.0.0.1` | Backend bind address |
 | `PORT` | `4000` | Backend port |
 | `JELLYFIN_URL` | `http://127.0.0.1:8096` | Jellyfin base URL used by the backend |
-| `JELLYFIN_PUBLIC_URL` | `JELLYFIN_URL` | Jellyfin URL the browser uses for video streams (different in Docker/LAN) |
+| `JELLYFIN_PUBLIC_URL` | LAN address on Jellyfin's port | Jellyfin URL the browser uses for video streams |
 | `JELLYFIN_API_KEY` | — | Written by churn after Jellyfin setup |
 | `JELLYFIN_ADMIN_USER` | `admin` | Optional non-interactive setup username |
 | `JELLYFIN_ADMIN_PASSWORD` | — | Optional non-interactive setup password; not persisted |
@@ -297,6 +301,12 @@ season/episode. Per-episode downloads and Sonarr season packs are overlaid on
 the episode list, and Jellyfin shows are matched to Sonarr through Jellyfin
 `ProviderIds.Tvdb`.
 
+Jellyfin can keep a series item while failing to link its on-disk episodes, for
+instance after a restart or an interrupted import. When a Jellyfin show loads
+with no episodes, the backend requests a library scan (at most once every five
+minutes) and the page polls every two seconds while that scan is likely still
+running, so the episode list fills in without a manual reload.
+
 Multi-season packs such as `S01-03` are recognised from the release title, so
 their download progress appears on every covered season even when Sonarr only
 reports one season in its queue. Shared queue records are counted once when
@@ -354,9 +364,14 @@ is the accepted tradeoff for stream redirection; a backend proxy would be needed
 if Churn is exposed beyond the LAN.
 
 Set `JELLYFIN_PUBLIC_URL` when the browser reaches Jellyfin at a different
-address than the backend (for example a LAN IP instead of a Docker service
-name). Playback failures show the media error alert with an **Open Jellyfin**
-fallback.
+address than the backend. By default Churn derives it from `JELLYFIN_URL`: a
+loopback host or a single-label container name (`http://jellyfin:8096`) is
+replaced with the host's LAN address, keeping scheme, port and base path, so
+playback works from other machines without configuration. Set the variable when
+the public address is neither loopback nor the detected LAN address (a reverse
+proxy, or a TLS name). Preview the effective value in the backend's startup log
+(`video streams resolve to …`). Playback failures show the media error alert
+with an **Open Jellyfin** fallback.
 
 ## Development
 

@@ -43,7 +43,7 @@ survive a rerun.
 | `HOST` | `127.0.0.1` | Backend bind address |
 | `PORT` | `4000` | Backend port |
 | `JELLYFIN_URL` | `http://127.0.0.1:8096` | Jellyfin base URL used by the backend |
-| `JELLYFIN_PUBLIC_URL` | `JELLYFIN_URL` | Browser-facing Jellyfin URL for video playback |
+| `JELLYFIN_PUBLIC_URL` | LAN address on Jellyfin's port | Browser-facing Jellyfin URL for video playback |
 | `JELLYFIN_API_KEY` | — | Written by churn after Jellyfin setup |
 | `JELLYFIN_ADMIN_USER` | `admin` | Optional non-interactive setup username |
 | `JELLYFIN_ADMIN_PASSWORD` | — | Optional non-interactive setup password |
@@ -300,9 +300,12 @@ frontend plays HLS with `hls.js` and falls back to native HLS when available.
 
 The token stays out of the page DOM and API responses but is visible to browser
 devtools in redirect targets and Jellyfin HLS playlist/segment URLs; video bytes
-still come directly from Jellyfin. Set `JELLYFIN_PUBLIC_URL` when the browser
-reaches Jellyfin at a different address than the backend. Playback failures show
-the media error alert with an **Open Jellyfin** fallback.
+still come directly from Jellyfin. `JELLYFIN_PUBLIC_URL` defaults to the host's
+LAN address (replacing a loopback or container host in `JELLYFIN_URL`, keeping
+scheme, port and base path), so playback works from other devices without
+configuration; set it when the public address is something else, such as a
+reverse-proxy name. The backend logs the effective value at startup. Playback
+failures show the media error alert with an **Open Jellyfin** fallback.
 
 ## Roadmap
 
