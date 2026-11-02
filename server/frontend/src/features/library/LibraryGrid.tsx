@@ -1,10 +1,16 @@
-import { ChevronRightIcon, FilmIcon, PlayIcon, TvIcon } from "lucide-react";
+import { useState } from "react";
+import { ChevronRightIcon, FilmIcon, PlayIcon, Trash2Icon, TvIcon } from "lucide-react";
 
 import type { ActivityItem, LibraryItem, RequestedLibraryItem } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  CancelDownloadDialog,
+  type CancelTarget,
+} from "@/features/library/CancelDownloadDialog";
 import type { LibraryEntry } from "@/features/library/library-entries";
 import { entryTitle } from "@/features/library/library-entries";
 
@@ -123,15 +129,62 @@ function LibraryCard({ entry }: { entry: LibraryEntry }) {
     </Card>
   );
 
-  return href ? (
-    <a
-      href={href}
-      className="group block h-full rounded-xl focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-    >
-      {card}
-    </a>
-  ) : (
-    card
+  const target = cancelTarget(entry);
+
+  return (
+    <div className="group relative h-full">
+      {href ? (
+        <a
+          href={href}
+          className="block h-full rounded-xl focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+        >
+          {card}
+        </a>
+      ) : (
+        card
+      )}
+      {target ? <CancelButton target={target} title={title} /> : null}
+    </div>
+  );
+}
+
+function cancelTarget(entry: LibraryEntry): CancelTarget | undefined {
+  if (entry.requested) {
+    return { service: entry.requested.service, id: entry.requested.arrId };
+  }
+  const activity = entry.activity;
+  if (activity?.kind === "movie" && activity.movieId !== undefined) {
+    return { service: "radarr", id: activity.movieId };
+  }
+  if (activity?.kind === "series" && activity.seriesId !== undefined) {
+    return { service: "sonarr", id: activity.seriesId };
+  }
+  return undefined;
+}
+
+function CancelButton({ target, title }: { target: CancelTarget; title: string }) {
+  const [open, setOpen] = useState(false);
+  const serviceName = target.service === "sonarr" ? "Sonarr" : "Radarr";
+
+  return (
+    <>
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        aria-label={`Cancel ${title}`}
+        title={`Cancel ${title} and remove it from ${serviceName}`}
+        className="absolute right-2 top-2 z-10 bg-background/85 text-muted-foreground shadow-sm backdrop-blur hover:bg-destructive/10 hover:text-destructive"
+        onClick={() => setOpen(true)}
+      >
+        <Trash2Icon />
+      </Button>
+      <CancelDownloadDialog
+        open={open}
+        onOpenChange={setOpen}
+        target={target}
+        title={title}
+      />
+    </>
   );
 }
 

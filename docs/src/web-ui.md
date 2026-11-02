@@ -82,9 +82,9 @@ destroys the session and makes a best-effort Jellyfin logout call.
 Library, show and image requests use the signed-in user's Jellyfin token, so
 Jellyfin still enforces that user's library access. The Jellyfin API key remains
 server-side for status checks. Every logged-in Jellyfin user gets the full
-dashboard, including search, requests and release grabs, which mutate global
-Sonarr/Radarr state. Churn does not add an admin-only gate; use Jellyfin user
-permissions to limit library visibility.
+dashboard, including search, requests, release grabs, and cancel/delete actions,
+which mutate global Sonarr/Radarr state. Churn does not add an admin-only gate;
+use Jellyfin user permissions to limit library visibility.
 
 Failed logins are throttled to 10 attempts per 15 minutes per IP and username.
 Auth responses are `no-store`, and cross-origin mutating requests are rejected.
@@ -103,6 +103,7 @@ token in `.env`, so resume positions and watched state are per user.
 | `GET /api/library` | Jellyfin movies and series with provider ids, scoped to the user's library views |
 | `GET /api/library/images/:itemId` | Poster proxy |
 | `GET /api/library/requested` | Sonarr/Radarr library titles, including requested items not yet downloaded |
+| `DELETE /api/library/requested/:service/:id` | Cancel queue items, delete the title (and files) from the arr, refresh Jellyfin |
 | `GET /api/library/shows/:source/:id` | Show seasons, episodes and download overlays |
 | `GET /api/library/shows/:source/:id/releases?season=N` | Sonarr season release search, including rejected and multi-season packs |
 | `POST /api/library/shows/:source/:id/releases/grab` | Grab a selected release with an override when Sonarr can map it |
@@ -139,11 +140,13 @@ backend-proxied poster. Titles already in the arr library are marked
 **Requested**. This uses Sonarr `tvdbId` and Radarr `tmdbId` matches, not the
 Jellyfin library.
 
-**Request options** persists quality profile, root folder, TV monitoring and
-search-on-add in `localStorage`. Defaults prefer the `HD - 720p/1080p` profile,
-fall back to `HD-1080p`, then `HD-720p`, and avoid 4K/Ultra-HD when a smaller
-profile exists. They use the first accessible root folder, monitor all seasons
-and start searching immediately. The Request button uses these settings
+**Request options** persists quality profile, root folder, TV monitoring,
+search-on-add and a **Prefer smaller files** switch in `localStorage`. The
+switch is on by default and auto-picks a 720p-only profile first, then a
+combined 720p/1080p profile, then 1080p-only, avoiding 4K/Ultra-HD when anything
+smaller exists. Turn it off to use the arr default (`HD - 720p/1080p`, then
+`HD-1080p`, then `HD-720p`). The other defaults are the first accessible root
+folder, all seasons and search on add. The Request button uses these settings
 directly.
 
 On `POST /api/requests` the backend re-fetches canonical metadata by id, checks
@@ -184,6 +187,14 @@ Library merges `/api/library`, `/api/library/requested` and `/api/activity`:
 - active downloads come first;
 - a failed arr shows a per-service alert without hiding Jellyfin or the other
   arr.
+
+Cards backed by Sonarr or Radarr have a trash button. The confirmation dialog
+calls `DELETE /api/library/requested/:service/:id`, which removes the title's
+queue records with `removeFromClient=true`, deletes the movie or series with
+`deleteFiles=true`, and triggers a best-effort Jellyfin library refresh. It
+stops an in-progress download and removes the arr entry so the title can be
+requested again with a smaller quality profile. Deleting a completed title also
+deletes its files.
 
 Movies show progress on the card. Shows link to
 `#/library/show/<source>/<id>`, backed by

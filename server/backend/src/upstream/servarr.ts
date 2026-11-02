@@ -1,6 +1,6 @@
 import type { ServiceConfig } from "../config.js";
 import { UpstreamError } from "../errors.js";
-import { fetchJson, fetchWithTimeout, postJson } from "../http.js";
+import { deleteRequest, fetchJson, fetchWithTimeout, postJson } from "../http.js";
 
 export interface ServarrSystemStatus {
   appName?: string;
@@ -247,6 +247,42 @@ export function createArrClient(service: ArrServiceId, config: ServiceConfig, ti
       }
       const response = await get<ServarrQueueResponse>(`/api/v3/queue?${query.toString()}`);
       return response.records ?? [];
+    },
+
+    /** Cancel one queue record and remove the release from the download client. */
+    async removeQueueRecord(queueId: number): Promise<void> {
+      const query = new URLSearchParams({
+        removeFromClient: "true",
+        blocklist: "false",
+        skipRedownload: "true",
+        changeCategory: "false",
+      });
+      await deleteRequest(service, `${config.url}/api/v3/queue/${queueId}?${query.toString()}`, {
+        timeoutMs,
+        headers: authHeaders(),
+      });
+    },
+
+    async deleteMovie(id: number, deleteFiles = true): Promise<void> {
+      const query = new URLSearchParams({
+        deleteFiles: String(deleteFiles),
+        addImportExclusion: "false",
+      });
+      await deleteRequest(service, `${config.url}/api/v3/movie/${id}?${query.toString()}`, {
+        timeoutMs,
+        headers: authHeaders(),
+      });
+    },
+
+    async deleteSeries(id: number, deleteFiles = true): Promise<void> {
+      const query = new URLSearchParams({
+        deleteFiles: String(deleteFiles),
+        addImportExclusion: "false",
+      });
+      await deleteRequest(service, `${config.url}/api/v3/series/${id}?${query.toString()}`, {
+        timeoutMs,
+        headers: authHeaders(),
+      });
     },
 
     async getSeries(id: number): Promise<ServarrSeriesResource> {

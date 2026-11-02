@@ -338,6 +338,10 @@ export function createJellyfinClient(
       return response.Items ?? [];
     },
 
+    async refreshLibrary(): Promise<void> {
+      await postNoContent(`${config.url}/Library/Refresh`, {});
+    },
+
     async getPrimaryImage(itemId: string, query: JellyfinImageQuery): Promise<JellyfinImage | null> {
       if (!token) {
         throw new UpstreamError("jellyfin", "unauthorized", "Jellyfin API key is not configured");

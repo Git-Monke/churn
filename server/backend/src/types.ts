@@ -76,6 +76,15 @@ export interface RequestedLibraryResponse {
   total: number;
 }
 
+export interface CancelLibraryItemResponse {
+  status: "cancelled";
+  service: "sonarr" | "radarr";
+  kind: "movie" | "series";
+  id: number;
+  /** Number of Sonarr/Radarr queue records removed for this title. */
+  queueRemoved: number;
+}
+
 export type RequestKind = "movie" | "series";
 export type RequestMonitor = "all" | "firstSeason" | "future" | "none";
 export type ArrServiceState = "ok" | "unconfigured" | "unauthorized" | "unreachable";

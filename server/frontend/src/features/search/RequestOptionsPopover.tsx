@@ -34,7 +34,11 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { MONITOR_LABELS } from "@/features/search/search-labels";
-import type { RequestDefaults, ServiceRequestDefaults } from "@/features/search/use-request-defaults";
+import {
+  pickSmallerQualityProfile,
+  type RequestDefaults,
+  type ServiceRequestDefaults,
+} from "@/features/search/use-request-defaults";
 
 interface RequestOptionsPopoverProps {
   options?: RequestOptionsResponse;
@@ -106,6 +110,7 @@ function ServiceOptions({
   onChange: (patch: Partial<ServiceRequestDefaults>) => void;
 }) {
   const name = service.id === "sonarr" ? "Sonarr" : "Radarr";
+  const smallerProfile = pickSmallerQualityProfile(service.qualityProfiles);
 
   return (
     <FieldSet>
@@ -145,6 +150,34 @@ function ServiceOptions({
                 </SelectGroup>
               </SelectContent>
             </Select>
+          </Field>
+
+          <Field orientation="horizontal">
+            <FieldContent>
+              <FieldLabel htmlFor={`${service.id}-prefer-smaller`}>
+                Prefer smaller files
+              </FieldLabel>
+              <FieldDescription>
+                Use a 720p-only profile first, then 720p/1080p. Turn off to use{" "}
+                {name}&apos;s own default.
+              </FieldDescription>
+            </FieldContent>
+            <Switch
+              id={`${service.id}-prefer-smaller`}
+              checked={defaults.preferSmaller}
+              onCheckedChange={(checked) =>
+                onChange({
+                  preferSmaller: checked,
+                  ...(checked
+                    ? smallerProfile
+                      ? { qualityProfileId: smallerProfile.id }
+                      : {}
+                    : service.defaults.qualityProfileId !== undefined
+                      ? { qualityProfileId: service.defaults.qualityProfileId }
+                      : {}),
+                })
+              }
+            />
           </Field>
 
           <Field>

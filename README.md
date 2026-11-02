@@ -103,7 +103,8 @@ The dashboard now requires a Jellyfin login. Churn validates the account with
 Jellyfin, keeps the resulting user token in an in-memory session, and sends only
 an HttpOnly session cookie to the browser. Restarting the backend signs everyone
 out. Every logged-in Jellyfin user gets full access to the dashboard, including
-Sonarr/Radarr requests; Jellyfin's own library restrictions still apply because
+Sonarr/Radarr requests and cancel/delete actions; Jellyfin's own library
+restrictions still apply because
 library calls use the user's token. See `server/README.md` for session settings
 and the full-access warning.
 
@@ -132,12 +133,16 @@ npm start          # Fastify serves the SPA at http://127.0.0.1:4000
 
 Search across Radarr and Sonarr from the dashboard and request a movie or show
 with one click. Requests use saved defaults for quality profile, root folder
-and TV monitoring, and start a download search immediately.
+and TV monitoring, and start a download search immediately. The Request options
+popover has a **Prefer smaller files** switch (on by default) that picks a
+720p-only profile first, then 720p/1080p, so new downloads arrive faster.
 
 The Library page merges titles already in Jellyfin with active Sonarr/Radarr
-downloads. Movies show progress and ETA on their card. Shows open a season and
-episode view with per-episode availability and download progress, including
-season-pack handling. Movies and Jellyfin episodes also open an in-app player:
+downloads. Movies show progress and ETA on their card. Each arr-backed card has
+a trash button that cancels the download, removes the title and its files from
+Sonarr/Radarr, and refreshes Jellyfin — useful for replacing a large release
+with a smaller profile. Shows open a season and episode view with per-episode
+availability and download progress, including season-pack handling. Movies and Jellyfin episodes also open an in-app player:
 video streams from Jellyfin, transcoding to HLS when the browser cannot decode
 the source, resume positions come from the signed-in user, and progress is
 reported back to Jellyfin. See `server/README.md` for

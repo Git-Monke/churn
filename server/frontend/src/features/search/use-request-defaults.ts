@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import type {
+  ArrQualityProfile,
   ArrRequestOptions,
   RequestMonitor,
   RequestOptionsResponse,
@@ -11,6 +12,8 @@ export interface ServiceRequestDefaults {
   rootFolderPath?: string;
   monitor?: RequestMonitor;
   searchOnAdd: boolean;
+  /** Prefer a 720p-only quality profile over larger ones when auto-picking. */
+  preferSmaller: boolean;
 }
 
 export interface RequestDefaults {
@@ -18,10 +21,10 @@ export interface RequestDefaults {
   radarr: ServiceRequestDefaults;
 }
 
-const STORAGE_KEY = "churn.requestDefaults.v2";
+const STORAGE_KEY = "churn.requestDefaults.v3";
 const DEFAULT_STATE: RequestDefaults = {
-  sonarr: { monitor: "all", searchOnAdd: true },
-  radarr: { searchOnAdd: true },
+  sonarr: { monitor: "all", searchOnAdd: true, preferSmaller: true },
+  radarr: { searchOnAdd: true, preferSmaller: true },
 };
 
 export function useRequestDefaults(options?: RequestOptionsResponse) {
@@ -73,11 +76,14 @@ function resolveServiceDefaults(
   const folderExists = options.rootFolders.some(
     (folder) => folder.path === current.rootFolderPath && folder.accessible,
   );
+  const preferSmaller = current.preferSmaller ?? true;
+  const preferredProfileId = preferSmaller
+    ? (pickSmallerQualityProfile(options.qualityProfiles)?.id ??
+      options.defaults.qualityProfileId)
+    : options.defaults.qualityProfileId;
 
   return {
-    qualityProfileId: profileExists
-      ? current.qualityProfileId
-      : options.defaults.qualityProfileId,
+    qualityProfileId: profileExists ? current.qualityProfileId : preferredProfileId,
     rootFolderPath: folderExists ? current.rootFolderPath : options.defaults.rootFolderPath,
     monitor:
       options.id === "sonarr"
@@ -87,7 +93,46 @@ function resolveServiceDefaults(
       typeof current.searchOnAdd === "boolean"
         ? current.searchOnAdd
         : options.defaults.searchOnAdd,
+    preferSmaller,
   };
+}
+
+/**
+ * Prefer the smallest profile that still targets 720p for faster downloads:
+ * 720p-only first, then 720p/1080p, then 1080p-only, then other non-4K
+ * profiles. Profiles that name 4K/2160p/UHD/Ultra only win when nothing else
+ * is available.
+ */
+export function pickSmallerQualityProfile(
+  profiles: ArrQualityProfile[],
+): ArrQualityProfile | undefined {
+  return profiles
+    .map((profile, index) => ({
+      profile,
+      index,
+      score: smallerQualityProfileScore(profile.name),
+    }))
+    .sort((left, right) => right.score - left.score || left.index - right.index)[0]
+    ?.profile;
+}
+
+function smallerQualityProfileScore(name: string): number {
+  const normalized = name.trim().toLowerCase().replace(/\s+/g, " ");
+  if (/(?:^|\W)(?:2160p?|4k|uhd|ultra)(?:\W|$)/.test(normalized)) {
+    return -1;
+  }
+  const has720 = /(?:^|\W)720p?(?:\W|$)/.test(normalized);
+  const has1080 = /(?:^|\W)1080p?(?:\W|$)/.test(normalized);
+  if (has720 && !has1080) {
+    return 4;
+  }
+  if (has720 && has1080) {
+    return 3;
+  }
+  if (has1080) {
+    return 2;
+  }
+  return 1;
 }
 
 function readStoredDefaults(): Partial<RequestDefaults> {

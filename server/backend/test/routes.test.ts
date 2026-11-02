@@ -485,6 +485,141 @@ describe("requested library", () => {
   });
 });
 
+describe("cancel requested title", () => {
+  it("removes matching queue records, deletes the movie, and refreshes Jellyfin", async () => {
+    const calls: Array<{ url: string; method?: string }> = [];
+    installFetch((url, init) => {
+      if (url.includes("radarr.test") && url.includes("/api/v3/queue?")) {
+        return jsonResponse({
+          records: [
+            {
+              id: 11,
+              movieId: 7,
+              title: "Kung Fu Panda 2",
+              status: "downloading",
+              trackedDownloadState: "downloading",
+            },
+            { id: 12, movieId: 8, title: "Other movie" },
+          ],
+        });
+      }
+      if (url.includes("radarr.test") && url.includes("/api/v3/queue/11")) {
+        calls.push({ url, method: init?.method });
+        return new Response(null, { status: 200 });
+      }
+      if (url.includes("radarr.test") && url.includes("/api/v3/movie/7")) {
+        calls.push({ url, method: init?.method });
+        return new Response(null, { status: 200 });
+      }
+      if (url.includes("jellyfin.test") && url.includes("/Library/Refresh")) {
+        calls.push({ url, method: init?.method });
+        return new Response(null, { status: 204 });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildAuthedServer(
+      makeConfig({
+        jellyfin: {
+          id: "jellyfin",
+          name: "Jellyfin",
+          url: "http://jellyfin.test:8096",
+          apiKey: "jellyfin-key",
+        },
+      }),
+    );
+    const response = await app.inject({
+      method: "DELETE",
+      url: "/api/library/requested/radarr/7",
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      status: "cancelled",
+      service: "radarr",
+      kind: "movie",
+      id: 7,
+      queueRemoved: 1,
+    });
+    const queueDelete = calls.find((call) => call.url.includes("/api/v3/queue/11"));
+    expect(queueDelete?.method).toBe("DELETE");
+    expect(queueDelete?.url).toContain("removeFromClient=true");
+    expect(queueDelete?.url).toContain("skipRedownload=true");
+    expect(calls.some((call) => call.url.includes("/api/v3/queue/12"))).toBe(false);
+    const movieDelete = calls.find((call) => call.url.includes("/api/v3/movie/7"));
+    expect(movieDelete?.method).toBe("DELETE");
+    expect(movieDelete?.url).toContain("deleteFiles=true");
+    expect(
+      calls.some(
+        (call) => call.url.includes("/Library/Refresh") && call.method === "POST",
+      ),
+    ).toBe(true);
+    await app.close();
+  });
+
+  it("deletes a series and tolerates queue records already removed", async () => {
+    const calls: Array<{ url: string; method?: string }> = [];
+    installFetch((url, init) => {
+      if (url.includes("sonarr.test") && url.includes("/api/v3/queue?")) {
+        return jsonResponse({
+          records: [
+            { id: 21, seriesId: 42, title: "Example Show S01E01" },
+            { id: 22, seriesId: 42, title: "Example Show S01E02" },
+          ],
+        });
+      }
+      if (url.includes("sonarr.test") && url.includes("/api/v3/queue/21")) {
+        return new Response(null, { status: 200 });
+      }
+      if (url.includes("sonarr.test") && url.includes("/api/v3/queue/22")) {
+        return jsonResponse({ message: "Not found" }, 404);
+      }
+      if (url.includes("sonarr.test") && url.includes("/api/v3/series/42")) {
+        calls.push({ url, method: init?.method });
+        return new Response(null, { status: 200 });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildAuthedServer(makeConfig());
+    const response = await app.inject({
+      method: "DELETE",
+      url: "/api/library/requested/sonarr/42",
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      status: "cancelled",
+      service: "sonarr",
+      kind: "series",
+      id: 42,
+      queueRemoved: 2,
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.method).toBe("DELETE");
+    expect(calls[0]?.url).toContain("deleteFiles=true");
+    await app.close();
+  });
+
+  it("rejects unknown services and invalid ids", async () => {
+    const app = await buildAuthedServer(makeConfig());
+    const badService = await app.inject({
+      method: "DELETE",
+      url: "/api/library/requested/foo/1",
+    });
+    expect(badService.statusCode).toBe(400);
+    expect(badService.json().error.code).toBe("invalid_service");
+
+    const badId = await app.inject({
+      method: "DELETE",
+      url: "/api/library/requested/radarr/not-a-number",
+    });
+    expect(badId.statusCode).toBe(400);
+    expect(badId.json().error.code).toBe("invalid_id");
+    await app.close();
+  });
+});
+
 describe("library images", () => {
   it("proxies the image with cache headers", async () => {
     const config = makeConfig({

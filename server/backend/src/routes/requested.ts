@@ -2,12 +2,15 @@ import type { FastifyInstance } from "fastify";
 
 import type { AppConfig, ServiceConfig } from "../config.js";
 import { movieMetadata, seriesMetadata } from "../activity.js";
+import { ApiError, isUpstreamNotFound } from "../errors.js";
 import type {
+  CancelLibraryItemResponse,
   RequestedLibraryItem,
   RequestedLibraryResponse,
   RequestedLibraryServiceState,
 } from "../types.js";
 import { isMovieAvailable, isSeriesAvailable } from "../search.js";
+import { createJellyfinClient } from "../upstream/jellyfin.js";
 import {
   createArrClient,
   type ArrServiceId,
@@ -38,6 +41,109 @@ export function registerRequestedLibraryRoutes(app: FastifyInstance, config: App
     };
     return response;
   });
+
+  app.delete<{ Params: { service: string; id: string } }>(
+    "/api/library/requested/:service/:id",
+    async (request, reply) => {
+      reply.header("cache-control", "no-store");
+      const service = parseArrService(request.params.service);
+      const id = parsePositiveId(request.params.id);
+      return cancelRequestedTitle(config, service, id);
+    },
+  );
+}
+
+async function cancelRequestedTitle(
+  config: AppConfig,
+  service: ArrServiceId,
+  id: number,
+): Promise<CancelLibraryItemResponse> {
+  const serviceConfig = config.services[service];
+  if (!serviceConfig.apiKey) {
+    throw new ApiError(
+      503,
+      `${service}_unconfigured`,
+      `Set ${service.toUpperCase()}_API_KEY or keep server/config/${service}/config.xml`,
+    );
+  }
+
+  const client = createArrClient(service, serviceConfig, config.requestTimeoutMs);
+  const queue = await client.getQueue();
+  const records = queue.filter((record) =>
+    service === "sonarr" ? record.seriesId === id : record.movieId === id,
+  );
+
+  // A season pack can produce several queue records for one download. Removing
+  // one can already remove its siblings, so a 404 for the rest is expected.
+  await Promise.all(
+    records.map(async (record) => {
+      if (record.id === undefined) {
+        return;
+      }
+      try {
+        await client.removeQueueRecord(record.id);
+      } catch (error) {
+        if (!isUpstreamNotFound(error)) {
+          throw error;
+        }
+      }
+    }),
+  );
+
+  try {
+    if (service === "sonarr") {
+      await client.deleteSeries(id);
+    } else {
+      await client.deleteMovie(id);
+    }
+  } catch (error) {
+    if (isUpstreamNotFound(error)) {
+      throw new ApiError(404, "not_found", "Title was not found in " + service);
+    }
+    throw error;
+  }
+
+  await refreshJellyfinLibrary(config);
+
+  return {
+    status: "cancelled",
+    service,
+    kind: service === "sonarr" ? "series" : "movie",
+    id,
+    queueRemoved: records.filter((record) => record.id !== undefined).length,
+  };
+}
+
+/** Jellyfin scans best-effort; a failure must not make the cancel look failed. */
+async function refreshJellyfinLibrary(config: AppConfig): Promise<void> {
+  const service = config.services.jellyfin;
+  if (!service.apiKey) {
+    return;
+  }
+  try {
+    const client = createJellyfinClient(service, config.requestTimeoutMs);
+    await client.refreshLibrary();
+  } catch {
+    // The arr delete already succeeded; Jellyfin will notice on its next scan.
+  }
+}
+
+function parseArrService(value: string): ArrServiceId {
+  if (value === "sonarr" || value === "radarr") {
+    return value;
+  }
+  throw new ApiError(400, "invalid_service", "service must be sonarr or radarr");
+}
+
+function parsePositiveId(value: string): number {
+  if (!/^\d{1,10}$/.test(value)) {
+    throw new ApiError(400, "invalid_id", "id must be a positive integer");
+  }
+  const id = Number.parseInt(value, 10);
+  if (!Number.isSafeInteger(id) || id < 1) {
+    throw new ApiError(400, "invalid_id", "id must be a positive integer");
+  }
+  return id;
 }
 
 async function loadRequestedLibrary(

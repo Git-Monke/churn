@@ -61,6 +61,28 @@ export function postJson<T>(
   return fetchJson<T>(service, url, { ...options, method: "POST", body });
 }
 
+/**
+ * Send a DELETE that may answer 200/204 with an empty body. Sonarr and Radarr
+ * use this for queue and library deletes, so `fetchJson` cannot be reused.
+ */
+export async function deleteRequest(
+  service: UpstreamServiceId,
+  url: string,
+  options: Omit<JsonRequestOptions, "method" | "body">,
+): Promise<void> {
+  const response = await fetchWithTimeout(
+    service,
+    url,
+    { method: "DELETE", headers: { accept: "application/json", ...options.headers } },
+    options.timeoutMs,
+  );
+  if (!response.ok) {
+    throw await upstreamResponseError(service, response);
+  }
+  // Drain the body so the connection can be reused; deletes are usually empty.
+  await response.arrayBuffer().catch(() => undefined);
+}
+
 export async function upstreamResponseError(
   service: UpstreamServiceId,
   response: Response,

@@ -127,8 +127,8 @@ clears the cookie, destroys the session and makes a best-effort Jellyfin logout
 call.
 
 All logged-in Jellyfin users get the full dashboard. That means any valid
-Jellyfin account can search, request media and grab releases, which changes
-global Sonarr/Radarr state. Jellyfin still enforces its own library access
+Jellyfin account can search, request media, grab releases, and cancel/delete
+titles, which changes global Sonarr/Radarr state. Jellyfin still enforces its own library access
 because library and show requests use the user's token, but Churn adds no
 admin-only gate of its own. Use separate Jellyfin accounts with non-admin
 permissions if you want to limit library visibility.
@@ -151,6 +151,7 @@ static playback token is stored in `.env`.
 | `GET /api/library` | Jellyfin movies and series with backend-owned poster URLs and provider ids |
 | `GET /api/library/images/:itemId` | Poster proxy; no Jellyfin key reaches the browser |
 | `GET /api/library/requested` | Sonarr/Radarr library titles, including requested items not yet downloaded |
+| `DELETE /api/library/requested/:service/:id` | Cancel the title's queue items, delete it (and its files) from the arr, and refresh Jellyfin |
 | `GET /api/library/shows/:source/:id` | Jellyfin/Sonarr show detail with seasons, episodes and download overlays |
 | `GET /api/library/shows/:source/:id/releases?season=N` | Sonarr season release search, including rejected and multi-season packs |
 | `POST /api/library/shows/:source/:id/releases/grab` | Grab a selected release, overriding automatic restrictions when Sonarr can map it |
@@ -180,13 +181,17 @@ added twice. Posters are proxied through the backend, so the browser never sees
 an arr URL or API key.
 
 **Request options** stores your preferred quality profile, root folder, TV
-monitoring scope and search-on-add setting in `localStorage`. The defaults are
-`HD - 720p/1080p`, the first accessible root folder, all seasons, and search on
-add; they fall back to `HD-1080p`, then `HD-720p`, and avoid 4K/Ultra-HD when a
-smaller profile exists. The Request button uses those settings directly. The backend re-fetches metadata
-from the arr by id, validates the selected profile and folder against the live
-API, checks for duplicates, then adds the title. Sonarr gets the chosen
-monitoring scope; Radarr adds with a `released` minimum availability.
+monitoring scope, search-on-add and "Prefer smaller files" settings in
+`localStorage`. Prefer smaller files is on by default: auto-picking chooses a
+720p-only profile first, then a combined 720p/1080p profile, then 1080p-only,
+and avoids 4K/Ultra-HD when anything smaller exists. Turn it off to use the
+arr's own default (`HD - 720p/1080p`, then `HD-1080p`, then `HD-720p`). The
+first accessible root folder, all seasons and search on add are the other
+defaults. The Request button uses those settings directly. The backend
+re-fetches metadata from the arr by id, validates the selected profile and
+folder against the live API, checks for duplicates, then adds the title. Sonarr
+gets the chosen monitoring scope; Radarr adds with a `released` minimum
+availability.
 
 Search stays usable when one app is down: the other app's results are still
 returned and an alert explains the unavailable service.
@@ -213,6 +218,14 @@ The Library page merges `/api/library`, `/api/library/requested` and `/api/activ
 - active downloads sort before available titles;
 - a broken arr only shows an alert for that service and does not hide Jellyfin
   or the other arr.
+
+Cards backed by Sonarr or Radarr have a trash button. It opens a confirmation
+dialog, then `DELETE /api/library/requested/:service/:id` removes every queue
+record for that title with `removeFromClient=true`, deletes the movie or series
+with `deleteFiles=true`, and asks Jellyfin to refresh its library. This stops an
+in-progress download and clears the Radarr/Sonarr entry so the title can be
+requested again with a smaller quality profile. Deleting a completed title also
+deletes its media files.
 
 Movies stay at card level. Clicking a show opens
 `/api/library/shows/:source/:id`, which unions Jellyfin and Sonarr episodes by

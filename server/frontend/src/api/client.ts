@@ -1,6 +1,7 @@
 import type {
   ActivityResponse,
   AuthSessionResponse,
+  CancelLibraryItemResponse,
   LoginInput,
   LoginResponse,
   CreateRequestInput,
@@ -63,6 +64,10 @@ function postJson<T>(path: string, body: unknown): Promise<T> {
   });
 }
 
+function deleteJson<T>(path: string): Promise<T> {
+  return requestJson<T>(path, { method: "DELETE" });
+}
+
 export function fetchSession(): Promise<AuthSessionResponse> {
   return getJson<AuthSessionResponse>("/api/auth/session");
 }
@@ -89,6 +94,15 @@ export function fetchRequestedLibrary(): Promise<RequestedLibraryResponse> {
 
 export function fetchRequestOptions(): Promise<RequestOptionsResponse> {
   return getJson<RequestOptionsResponse>("/api/requests/options");
+}
+
+export function cancelLibraryItem(
+  service: "sonarr" | "radarr",
+  id: number,
+): Promise<CancelLibraryItemResponse> {
+  return deleteJson<CancelLibraryItemResponse>(
+    `/api/library/requested/${service}/${encodeURIComponent(String(id))}`,
+  );
 }
 
 export function fetchSearch(query: string): Promise<SearchResponse> {

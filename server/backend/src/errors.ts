@@ -43,3 +43,7 @@ export function isUnreachable(error: unknown): boolean {
 export function isInvalidResponse(error: unknown): boolean {
   return error instanceof UpstreamError && error.kind === "invalid_response";
 }
+
+export function isUpstreamNotFound(error: unknown): boolean {
+  return error instanceof UpstreamError && error.status === 404;
+}
