@@ -1964,6 +1964,59 @@ describe("show detail", () => {
     await app.close();
   });
 
+  it("requests a Jellyfin scan when a series has no indexed episodes", async () => {
+    const fetchMock = installFetch((url) => {
+      if (url.includes("jellyfin.test") && url.includes("/Items/series-empty?")) {
+        return jsonResponse({
+          Id: "series-empty",
+          Name: "Empty Show",
+          Type: "Series",
+          ProductionYear: 2024,
+          ProviderIds: {},
+        });
+      }
+      if (url.includes("jellyfin.test") && url.includes("/Shows/series-empty/Seasons")) {
+        return jsonResponse({ Items: [] });
+      }
+      if (url.includes("jellyfin.test") && url.includes("/Shows/series-empty/Episodes")) {
+        return jsonResponse({ Items: [] });
+      }
+      if (url.includes("jellyfin.test") && url.includes("/Library/Refresh")) {
+        return new Response(null, { status: 204 });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildAuthedServer(jellyfinConfig);
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/library/shows/jellyfin/series-empty",
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      source: "jellyfin",
+      state: "ok",
+      scanning: true,
+      seasons: [],
+      episodes: [],
+    });
+    expect(
+      fetchMock.mock.calls.some(([input]) => String(input).includes("/Library/Refresh")),
+    ).toBe(true);
+
+    // The page polls while the scan runs; do not start another scan each time.
+    await app.inject({
+      method: "GET",
+      url: "/api/library/shows/jellyfin/series-empty",
+    });
+    const refreshes = fetchMock.mock.calls.filter(([input]) =>
+      String(input).includes("/Library/Refresh"),
+    );
+    expect(refreshes).toHaveLength(1);
+    await app.close();
+  });
+
   it("builds a Sonarr-only show with season-pack downloads", async () => {
     installFetch((url) => {
       if (url.includes("sonarr.test") && url.endsWith("/api/v3/series/42")) {

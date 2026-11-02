@@ -47,7 +47,9 @@ export function ShowPage({ source, id }: { source: ShowSource; id: string }) {
   const showQuery = useQuery({
     queryKey: ["show", source, id],
     queryFn: () => fetchShow(source, id),
-    refetchInterval: 10_000,
+    // While Jellyfin is re-indexing an empty show, poll fast enough to pick up
+    // the episodes as soon as the scan finishes.
+    refetchInterval: (query) => (query.state.data?.scanning ? 2_000 : 10_000),
   });
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
   const [releasesOpen, setReleasesOpen] = useState(false);
@@ -264,6 +266,20 @@ export function ShowPage({ source, id }: { source: ShowSource; id: string }) {
                 </Empty>
               )}
             </section>
+          ) : showQuery.data.source === "jellyfin" ? (
+            <Empty className="border">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <FilmIcon />
+                </EmptyMedia>
+                <EmptyTitle>Jellyfin is still indexing this show</EmptyTitle>
+                <EmptyDescription>
+                  {showQuery.data.scanning
+                    ? "Jellyfin knows about this show but has not added its episodes yet. A library scan was requested; this page checks again automatically."
+                    : "Jellyfin knows about this show but has not added its episodes yet. Refresh the Jellyfin library and try again."}
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           ) : (
             <Empty className="border">
               <EmptyHeader>

@@ -417,6 +417,8 @@ export interface ShowDetailResponse {
   series: ShowSeriesSummary;
   /** Sonarr series id when this show is tracked there, regardless of source. */
   sonarrId?: number;
+  /** Jellyfin returned no episodes and a library scan is in flight. */
+  scanning?: boolean;
   defaultSeason?: number;
   seasons: ShowSeason[];
   episodes: ShowEpisode[];

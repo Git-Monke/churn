@@ -5,6 +5,7 @@ import { filterActiveQueueRecords, isActiveQueueRecord, isSeasonPack, queueRecor
 import { mapWithConcurrency } from "../concurrency.js";
 import { requireAuth, type AuthContext } from "../auth.js";
 import { ApiError, isUnauthorized, isUpstreamNotFound, UpstreamError } from "../errors.js";
+import { refreshJellyfinLibrary } from "../library-scan.js";
 import {
   buildReleaseGrabPayload,
   findRelease,
@@ -204,6 +205,7 @@ async function loadJellyfinShow(
     sonarrEpisodes,
     queueRecords: queueForSeries(queueRecords, sonarrSeries?.id),
   });
+  const scanning = detail.episodes.length === 0 && (await refreshJellyfinSeries(config, itemId));
 
   return {
     source: "jellyfin",
@@ -211,8 +213,40 @@ async function loadJellyfinShow(
     warnings: warnings.length > 0 ? warnings : undefined,
     series,
     ...(sonarrSeries?.id !== undefined ? { sonarrId: sonarrSeries.id } : {}),
+    ...(scanning ? { scanning: true } : {}),
     ...detail,
   };
+}
+
+/**
+ * Jellyfin can keep a series but not link its on-disk episodes, for example
+ * after a restart or an interrupted import. A full library scan repairs that,
+ * so request one when a show loads without episodes and keep the page polling
+ * quickly for a short while.
+ */
+const JELLYFIN_SCAN_POLL_MS = 2 * 60_000;
+const JELLYFIN_SCAN_RETRY_MS = 5 * 60_000;
+const jellyfinScanRequests = new Map<string, number>();
+
+async function refreshJellyfinSeries(config: AppConfig, itemId: string): Promise<boolean> {
+  const now = Date.now();
+  const requestedAt = jellyfinScanRequests.get(itemId);
+  if (requestedAt !== undefined) {
+    if (now - requestedAt < JELLYFIN_SCAN_POLL_MS) {
+      return true;
+    }
+    if (now - requestedAt < JELLYFIN_SCAN_RETRY_MS) {
+      return false;
+    }
+  }
+
+  jellyfinScanRequests.set(itemId, now);
+  try {
+    await refreshJellyfinLibrary(config);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Indexer searches routinely take longer than the general API timeout. */
