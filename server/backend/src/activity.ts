@@ -12,6 +12,8 @@ export interface ActivityAggregate {
   progress: number;
   sizeBytes?: number;
   sizeLeftBytes?: number;
+  /** Sum of live qBittorrent download speeds over unique downloads. */
+  downloadSpeedBytes?: number;
   timeLeft?: string;
   estimatedCompletionTime?: string;
   downloadClients: string[];
@@ -168,6 +170,14 @@ export function aggregateQueueRecords(records: ServarrQueueRecord[]): ActivityAg
     aggregate.sizeLeftBytes = totalLeft;
   }
 
+  const downloadSpeedBytes = downloads.reduce(
+    (sum, record) => sum + (finite(record.downloadSpeed) ?? 0),
+    0,
+  );
+  if (downloadSpeedBytes > 0) {
+    aggregate.downloadSpeedBytes = downloadSpeedBytes;
+  }
+
   const etaRecord = records
     .filter((record) => record.estimatedCompletionTime)
     .sort((left, right) =>
@@ -230,6 +240,7 @@ export function buildActivityItem(options: BuildActivityItemOptions): ActivityIt
   assignIfDefined(item, "imdbId", metadata?.imdbId);
   assignIfDefined(item, "sizeBytes", aggregate.sizeBytes);
   assignIfDefined(item, "sizeLeftBytes", aggregate.sizeLeftBytes);
+  assignIfDefined(item, "downloadSpeedBytes", aggregate.downloadSpeedBytes);
   assignIfDefined(item, "timeLeft", aggregate.timeLeft);
   assignIfDefined(item, "estimatedCompletionTime", aggregate.estimatedCompletionTime);
   assignIfDefined(item, "quality", aggregate.quality);

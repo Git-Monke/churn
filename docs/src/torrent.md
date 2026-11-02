@@ -21,6 +21,14 @@ Only `gluetun` joins a Docker network. The other network-capable containers use
 the internet. Web UI ports `8080` (qBittorrent) and `9696` (Prowlarr) are
 published on the gluetun container.
 
+The qBittorrent WebUI is published on all host interfaces over plain HTTP and is
+protected by the API key seeded by `qbittorrent-init`. The churn backend reads
+that key from the qBittorrent config file and uses it read-only from the host
+(`/api/v2/torrents/info`) to show live Library progress; the key stays
+server-side and is never sent to the browser. If you do not need the WebUI from
+other machines, bind the published port to `127.0.0.1:8080:8080` in
+`torrent/docker-compose.yml`.
+
 ## VPN and leak protection
 
 - gluetun connects to Mullvad over WireGuard.

@@ -66,10 +66,22 @@ preserves unknown keys, so hand-added settings survive a rerun.
 | `RADARR_URL` | `http://127.0.0.1:7878` | Radarr base URL |
 | `SONARR_API_KEY` | `server/config/sonarr/config.xml` | Optional override |
 | `RADARR_API_KEY` | `server/config/radarr/config.xml` | Optional override |
+| `QBITTORRENT_URL` | `http://127.0.0.1:8080` | qBittorrent WebUI used for live torrent progress |
+| `QBITTORRENT_API_KEY` | `torrent/config/qbittorrent/qBittorrent/qBittorrent.conf` | Optional override for the read-only progress key |
 | `REQUEST_TIMEOUT_MS` | `5000` | Upstream request timeout |
 | `CHURN_SESSION_TTL_MS` | `43200000` (12 hours) | Server-side idle session TTL; clamped to 5 minutes–30 days |
 | `CHURN_COOKIE_SECURE` | `auto` | `auto`, `true` or `false`; controls the session cookie's `Secure` flag |
 | `CHURN_SERVER_DIR` | resolved from the backend module | Override the `server/` root |
+
+### Live torrent progress
+
+The backend reads qBittorrent's stable `[WebUI]` API key from
+`torrent/config/qbittorrent/qBittorrent/qBittorrent.conf` (falling back to the
+legacy `WebUI\APIKey` entry). Set `QBITTORRENT_API_KEY` to override it, or
+`QBITTORRENT_URL` when qBittorrent is not reachable at
+`http://127.0.0.1:8080`. The key is used server-side only, against the read-only
+`/api/v2/torrents/info` endpoint; it is never sent to the browser. If the key or
+qBittorrent is unavailable, Library falls back to Sonarr/Radarr's queue values.
 
 ### Jellyfin setup and API key
 

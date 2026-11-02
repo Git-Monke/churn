@@ -53,6 +53,9 @@ function makeConfig(overrides: Partial<AppConfig> = {}): AppConfig {
         apiKey: "radarr-key",
       },
     },
+    qbittorrent: {
+      url: "http://qbittorrent.test:8080",
+    },
     ...overrides,
   };
 }

@@ -1,14 +1,16 @@
 import type { ServiceId } from "./config.js";
 
+export type UpstreamServiceId = ServiceId | "qbittorrent";
+
 export type UpstreamErrorKind = "unreachable" | "unauthorized" | "http" | "invalid_response";
 
 /** An upstream request failed. Messages are safe to return to the browser. */
 export class UpstreamError extends Error {
-  readonly service: ServiceId;
+  readonly service: UpstreamServiceId;
   readonly kind: UpstreamErrorKind;
   readonly status?: number;
 
-  constructor(service: ServiceId, kind: UpstreamErrorKind, message: string, status?: number) {
+  constructor(service: UpstreamServiceId, kind: UpstreamErrorKind, message: string, status?: number) {
     super(message);
     this.name = "UpstreamError";
     this.service = service;

@@ -167,6 +167,8 @@ export interface ActivityItem {
   progress: number;
   sizeBytes?: number;
   sizeLeftBytes?: number;
+  /** Sum of live qBittorrent download speeds over unique downloads. */
+  downloadSpeedBytes?: number;
   timeLeft?: string;
   estimatedCompletionTime?: string;
   downloadClients: string[];

@@ -106,6 +106,8 @@ export interface ServarrQueueRecord {
     };
   };
   statusMessages?: ServarrQueueStatusMessage[];
+  /** Populated by the qBittorrent overlay; arr never sends this field. */
+  downloadSpeed?: number;
 }
 
 export interface ServarrQueueResponse {

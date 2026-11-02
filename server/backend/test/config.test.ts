@@ -4,10 +4,20 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { loadConfig, readApiKeyFromConfigXml } from "../src/config.js";
+import { loadConfig, readApiKeyFromConfigXml, readQbittorrentApiKey } from "../src/config.js";
 
 function tempServerDir(): string {
   return mkdtempSync(path.join(tmpdir(), "churn-config-"));
+}
+
+function tempRoot(): string {
+  return mkdtempSync(path.join(tmpdir(), "churn-root-"));
+}
+
+function writeQbittorrentConfig(root: string, contents: string): void {
+  const dir = path.join(root, "torrent", "config", "qbittorrent", "qBittorrent");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(path.join(dir, "qBittorrent.conf"), contents);
 }
 
 function writeConfigXml(serverDir: string, app: "sonarr" | "radarr", key: string): void {
@@ -37,6 +47,58 @@ describe("config loading", () => {
     expect(config.services.sonarr.url).toBe("http://127.0.0.1:8989");
     expect(config.services.sonarr.apiKey).toBe("sonarr-key");
     expect(config.services.radarr.apiKey).toBe("radarr-key");
+  });
+
+  it("reads the qBittorrent key from env or the seeded config file", () => {
+    const root = tempRoot();
+    const serverDir = path.join(root, "server");
+    mkdirSync(serverDir, { recursive: true });
+    writeQbittorrentConfig(
+      root,
+      ["[WebUI]", "APIKey=file-key", "Address=*", "ServerDomains=*"].join("\n"),
+    );
+
+    const fromFile = loadConfig({ serverDir, env: {}, readDotEnv: false });
+    expect(fromFile.qbittorrent).toEqual({
+      url: "http://127.0.0.1:8080",
+      apiKey: "file-key",
+    });
+
+    const fromEnv = loadConfig({
+      serverDir,
+      env: {
+        QBITTORRENT_URL: "http://qbittorrent:8081/",
+        QBITTORRENT_API_KEY: "env-key",
+      },
+      readDotEnv: false,
+    });
+    expect(fromEnv.qbittorrent).toEqual({
+      url: "http://qbittorrent:8081",
+      apiKey: "env-key",
+    });
+  });
+
+  it("reads legacy qBittorrent keys and ignores missing config", () => {
+    const root = tempRoot();
+    const serverDir = path.join(root, "server");
+    mkdirSync(serverDir, { recursive: true });
+    writeQbittorrentConfig(
+      root,
+      ["[Preferences]", "WebUI\\APIKey=legacy-key", "[WebUI]", "Address=*"].join("\n"),
+    );
+
+    expect(readQbittorrentApiKey(serverDir)).toBe("legacy-key");
+    expect(loadConfig({ serverDir, env: {}, readDotEnv: false }).qbittorrent.apiKey).toBe(
+      "legacy-key",
+    );
+
+    const emptyRoot = tempRoot();
+    const emptyServer = path.join(emptyRoot, "server");
+    mkdirSync(emptyServer, { recursive: true });
+    expect(readQbittorrentApiKey(emptyServer)).toBeUndefined();
+    expect(loadConfig({ serverDir: emptyServer, env: {}, readDotEnv: false }).qbittorrent).toEqual({
+      url: "http://127.0.0.1:8080",
+    });
   });
 
   it("lets environment variables override URLs and keys", () => {

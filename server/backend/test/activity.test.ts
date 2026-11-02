@@ -178,6 +178,16 @@ describe("aggregateQueueRecords", () => {
     expect(aggregate.seasons).toEqual([1, 2, 3]);
   });
 
+  it("sums live download speed once per unique download", () => {
+    const aggregate = aggregateQueueRecords([
+      record({ id: 1, downloadId: "AAA", downloadSpeed: 1_500_000 }),
+      record({ id: 2, downloadId: "AAA", downloadSpeed: 1_500_000 }),
+      record({ id: 3, downloadId: "BBB", downloadSpeed: 500_000 }),
+    ]);
+
+    expect(aggregate.downloadSpeedBytes).toBe(2_000_000);
+  });
+
   it("returns zero progress when no record reports a size", () => {
     const aggregate = aggregateQueueRecords([
       record({ size: 0, sizeleft: 0, status: "queued" }),

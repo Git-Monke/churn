@@ -217,11 +217,24 @@ function MetadataLine({
 
 function downloadSource(activity: ActivityItem): string {
   const client = activity.downloadClients[0];
-  const protocol = activity.protocols[0] === "usenet" ? "Usenet" : activity.protocols[0] === "torrent" ? "Torrent" : undefined;
-  if (client && protocol) {
-    return `${client} · ${protocol}`;
+  const protocol =
+    activity.protocols[0] === "usenet"
+      ? "Usenet"
+      : activity.protocols[0] === "torrent"
+        ? "Torrent"
+        : undefined;
+  const parts = [client, protocol];
+  if (activity.status === "downloading" && activity.downloadSpeedBytes) {
+    parts.push(formatSpeed(activity.downloadSpeedBytes));
   }
-  return client ?? protocol ?? "Downloading";
+  return parts.filter((part): part is string => Boolean(part)).join(" · ") || "Downloading";
+}
+
+function formatSpeed(bytesPerSecond: number): string {
+  if (bytesPerSecond < 1024 ** 2) {
+    return `${Math.max(1, Math.round(bytesPerSecond / 1024))} KB/s`;
+  }
+  return `${(bytesPerSecond / 1024 ** 2).toFixed(1)} MB/s`;
 }
 
 function downloadEta(activity: ActivityItem): string {

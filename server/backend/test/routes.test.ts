@@ -35,6 +35,9 @@ function makeConfig(overrides: Partial<AppConfig["services"]> = {}): AppConfig {
         ...overrides.radarr,
       },
     },
+    qbittorrent: {
+      url: "http://qbittorrent.test:8080",
+    },
   };
 }
 

@@ -161,6 +161,18 @@ aggregated progress, ETA, size, download client, protocol, quality and warning
 messages. Posters come from arr metadata through the existing backend image
 proxy.
 
+The route reuses a short-lived snapshot (400 ms) and caches series/movie metadata
+for five minutes, so polling is cheap: concurrent tabs share one upstream refresh
+and repeat polls skip the per-title metadata requests. Library polls every 500 ms
+while a download is active and backs off to every 2 s once the queue is empty,
+which keeps progress bars moving without hammering Sonarr/Radarr.
+
+For torrent downloads the feed also reads qBittorrent's read-only
+`/api/v2/torrents/info` endpoint once per snapshot, matches records by torrent
+hash, and overlays live progress, ETA and download speed. If qBittorrent is
+unavailable or its key is not configured, the arr values remain. Usenet
+downloads still follow Sonarr/Radarr's own queue refresh.
+
 Library merges `/api/library`, `/api/library/requested` and `/api/activity`:
 
 - movies and shows already in Jellyfin and active in an arr are matched by

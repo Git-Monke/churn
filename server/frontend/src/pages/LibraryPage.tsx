@@ -39,7 +39,11 @@ export function LibraryPage({ jellyfinUrl }: { jellyfinUrl?: string }) {
   const activityQuery = useQuery({
     queryKey: ["activity"],
     queryFn: fetchActivity,
-    refetchInterval: 10_000,
+    // 2×/s while something is downloading, slow back down once the queue is
+    // empty. The backend caches each snapshot, so this is one upstream refresh
+    // for every open tab rather than one per request.
+    refetchInterval: (query) =>
+      (query.state.data?.items.length ?? 0) > 0 ? 500 : 2_000,
   });
 
   const entries = useMemo(

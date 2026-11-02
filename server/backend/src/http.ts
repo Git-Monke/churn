@@ -1,4 +1,4 @@
-import type { ServiceId } from "./config.js";
+import type { UpstreamServiceId } from "./errors.js";
 import { UpstreamError } from "./errors.js";
 
 interface JsonRequestOptions {
@@ -10,7 +10,7 @@ interface JsonRequestOptions {
 
 /** Fetch with a hard timeout, translating network/timeout failures. */
 export async function fetchWithTimeout(
-  service: ServiceId,
+  service: UpstreamServiceId,
   url: string,
   init: RequestInit,
   timeoutMs: number,
@@ -27,7 +27,7 @@ export async function fetchWithTimeout(
 }
 
 export async function fetchJson<T>(
-  service: ServiceId,
+  service: UpstreamServiceId,
   url: string,
   options: JsonRequestOptions,
 ): Promise<T> {
@@ -53,7 +53,7 @@ export async function fetchJson<T>(
 }
 
 export function postJson<T>(
-  service: ServiceId,
+  service: UpstreamServiceId,
   url: string,
   body: unknown,
   options: Omit<JsonRequestOptions, "method" | "body">,
@@ -62,7 +62,7 @@ export function postJson<T>(
 }
 
 export async function upstreamResponseError(
-  service: ServiceId,
+  service: UpstreamServiceId,
   response: Response,
 ): Promise<UpstreamError> {
   if (response.status === 401 || response.status === 403) {

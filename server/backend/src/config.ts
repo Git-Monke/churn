@@ -14,6 +14,11 @@ export interface ServiceConfig {
   apiKey?: string;
 }
 
+export interface QbittorrentConfig {
+  url: string;
+  apiKey?: string;
+}
+
 export interface AppConfig {
   host: string;
   port: number;
@@ -24,6 +29,7 @@ export interface AppConfig {
   cookieSecure: CookieSecureSetting;
   jellyfinPublicUrl: string;
   services: Record<ServiceId, ServiceConfig>;
+  qbittorrent: QbittorrentConfig;
 }
 
 interface LoadConfigOptions {
@@ -37,6 +43,8 @@ const SERVICE_DEFAULTS: Record<ServiceId, { name: string; url: string }> = {
   sonarr: { name: "Sonarr", url: "http://127.0.0.1:8989" },
   radarr: { name: "Radarr", url: "http://127.0.0.1:7878" },
 };
+
+const QBITTORRENT_DEFAULT_URL = "http://127.0.0.1:8080";
 
 /** Resolve the `server/` directory from this module, under both src/ and dist/. */
 export function resolveServerDir(): string {
@@ -58,6 +66,52 @@ export function readApiKeyFromConfigXml(serverDir: string, service: "sonarr" | "
     const contents = readFileSync(configPath, "utf8");
     const match = contents.match(/<ApiKey>\s*([^<\s]+)\s*<\/ApiKey>/);
     return match?.[1];
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Read the stable API key seeded by `qbittorrent-init`. qBittorrent 5.x stores
+ * it under `[WebUI]`; older churn installs wrote `WebUI\APIKey` under
+ * `[Preferences]`.
+ */
+export function readQbittorrentApiKey(serverDir: string): string | undefined {
+  const configPath = path.resolve(
+    serverDir,
+    "..",
+    "torrent",
+    "config",
+    "qbittorrent",
+    "qBittorrent",
+    "qBittorrent.conf",
+  );
+  if (!existsSync(configPath)) {
+    return undefined;
+  }
+  try {
+    const contents = readFileSync(configPath, "utf8");
+    let inWebUi = false;
+    let legacyKey: string | undefined;
+    for (const line of contents.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+        inWebUi = trimmed === "[WebUI]";
+        continue;
+      }
+      if (inWebUi) {
+        const match = trimmed.match(/^APIKey\s*=\s*(.*)$/);
+        const key = match ? cleanApiKey(match[1]) : undefined;
+        if (key) {
+          return key;
+        }
+      }
+      const legacy = trimmed.match(/^WebUI\\APIKey\s*=\s*(.*)$/);
+      if (legacy) {
+        legacyKey = cleanApiKey(legacy[1]) ?? legacyKey;
+      }
+    }
+    return legacyKey;
   } catch {
     return undefined;
   }
@@ -91,6 +145,11 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
     },
   };
 
+  const qbittorrent: QbittorrentConfig = {
+    url: normalizeUrl(values.QBITTORRENT_URL, QBITTORRENT_DEFAULT_URL),
+    apiKey: cleanApiKey(values.QBITTORRENT_API_KEY) ?? readQbittorrentApiKey(serverDir),
+  };
+
   return {
     host: nonEmpty(values.HOST) ?? "127.0.0.1",
     port: parsePort(values.PORT),
@@ -104,6 +163,7 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
       services.jellyfin.url,
     ),
     services,
+    qbittorrent,
   };
 }
 
