@@ -2019,6 +2019,94 @@ describe("show detail", () => {
     await app.close();
   });
 
+  it("asks Sonarr to scan a completed qBittorrent download it lost", async () => {
+    const config = makeConfig();
+    config.qbittorrent.apiKey = "qbt-key";
+    const commands: Array<Record<string, unknown>> = [];
+    installFetch((url, init) => {
+      if (url.includes("sonarr.test") && url.endsWith("/api/v3/series/43")) {
+        return jsonResponse({
+          id: 43,
+          title: "Example Show",
+          year: 2024,
+          tvdbId: 5678,
+          images: [],
+        });
+      }
+      if (url.includes("sonarr.test") && url.includes("/api/v3/episode?seriesId=43")) {
+        return jsonResponse([
+          {
+            id: 601,
+            seriesId: 43,
+            seasonNumber: 1,
+            episodeNumber: 1,
+            title: "First",
+            airDateUtc: "2024-01-01T00:00:00Z",
+            hasFile: false,
+          },
+          {
+            id: 602,
+            seriesId: 43,
+            seasonNumber: 1,
+            episodeNumber: 2,
+            title: "Second",
+            airDateUtc: "2024-01-02T00:00:00Z",
+            hasFile: false,
+          },
+        ]);
+      }
+      if (url.includes("sonarr.test") && url.includes("/api/v3/queue")) {
+        return jsonResponse({ records: [] });
+      }
+      if (url.includes("sonarr.test") && url.endsWith("/api/v3/command")) {
+        commands.push(readBody(init));
+        return jsonResponse({ id: 99 });
+      }
+      if (url.endsWith("/api/v2/torrents/info")) {
+        return jsonResponse([
+          {
+            hash: "44dbb26758b4ed17be93003f86c03461afbe2d8c",
+            name: "Example.Show.S01.1080p.BluRay.x265-KONTRAST",
+            progress: 1,
+            state: "stalledUP",
+            size: 10_000,
+            content_path: "/data/Example.Show.S01.1080p.BluRay.x265-KONTRAST",
+          },
+        ]);
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildAuthedServer(config);
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/library/shows/sonarr/43",
+    });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(commands).toEqual([
+      {
+        name: "DownloadedEpisodesScan",
+        path: "/data/Example.Show.S01.1080p.BluRay.x265-KONTRAST",
+        importMode: "auto",
+      },
+    ]);
+    for (const episode of body.episodes) {
+      expect(episode.download).toMatchObject({
+        status: "importing",
+        progress: 100,
+        untracked: true,
+        statusMessages: [expect.stringContaining("asked Sonarr to import it")],
+      });
+    }
+
+    // Polling the page while Sonarr imports must not queue the scan again.
+    await app.inject({ method: "GET", url: "/api/library/shows/sonarr/43" });
+    expect(commands).toHaveLength(1);
+    await app.close();
+  });
+
   it("builds a Sonarr-only show with season-pack downloads", async () => {
     installFetch((url) => {
       if (url.includes("sonarr.test") && url.endsWith("/api/v3/series/42")) {

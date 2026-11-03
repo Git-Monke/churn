@@ -312,8 +312,11 @@ season/episode. Per-episode downloads and Sonarr season packs are overlaid on
 the episode list, and Jellyfin shows are matched to Sonarr through Jellyfin
 `ProviderIds.Tvdb`. If qBittorrent has an active torrent that Sonarr never
 queued, its filename is matched to the show and covered episodes so progress
-still appears; a completed untracked torrent is flagged because Sonarr will not
-import it automatically.
+still appears. If that torrent has finished, churn asks Sonarr to run a
+downloaded-episodes scan on its content path. This recovers downloads whose
+queue record was lost when a series was re-added or Sonarr restarted; the page
+shows **Importing** while Sonarr matches the files, and the normal import watcher
+then refreshes Jellyfin.
 
 Jellyfin can keep a series item while failing to link its on-disk episodes, for
 instance after a restart or an interrupted import. When a Jellyfin show loads

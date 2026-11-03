@@ -198,7 +198,10 @@ and starts the download. Out-of-profile tiers use an explicit override. Episode
 level picking remains available for repairing one missing episode. If
 qBittorrent has a download that Sonarr never queued, the show page matches its
 filename to the series and season/episode and shows live progress instead of
-prompting for another release.
+prompting for another release. Once that download finishes, churn asks Sonarr to
+scan its content path so the files are imported even when the queue record was
+lost; the episode changes to **Importing** and Jellyfin is refreshed after the
+import completes.
 
 On `POST /api/requests` the backend re-fetches canonical metadata by id, checks
 for duplicates, validates the profile and root folder against the live arr APIs,

@@ -7,6 +7,10 @@ import { requireAuth, type AuthContext } from "../auth.js";
 import { ApiError, isUnauthorized, isUpstreamNotFound, UpstreamError } from "../errors.js";
 import { refreshJellyfinLibrary } from "../library-scan.js";
 import { grabWithDuplicateRecovery } from "../download-recovery.js";
+import {
+  markDownloadsImporting,
+  recoverCompletedShowDownloads,
+} from "../download-import.js";
 import type { ReleaseCache } from "../release-cache.js";
 import { buildCachedReleasesResponse } from "../release-options.js";
 import {
@@ -250,6 +254,16 @@ async function loadJellyfinShow(
     ),
     qbittorrentTorrents,
   });
+  const recovering = sonarrSeries?.id === undefined
+    ? new Set<string>()
+    : await recoverCompletedShowDownloads(
+        config,
+        sonarrSeries.id,
+        series.title,
+        detail.episodes,
+        qbittorrentTorrents,
+      );
+  markDownloadsImporting(detail.episodes, recovering);
   const scanning = detail.episodes.length === 0 && (await refreshJellyfinSeries(config, itemId));
 
   return {
@@ -497,7 +511,7 @@ async function grabShowRelease(
   }
 
   const packSeasons = seasonPackSeasons(release, input.seasonNumber);
-  if (packSeasons && packSeasons.length > 1) {
+  if (packSeasons && packSeasons.length > 0) {
     try {
       await monitorSeriesSeasons(client, seriesId, packSeasons);
     } catch (error) {
@@ -660,6 +674,8 @@ async function loadSonarrShow(
   }
 
   const series = seriesSummaryFromSonarr(serverSeries);
+  const torrents =
+    torrentsResult.status === "fulfilled" ? torrentsResult.value : [];
   const detail = buildShowDetail({
     source: "sonarr",
     series,
@@ -669,13 +685,19 @@ async function loadSonarrShow(
         queueResult.status === "fulfilled" ? queueResult.value : [],
         seriesId,
       ),
-      indexTorrents(
-        torrentsResult.status === "fulfilled" ? torrentsResult.value : [],
-      ),
+      indexTorrents(torrents),
     ),
-    qbittorrentTorrents:
-      torrentsResult.status === "fulfilled" ? torrentsResult.value : [],
+    qbittorrentTorrents: torrents,
   });
+
+  const recovering = await recoverCompletedShowDownloads(
+    config,
+    seriesId,
+    series.title,
+    detail.episodes,
+    torrents,
+  );
+  markDownloadsImporting(detail.episodes, recovering);
 
   return {
     source: "sonarr",

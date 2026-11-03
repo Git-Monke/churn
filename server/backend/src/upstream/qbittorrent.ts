@@ -30,6 +30,8 @@ export interface QbittorrentTorrent {
   added_on?: number;
   /** Unix timestamp the torrent finished downloading, 0 if incomplete. */
   completion_on?: number;
+  /** Absolute path to the torrent's files on qBittorrent's filesystem. */
+  content_path?: string;
 }
 
 /** qBittorrent accepts an optional `urn:btih:` prefix; compare bare hashes. */
