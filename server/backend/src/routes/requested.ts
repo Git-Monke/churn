@@ -2,10 +2,14 @@ import type { FastifyInstance } from "fastify";
 
 import type { AppConfig, ServiceConfig } from "../config.js";
 import { movieMetadata, seriesMetadata } from "../activity.js";
-import { mapWithConcurrency } from "../concurrency.js";
 import { ApiError, isUpstreamNotFound } from "../errors.js";
 import { refreshJellyfinLibrary } from "../library-scan.js";
-import type { ReleaseCache } from "../release-cache.js";
+import {
+  movieMetadataEntry,
+  seriesMetadataEntry,
+  type MediaCache,
+} from "../media-cache.js";
+import type { ReleaseSearchService } from "../release-search.js";
 import type {
   CancelLibraryItemResponse,
   RequestedLibraryItem,
@@ -13,6 +17,9 @@ import type {
   RequestedLibraryServiceState,
 } from "../types.js";
 import { isMovieAvailable, isSeriesAvailable } from "../search.js";
+import { movieTitleMatches } from "../qbittorrent-activity.js";
+import { tokenize, torrentBelongsToShow } from "../qbittorrent-show.js";
+import { createQbittorrentClient } from "../upstream/qbittorrent.js";
 import {
   createArrClient,
   type ArrServiceId,
@@ -26,12 +33,11 @@ interface ServiceRequestedLibrary {
   status: RequestedLibraryServiceState;
 }
 
-const RELEASE_SEARCH_TIMEOUT_MS = 30_000;
-
 export function registerRequestedLibraryRoutes(
   app: FastifyInstance,
   config: AppConfig,
-  releaseCache: ReleaseCache,
+  mediaCache: MediaCache,
+  releaseSearch: ReleaseSearchService,
 ): void {
   app.get("/api/library/requested", async (_request, reply) => {
     reply.header("cache-control", "no-store");
@@ -40,13 +46,13 @@ export function registerRequestedLibraryRoutes(
         "sonarr",
         config.services.sonarr,
         config.requestTimeoutMs,
-        releaseCache,
+        mediaCache,
       ),
       loadRequestedLibrary(
         "radarr",
         config.services.radarr,
         config.requestTimeoutMs,
-        releaseCache,
+        mediaCache,
       ),
     ]);
     const items = [...sonarr.items, ...radarr.items];
@@ -66,16 +72,16 @@ export function registerRequestedLibraryRoutes(
       reply.header("cache-control", "no-store");
       const service = parseArrService(request.params.service);
       const id = parsePositiveId(request.params.id);
-      return cancelRequestedTitle(config, service, id, releaseCache);
+      return cancelRequestedTitle(config, service, id, releaseSearch);
     },
   );
 }
 
-async function cancelRequestedTitle(
+export async function cancelRequestedTitle(
   config: AppConfig,
   service: ArrServiceId,
   id: number,
-  releaseCache: ReleaseCache,
+  releaseSearch: ReleaseSearchService,
 ): Promise<CancelLibraryItemResponse> {
   const serviceConfig = config.services[service];
   if (!serviceConfig.apiKey) {
@@ -87,6 +93,9 @@ async function cancelRequestedTitle(
   }
 
   const client = createArrClient(service, serviceConfig, config.requestTimeoutMs);
+  const qbittorrentHashes = await findQbittorrentHashes(config, client, service, id).catch(
+    () => [] as string[],
+  );
   const queue = await client.getQueue();
   const records = queue.filter((record) =>
     service === "sonarr" ? record.seriesId === id : record.movieId === id,
@@ -122,10 +131,15 @@ async function cancelRequestedTitle(
     throw error;
   }
 
+  // The arr removes its queue entry and tracked files, but a torrent Sonarr no
+  // longer knows about can survive in qBittorrent. Remove those only after the
+  // arr delete succeeded, so a failed delete never touches the download client.
+  await removeQbittorrentTorrents(config, qbittorrentHashes);
+
   if (service === "sonarr") {
-    await releaseCache.invalidateSeries(id);
+    await releaseSearch.invalidateSeries(id);
   } else {
-    await releaseCache.invalidateMovie(id);
+    await releaseSearch.invalidateMovie(id);
   }
 
   // Jellyfin scans best-effort; a failure must not make the cancel look failed.
@@ -134,6 +148,7 @@ async function cancelRequestedTitle(
   } catch {
     // The arr delete already succeeded; Jellyfin will notice on its next scan.
   }
+  scheduleJellyfinRefresh(config);
 
   return {
     status: "cancelled",
@@ -142,6 +157,217 @@ async function cancelRequestedTitle(
     id,
     queueRemoved: records.filter((record) => record.id !== undefined).length,
   };
+}
+
+
+export interface ArrTitleMatch {
+  service: "sonarr" | "radarr";
+  kind: "movie" | "series";
+  arrId: number;
+}
+
+/**
+ * Match a Jellyfin item to an arr title when provider ids are missing or
+ * differ. Provider ids win; otherwise require the same normalized title and a
+ * compatible year so a remake or a different show is never deleted by accident.
+ */
+export async function findArrTitleMatch(
+  config: AppConfig,
+  kind: "movie" | "series",
+  title: string,
+  year: number | undefined,
+  providerIds: { tmdbId?: number; tvdbId?: number } = {},
+): Promise<ArrTitleMatch | undefined> {
+  const serviceName = kind === "movie" ? "radarr" : "sonarr";
+  const service = config.services[serviceName];
+  if (!service.apiKey) {
+    return undefined;
+  }
+
+  const client = createArrClient(serviceName, service, config.requestTimeoutMs);
+  const items =
+    kind === "movie"
+      ? (await client.listMovies())
+          .map(requestedMovieItem)
+          .filter((item): item is RequestedLibraryItem => item !== null)
+      : (await client.listSeries())
+          .map(requestedSeriesItem)
+          .filter((item): item is RequestedLibraryItem => item !== null);
+
+  const providerMatches = items.filter((item) =>
+    kind === "movie"
+      ? providerIds.tmdbId !== undefined && item.tmdbId === providerIds.tmdbId
+      : providerIds.tvdbId !== undefined && item.tvdbId === providerIds.tvdbId,
+  );
+  if (providerMatches.length === 1) {
+    const match = providerMatches[0]!;
+    return { service: match.service, kind: match.kind, arrId: match.arrId };
+  }
+  if (providerMatches.length > 1) {
+    throw new ApiError(
+      409,
+      "ambiguous_arr_title",
+      "More than one Sonarr/Radarr title matches this Jellyfin item",
+    );
+  }
+
+  const titleMatches = items.filter((item) => {
+    if (normalizeTitle(item.title) !== normalizeTitle(title)) {
+      return false;
+    }
+    if (year === undefined || item.year === undefined) {
+      return true;
+    }
+    return kind === "series" ? Math.abs(item.year - year) <= 1 : item.year === year;
+  });
+  if (titleMatches.length > 1) {
+    throw new ApiError(
+      409,
+      "ambiguous_arr_title",
+      "More than one Sonarr/Radarr title matches this Jellyfin item",
+    );
+  }
+  if (titleMatches.length === 0) {
+    return undefined;
+  }
+  const match = titleMatches[0]!;
+  return { service: match.service, kind: match.kind, arrId: match.arrId };
+}
+
+function normalizeTitle(value: string): string {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+async function findQbittorrentHashes(
+  config: AppConfig,
+  client: ReturnType<typeof createArrClient>,
+  service: ArrServiceId,
+  id: number,
+): Promise<string[]> {
+  if (!config.qbittorrent.apiKey) {
+    return [];
+  }
+
+  const qbittorrent = createQbittorrentClient(
+    config.qbittorrent,
+    Math.min(config.requestTimeoutMs, 2_000),
+  );
+  const [torrents, resource] = await Promise.all([
+    qbittorrent.getTorrents(),
+    service === "sonarr" ? client.getSeries(id) : client.getMovie(id),
+  ]);
+  const title = resource.title?.trim();
+  if (!title) {
+    return [];
+  }
+
+  const matched =
+    service === "sonarr"
+      ? torrents.filter((torrent) => {
+          const name = torrent.name?.trim();
+          return name !== undefined && torrentBelongsToShow(name, tokenize(title));
+        })
+      : torrents.filter(
+          (torrent) =>
+            torrent.name !== undefined &&
+            movieTitleMatches(
+              torrent.name,
+              title,
+              (resource as ServarrMovieResource).year,
+            ),
+        );
+
+  return [
+    ...new Set(
+      matched
+        .map((torrent) => torrent.hash ?? torrent.infohash_v1 ?? torrent.infohash_v2)
+        .filter((hash): hash is string => Boolean(hash?.trim())),
+    ),
+  ];
+}
+
+async function removeQbittorrentTorrents(
+  config: AppConfig,
+  hashes: string[],
+): Promise<void> {
+  if (!config.qbittorrent.apiKey || hashes.length === 0) {
+    return;
+  }
+  const client = createQbittorrentClient(
+    config.qbittorrent,
+    Math.min(config.requestTimeoutMs, 2_000),
+  );
+  await Promise.all(
+    hashes.map(async (hash) => {
+      try {
+        await client.removeTorrent(hash, true);
+      } catch {
+        // The arr delete already succeeded. Leave a stubborn torrent for the
+        // user rather than reporting the whole deletion as failed.
+      }
+    }),
+  );
+}
+
+
+/** Best-effort qBittorrent cleanup for a title deleted outside the arr. */
+export async function removeQbittorrentForTitle(
+  config: AppConfig,
+  kind: "movie" | "series",
+  title: string,
+  year: number | undefined,
+): Promise<void> {
+  if (!config.qbittorrent.apiKey) {
+    return;
+  }
+  const client = createQbittorrentClient(
+    config.qbittorrent,
+    Math.min(config.requestTimeoutMs, 2_000),
+  );
+  let torrents;
+  try {
+    torrents = await client.getTorrents();
+  } catch {
+    return;
+  }
+  const matched =
+    kind === "series"
+      ? torrents.filter((torrent) => {
+          const name = torrent.name?.trim();
+          return name !== undefined && torrentBelongsToShow(name, tokenize(title));
+        })
+      : torrents.filter(
+          (torrent) =>
+            torrent.name !== undefined && movieTitleMatches(torrent.name, title, year),
+        );
+  const hashes = [
+    ...new Set(
+      matched
+        .map((torrent) => torrent.hash ?? torrent.infohash_v1 ?? torrent.infohash_v2)
+        .filter((hash): hash is string => Boolean(hash?.trim())),
+    ),
+  ];
+  await Promise.all(
+    hashes.map(async (hash) => {
+      try {
+        await client.removeTorrent(hash, true);
+      } catch {
+        // The Jellyfin delete already succeeded; leave stubborn torrents alone.
+      }
+    }),
+  );
+}
+
+/** Jellyfin can miss files deleted midway through a scan; ask once more later. */
+function scheduleJellyfinRefresh(config: AppConfig): void {
+  const timer = setTimeout(() => {
+    void refreshJellyfinLibrary(config).catch(() => undefined);
+  }, 1_500);
+  timer.unref?.();
 }
 
 function parseArrService(value: string): ArrServiceId {
@@ -166,7 +392,7 @@ async function loadRequestedLibrary(
   id: ArrServiceId,
   service: ServiceConfig,
   timeoutMs: number,
-  releaseCache: ReleaseCache,
+  mediaCache: MediaCache,
 ): Promise<ServiceRequestedLibrary> {
   if (!service.apiKey) {
     return failedRequestedLibrary(id, "unconfigured", unconfiguredDetail(id));
@@ -176,7 +402,7 @@ async function loadRequestedLibrary(
   try {
     if (id === "sonarr") {
       const series = await client.listSeries();
-      prefetchSeriesReleases(service, timeoutMs, releaseCache, series);
+      await cacheSeriesMetadata(series, mediaCache);
       const items = series
         .map(requestedSeriesItem)
         .filter((item): item is RequestedLibraryItem => item !== null);
@@ -184,7 +410,7 @@ async function loadRequestedLibrary(
     }
 
     const movies = await client.listMovies();
-    prefetchMovieReleases(service, timeoutMs, releaseCache, movies);
+    await cacheMovieMetadata(movies, mediaCache);
     const items = movies
       .map(requestedMovieItem)
       .filter((item): item is RequestedLibraryItem => item !== null);
@@ -192,6 +418,38 @@ async function loadRequestedLibrary(
   } catch (error) {
     return failedRequestedLibrary(id, stateForError(error), errorMessage(error));
   }
+}
+
+async function cacheSeriesMetadata(
+  series: ServarrSeriesResource[],
+  mediaCache: MediaCache,
+): Promise<void> {
+  await Promise.all(
+    series.map(async (item) => {
+      const entry = seriesMetadataEntry(item);
+      if (entry && !(await mediaCache.getSeries(entry.id))) {
+        await mediaCache.putSeries(entry);
+      }
+    }),
+  ).catch(() => {
+    // Metadata caching is best-effort; the library response is unaffected.
+  });
+}
+
+async function cacheMovieMetadata(
+  movies: ServarrMovieResource[],
+  mediaCache: MediaCache,
+): Promise<void> {
+  await Promise.all(
+    movies.map(async (item) => {
+      const entry = movieMetadataEntry(item);
+      if (entry && !(await mediaCache.getMovie(entry.id))) {
+        await mediaCache.putMovie(entry);
+      }
+    }),
+  ).catch(() => {
+    // Metadata caching is best-effort; the library response is unaffected.
+  });
 }
 
 export function requestedSeriesItem(series: ServarrSeriesResource): RequestedLibraryItem | null {
@@ -257,77 +515,6 @@ export function requestedMovieItem(movie: ServarrMovieResource): RequestedLibrar
  * Fully available titles need no chooser options; the cache methods deduplicate
  * searches and apply a cooldown to empty results.
  */
-function prefetchSeriesReleases(
-  service: ServiceConfig,
-  requestTimeoutMs: number,
-  releaseCache: ReleaseCache,
-  series: ServarrSeriesResource[],
-): void {
-  const missing = series.filter(
-    (item) => item.id !== undefined && !isSeriesAvailable(item),
-  );
-  if (missing.length === 0) {
-    return;
-  }
-  const client = createArrClient(
-    "sonarr",
-    service,
-    Math.max(requestTimeoutMs, RELEASE_SEARCH_TIMEOUT_MS),
-  );
-  void mapWithConcurrency(missing, 2, async (item) => {
-    const seriesId = item.id as number;
-    const seasonNumbers = regularSeasons(item.seasons);
-    if (seasonNumbers.length === 0) {
-      try {
-        const full = await client.getSeries(seriesId);
-        await releaseCache.warmMissingSeries(seriesId, regularSeasons(full.seasons), (season) =>
-          client.getSeasonReleases(seriesId, season),
-        );
-      } catch {
-        // The show page will retry if the cache is still empty.
-      }
-      return;
-    }
-    await releaseCache.warmMissingSeries(seriesId, seasonNumbers, (season) =>
-      client.getSeasonReleases(seriesId, season),
-    );
-  }).catch(() => {
-    // Prefetch is best-effort; the requested library response is unaffected.
-  });
-}
-
-function prefetchMovieReleases(
-  service: ServiceConfig,
-  requestTimeoutMs: number,
-  releaseCache: ReleaseCache,
-  movies: ServarrMovieResource[],
-): void {
-  const missing = movies.filter(
-    (item) => item.id !== undefined && !isMovieAvailable(item),
-  );
-  if (missing.length === 0) {
-    return;
-  }
-  const client = createArrClient(
-    "radarr",
-    service,
-    Math.max(requestTimeoutMs, RELEASE_SEARCH_TIMEOUT_MS),
-  );
-  void mapWithConcurrency(missing, 2, (item) =>
-    releaseCache.warmMissingMovie(item.id as number, () =>
-      client.getMovieReleases(item.id as number),
-    ),
-  ).catch(() => {
-    // Prefetch is best-effort; the requested library response is unaffected.
-  });
-}
-
-function regularSeasons(seasons: ServarrSeriesResource["seasons"]): number[] {
-  return [...new Set((seasons ?? []).map((season) => season.seasonNumber))]
-    .filter((season) => Number.isInteger(season) && season > 0)
-    .sort((left, right) => left - right);
-}
-
 function failedRequestedLibrary(
   id: ArrServiceId,
   state: RequestedLibraryServiceState["state"],

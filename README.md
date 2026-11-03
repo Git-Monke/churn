@@ -139,45 +139,49 @@ npm start          # Fastify serves the SPA at http://127.0.0.1:4000
 
 Search across Radarr and Sonarr from the dashboard and request a movie or show.
 Requests only add the title to the library: they do **not** start a download or
-run an automatic search. Churn adds the title unmonitored, then warms a release
-cache in the background: one Radarr search for a movie, and one Sonarr season
-search per regular season (specials excluded) for a show. Season searches run
-in order from season 1 upward, so a multi-season pack such as `S01-05` found by
-an early search is cached under every season it covers. Opening an existing show
-also starts any missing season searches in the background, including seasons
-whose previous search found nothing; those retries are rate-limited. Opening the
-requested-library view reconciles titles added directly in Sonarr or Radarr, so
-their movie options or every regular season are prefetched too.
+run an automatic search. Churn adds the title unmonitored and caches the metadata
+Radarr/Sonarr returned (title, year, TMDB/TVDB/IMDB ids, seasons and poster).
 
-Clicking a movie opens its detail page. Clicking a show opens the existing show
-page; while its season searches run the page shows a searching notice, and the
-cached release chooser opens automatically when a season has usable options and
-no downloaded episodes. Choosing a season also shows the chooser. The chooser groups
-options by quality tier (`480p`, `720p`, `1080p`, `2160p`, and `Other`) and only
-shows tiers with at least one release. Within a tier, only releases the arr can actually grab are shown, sorted by
-seeders (highest first), then file size, with quality, indexer, age and
-multi-season coverage. Only the best-seeded release is shown initially; a
-**Show more options** button expands the rest. Results persist in `server/cache/releases` (or `server/.churn-cache/releases` when the container-owned `cache/` directory is not writable), so they are
-still there after a backend restart. When the best option in a tier has fewer
-than 50 seeders, the chooser shows a “may be stale” warning and a refresh button
-instead of hiding the options.
+Release search is Prowlarr-first. Opening a movie or season runs one Prowlarr
+search per enabled indexer in parallel, and the chooser updates as each one
+finishes. A progress line shows `5/9 indexers finished`, with a chip for every
+indexer, so you can see whether more results are still coming. Churn's own
+release-name parser filters the results by title, year, season and episode and
+extracts quality, season ranges and episode ranges. Results are grouped by
+quality tier (`480p`, `720p`, `1080p`, `2160p`, and `Other`) and sorted by
+seeders, then size. Only the best-seeded release is shown initially; **Show more
+options** expands the tier.
 
-Choosing a release grabs it and enables monitoring for the movie or the
-affected season(s). A multi-season pack monitors every season it covers so
-Sonarr imports the whole pack. Picking a tier outside the title's quality
-profile uses an explicit override, and the release row shows the override and
-rejection reasons first. The old automatic seeders-aware pick and swarm re-pick
-are retired from the request path.
+Every enabled Prowlarr indexer is represented. If Prowlarr has not synced an
+indexer to the target Sonarr/Radarr, its results are still visible but Download
+is disabled with an explanation. Otherwise, choosing a release re-queries just
+that indexer through Sonarr/Radarr, matches the release, and grabs it through the
+normal arr path. That keeps monitoring, imports and qBittorrent tracking in the
+arrs. A multi-season pack monitors every season it covers so Sonarr imports the
+whole pack.
 
-The Library page merges titles already in Jellyfin with active Sonarr/Radarr
-downloads. Movies show progress and ETA on their card. Each arr-backed card has
-a trash button that cancels the download, removes the title and its files from
-Sonarr/Radarr, and refreshes Jellyfin — useful for replacing a large release
-with a smaller profile. Shows open a season and episode view with per-episode
-availability and download progress, including season-pack handling. A
-downloading episode has its own **Cancel download** action that stops just that
-download, blocklists the release and keeps imported files; shows that are in
-Jellyfin still get Sonarr release search through the matched Sonarr series.
+Release-search snapshots persist in `server/cache/releases/prowlarr` (or
+`server/.churn-cache/releases/prowlarr` when the container-owned `cache/`
+directory is not writable). Later opens show the snapshot until **Search again**
+starts a fresh search. When the best option in a tier has fewer than 50 seeders,
+the chooser shows a “may be stale” warning and a refresh button instead of
+hiding the options.
+
+The Library page uses Jellyfin as the only source of playable titles and
+qBittorrent as the only source of active download progress. The requested-library
+catalog still lists titles added to Sonarr/Radarr so a show or movie remains
+available for release selection before anything has downloaded. Movies show
+qBittorrent progress and ETA on their card. Every card has a trash button:
+Sonarr/Radarr-backed titles are removed there, cleaned up in qBittorrent and
+refreshed in Jellyfin, while Jellyfin-only titles are deleted from Jellyfin and
+its filesystem. When the provider ids differ, churn matches a Jellyfin title back
+to Sonarr/Radarr by title and year before falling back to a Jellyfin delete.
+Shows open a season and episode view with
+Sonarr's missing episodes, Jellyfin playability and qBittorrent download
+progress, including season-pack handling. A downloading episode has its own
+**Cancel download** action that stops just that download and keeps imported
+files; shows that are in Jellyfin still get Sonarr release search through the
+matched Sonarr series.
 Movies and Jellyfin episodes also open an in-app player:
 video streams from Jellyfin, transcoding to HLS when the browser cannot decode
 the source, resume positions come from the signed-in user, and progress is

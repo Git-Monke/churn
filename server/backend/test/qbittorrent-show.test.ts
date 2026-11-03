@@ -85,7 +85,7 @@ describe("qBittorrent fallback for show downloads", () => {
     expect(downloads.size).toBe(0);
   });
 
-  it("warns when the torrent finished but Sonarr is not tracking it", () => {
+  it("marks a finished torrent as importing until Sonarr imports it", () => {
     const episodes = [{ key: "s01e01", seasonNumber: 1, episodeNumber: 1 }];
     const downloads = mapShowTorrentDownloads(
       [torrent({ progress: 1, state: "uploading" })],
@@ -94,39 +94,11 @@ describe("qBittorrent fallback for show downloads", () => {
     );
 
     expect(downloads.get("s01e01")).toMatchObject({
-      status: "warning",
+      status: "importing",
       progress: 100,
       untracked: true,
-      statusMessages: [expect.stringContaining("will not import automatically")],
+      statusMessages: [expect.stringContaining("Sonarr has not imported it yet")],
     });
-  });
-
-  it("lets a real Sonarr queue record win over the qBittorrent fallback", () => {
-    const detail = buildShowDetail({
-      source: "sonarr",
-      series,
-      sonarrEpisodes: [episode(1, 1, 1)],
-      queueRecords: [
-        {
-          id: 10,
-          episodeId: 1,
-          seasonNumber: 1,
-          status: "downloadClientUnavailable",
-          trackedDownloadState: "downloading",
-          trackedDownloadStatus: "warning",
-          size: 100,
-          sizeleft: 50,
-        },
-      ],
-      qbittorrentTorrents: [torrent()],
-    });
-
-    expect(detail.episodes[0]?.download).toMatchObject({
-      status: "warning",
-      progress: 50,
-    });
-    expect(detail.episodes[0]?.download?.untracked).toBeUndefined();
-    expect(detail.episodes[0]?.download?.statusMessages).toBeUndefined();
   });
 
   it("adds an untracked qBittorrent download through buildShowDetail", () => {

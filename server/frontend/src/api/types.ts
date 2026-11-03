@@ -128,7 +128,10 @@ export interface RequestedLibraryItem {
   tmdbId?: number;
   tvdbId?: number;
   imdbId?: string;
-  /** True when the arr has the movie file or every series episode. */
+  /**
+   * Arr import hint; Jellyfin alone determines playability. Used only for the
+   * transitional Scanning state and release prefetching.
+   */
   available: boolean;
 }
 
@@ -154,6 +157,13 @@ export interface CancelLibraryItemResponse {
   queueRemoved: number;
 }
 
+export interface CancelJellyfinItemResponse {
+  status: "cancelled";
+  service: "jellyfin";
+  kind: "movie" | "series";
+  id: string;
+}
+
 export interface CancelEpisodeDownloadResponse {
   status: "cancelled";
   service: "sonarr";
@@ -161,6 +171,7 @@ export interface CancelEpisodeDownloadResponse {
   seasonNumber: number;
   episodeNumber: number;
   queueRemoved: number;
+  downloadClientRemoved?: number;
   seasonPack: boolean;
 }
 
@@ -208,7 +219,8 @@ export type ActivityStatus = "queued" | "downloading" | "importing" | "warning";
 
 export interface ActivityItem {
   key: string;
-  service: "sonarr" | "radarr";
+  /** Present only when the qBittorrent download matched a local arr title. */
+  service?: "sonarr" | "radarr";
   kind: RequestKind;
   title: string;
   year?: number;
@@ -223,6 +235,7 @@ export interface ActivityItem {
   movieId?: number;
   seriesId?: number;
   seasons?: number[];
+  /** Number of active qBittorrent torrents represented by this item. */
   queueCount: number;
   status: ActivityStatus;
   progress: number;
@@ -239,7 +252,7 @@ export interface ActivityItem {
 }
 
 export interface ActivityServiceState {
-  id: "sonarr" | "radarr";
+  id: "qbittorrent";
   state: ArrServiceState;
   detail?: string;
   count: number;
@@ -269,7 +282,7 @@ export interface ActivityResponse {
 }
 
 export type ShowSource = "jellyfin" | "sonarr";
-export type ShowAvailability = "jellyfin" | "sonarr" | "missing" | "upcoming";
+export type ShowAvailability = "jellyfin" | "missing" | "upcoming";
 
 export interface ShowDownload {
   status: ActivityStatus;
@@ -299,6 +312,8 @@ export interface ShowEpisode {
   /** Jellyfin episode id, used to open the in-app player. */
   jellyfinId?: string;
   availability: ShowAvailability;
+  /** Sonarr has a file, but Jellyfin has not indexed it yet (not playable). */
+  imported?: boolean;
   download?: ShowDownload;
 }
 
@@ -362,6 +377,7 @@ export interface ShowRelease {
   ageHours?: number;
   publishDate?: string;
   searchSeasonNumber?: number;
+  downloadDetail?: string;
 }
 
 export interface ShowReleasesResponse {
@@ -382,6 +398,23 @@ export interface ReleaseGroup {
   releases: ShowRelease[];
 }
 
+export type ReleaseIndexerState = "pending" | "searching" | "finished" | "error";
+
+export interface ReleaseIndexerProgress {
+  id: number;
+  name: string;
+  state: ReleaseIndexerState;
+  count: number;
+  canGrab: boolean;
+  detail?: string;
+}
+
+export interface ReleaseSearchProgress {
+  finished: number;
+  total: number;
+  indexers: ReleaseIndexerProgress[];
+}
+
 export interface CachedReleasesResponse {
   kind: "movie" | "series-season";
   service: "radarr" | "sonarr";
@@ -393,6 +426,7 @@ export interface CachedReleasesResponse {
   fetchedAt?: string;
   releaseCount: number;
   groups: ReleaseGroup[];
+  progress?: ReleaseSearchProgress;
 }
 
 export interface MovieDetailResponse {

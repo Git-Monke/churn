@@ -428,11 +428,15 @@ export function toReleaseGroups(
   return groupShowReleases(mapped);
 }
 
-export function groupShowReleases(releases: ShowRelease[]): ReleaseGroup[] {
+export function groupShowReleases(
+  releases: ShowRelease[],
+  options: { includeUnavailable?: boolean } = {},
+): ReleaseGroup[] {
   const groups = new Map<number, ShowRelease[]>();
   for (const release of releases) {
-    // Unavailable releases are noise in the chooser: they cannot be grabbed.
-    if (!release.canGrab) {
+    // Legacy callers hide releases the arr cannot grab. The Prowlarr chooser
+    // keeps them visible but disables Download so every indexer is represented.
+    if (!release.canGrab && options.includeUnavailable !== true) {
       continue;
     }
     const tier = release.tier ?? 99;

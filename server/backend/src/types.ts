@@ -103,7 +103,11 @@ export interface RequestedLibraryItem {
   tmdbId?: number;
   tvdbId?: number;
   imdbId?: string;
-  /** True when the arr has the movie file or every series episode. */
+  /**
+   * Arr import hint: the arr has a file, but only Jellyfin can say whether the
+   * title is playable. Used for scan-state and release-prefetch decisions, never
+   * for the Available badge or play links.
+   */
   available: boolean;
 }
 
@@ -130,6 +134,13 @@ export interface CancelLibraryItemResponse {
   queueRemoved: number;
 }
 
+export interface CancelJellyfinItemResponse {
+  status: "cancelled";
+  service: "jellyfin";
+  kind: "movie" | "series";
+  id: string;
+}
+
 export interface CancelEpisodeDownloadResponse {
   status: "cancelled";
   service: "sonarr";
@@ -138,6 +149,8 @@ export interface CancelEpisodeDownloadResponse {
   episodeNumber: number;
   /** Number of Sonarr queue records removed for this episode's download. */
   queueRemoved: number;
+  /** Number of untracked qBittorrent torrents removed directly. */
+  downloadClientRemoved?: number;
   /** True when the cancelled download was a season pack. */
   seasonPack: boolean;
 }
@@ -186,7 +199,8 @@ export type ActivityStatus = "queued" | "downloading" | "importing" | "warning";
 
 export interface ActivityItem {
   key: string;
-  service: "sonarr" | "radarr";
+  /** Present only when the qBittorrent download matched a local arr title. */
+  service?: "sonarr" | "radarr";
   kind: RequestKind;
   title: string;
   year?: number;
@@ -201,6 +215,7 @@ export interface ActivityItem {
   movieId?: number;
   seriesId?: number;
   seasons?: number[];
+  /** Number of active qBittorrent torrents represented by this item. */
   queueCount: number;
   status: ActivityStatus;
   progress: number;
@@ -217,7 +232,7 @@ export interface ActivityItem {
 }
 
 export interface ActivityServiceState {
-  id: "sonarr" | "radarr";
+  id: "qbittorrent";
   state: ArrServiceState;
   detail?: string;
   count: number;
@@ -260,6 +275,8 @@ export interface ShowRelease {
   publishDate?: string;
   /** Season search that produced this release, used to look it up again on grab. */
   searchSeasonNumber?: number;
+  /** Why a result is visible but cannot be grabbed through the target arr. */
+  downloadDetail?: string;
 }
 
 export interface ReleaseGroup {
@@ -273,6 +290,24 @@ export interface ReleaseGroup {
   releases: ShowRelease[];
 }
 
+export type ReleaseIndexerState = "pending" | "searching" | "finished" | "error";
+
+export interface ReleaseIndexerProgress {
+  id: number;
+  name: string;
+  state: ReleaseIndexerState;
+  count: number;
+  /** True when the target Sonarr/Radarr has a matching indexer for grabbing. */
+  canGrab: boolean;
+  detail?: string;
+}
+
+export interface ReleaseSearchProgress {
+  finished: number;
+  total: number;
+  indexers: ReleaseIndexerProgress[];
+}
+
 export interface CachedReleasesResponse {
   kind: "movie" | "series-season";
   service: "radarr" | "sonarr";
@@ -284,6 +319,8 @@ export interface CachedReleasesResponse {
   fetchedAt?: string;
   releaseCount: number;
   groups: ReleaseGroup[];
+  /** Per-indexer progress. Omitted by the legacy cached-release routes. */
+  progress?: ReleaseSearchProgress;
 }
 
 export interface MovieSeriesSummary {
@@ -401,7 +438,7 @@ export interface CreateRequestResponse {
 }
 
 export type ShowSource = "jellyfin" | "sonarr";
-export type ShowAvailability = "jellyfin" | "sonarr" | "missing" | "upcoming";
+export type ShowAvailability = "jellyfin" | "missing" | "upcoming";
 
 export interface ShowDownload {
   status: ActivityStatus;
@@ -431,6 +468,8 @@ export interface ShowEpisode {
   /** Jellyfin episode id, used to open the in-app player. */
   jellyfinId?: string;
   availability: ShowAvailability;
+  /** Sonarr has a file, but Jellyfin has not indexed it yet (not playable). */
+  imported?: boolean;
   download?: ShowDownload;
 }
 

@@ -2,7 +2,8 @@ import type { FastifyInstance } from "fastify";
 
 import type { AppConfig, ServiceConfig } from "../config.js";
 import { ApiError } from "../errors.js";
-import type { ReleaseCache } from "../release-cache.js";
+import { movieMetadataEntry, seriesMetadataEntry, type MediaCache } from "../media-cache.js";
+import type { ReleaseSearchService } from "../release-search.js";
 import {
   pickDefaultQualityProfile,
   pickDefaultRootFolder,
@@ -26,13 +27,11 @@ import {
   type ServarrSeriesResource,
 } from "../upstream/servarr.js";
 
-/** Release searches hit every indexer, so they need more time than a CRUD call. */
-const RELEASE_SEARCH_TIMEOUT_MS = 30_000;
-
 export function registerRequestRoutes(
   app: FastifyInstance,
   config: AppConfig,
-  releaseCache: ReleaseCache,
+  mediaCache: MediaCache,
+  releaseSearch: ReleaseSearchService,
 ): void {
   app.get("/api/requests/options", async (_request, reply) => {
     reply.header("cache-control", "no-store");
@@ -62,11 +61,7 @@ export function registerRequestRoutes(
       );
     }
 
-    const timeoutMs = Math.max(
-      config.requestTimeoutMs,
-      config.searchTimeoutMs,
-      RELEASE_SEARCH_TIMEOUT_MS,
-    );
+    const timeoutMs = Math.max(config.requestTimeoutMs, config.searchTimeoutMs);
     const client = createArrClient(service, serviceConfig, timeoutMs);
     const term = input.kind === "movie" ? `tmdb:${input.tmdbId}` : `tvdb:${input.tvdbId}`;
     const [lookupResult, libraryResult, profileResult, folderResult] = await Promise.allSettled([
@@ -92,7 +87,8 @@ export function registerRequestRoutes(
     return input.kind === "movie"
       ? addMovieRequest(
           client,
-          releaseCache,
+          mediaCache,
+          releaseSearch,
           input,
           lookupResult.value as ServarrMovieResource[],
           libraryResult.value as ServarrMovieResource[],
@@ -101,7 +97,8 @@ export function registerRequestRoutes(
         )
       : addSeriesRequest(
           client,
-          releaseCache,
+          mediaCache,
+          releaseSearch,
           input,
           lookupResult.value as ServarrSeriesResource[],
           libraryResult.value as ServarrSeriesResource[],
@@ -176,7 +173,8 @@ function defaultOptions(
 
 async function addMovieRequest(
   client: ReturnType<typeof createArrClient>,
-  releaseCache: ReleaseCache,
+  mediaCache: MediaCache,
+  releaseSearch: ReleaseSearchService,
   input: CreateRequestInput,
   lookup: ServarrMovieResource[],
   library: ServarrMovieResource[],
@@ -194,6 +192,10 @@ async function addMovieRequest(
 
   const existing = library.find((movie) => movie.tmdbId === tmdbId);
   if (existing) {
+    const entry = movieMetadataEntry(existing);
+    if (entry) {
+      await mediaCache.putMovie(entry);
+    }
     return {
       status: "already_exists",
       service: "radarr",
@@ -214,12 +216,15 @@ async function addMovieRequest(
     addOptions: { searchForMovie: false },
   });
 
-  const mediaTitle = added.title ?? resource.title ?? "Unknown title";
+  const entry = movieMetadataEntry(added) ?? movieMetadataEntry(resource);
+  if (entry) {
+    await mediaCache.putMovie(entry);
+  }
   if (added.id !== undefined) {
-    const movieId = added.id;
-    void releaseCache.warmMovie(movieId, () => client.getMovieReleases(movieId));
+    void releaseSearch.warmMovie(added.id);
   }
 
+  const mediaTitle = added.title ?? resource.title ?? "Unknown title";
   return {
     status: "added",
     service: "radarr",
@@ -232,7 +237,8 @@ async function addMovieRequest(
 
 async function addSeriesRequest(
   client: ReturnType<typeof createArrClient>,
-  releaseCache: ReleaseCache,
+  mediaCache: MediaCache,
+  releaseSearch: ReleaseSearchService,
   input: CreateRequestInput,
   lookup: ServarrSeriesResource[],
   library: ServarrSeriesResource[],
@@ -250,6 +256,10 @@ async function addSeriesRequest(
 
   const existing = library.find((series) => series.tvdbId === tvdbId);
   if (existing) {
+    const entry = seriesMetadataEntry(existing);
+    if (entry) {
+      await mediaCache.putSeries(entry);
+    }
     return {
       status: "already_exists",
       service: "sonarr",
@@ -278,30 +288,15 @@ async function addSeriesRequest(
     },
   });
 
-  const mediaTitle = added.title ?? resource.title ?? "Unknown title";
-  if (added.id !== undefined) {
-    const seriesId = added.id;
-    const seasonNumbers = regularSeasons(added.seasons ?? seasons);
-    if (seasonNumbers.length > 0) {
-      void releaseCache.warmSeries(seriesId, seasonNumbers, (seasonNumber) =>
-        client.getSeasonReleases(seriesId, seasonNumber),
-      );
-    } else {
-      // Lookup resources occasionally omit the season list. Fetch the added
-      // series once in the background so the cache still warms every season.
-      void (async () => {
-        try {
-          const series = await client.getSeries(seriesId);
-          await releaseCache.warmSeries(seriesId, regularSeasons(series.seasons), (seasonNumber) =>
-            client.getSeasonReleases(seriesId, seasonNumber),
-          );
-        } catch {
-          // The UI can retry by opening a season.
-        }
-      })();
+  const entry = seriesMetadataEntry(added) ?? seriesMetadataEntry(resource);
+  if (entry) {
+    await mediaCache.putSeries(entry);
+    if (added.id !== undefined) {
+      void releaseSearch.warmSeries(added.id, entry.seasons);
     }
   }
 
+  const mediaTitle = added.title ?? resource.title ?? "Unknown title";
   return {
     status: "added",
     service: "sonarr",
@@ -312,11 +307,6 @@ async function addSeriesRequest(
   };
 }
 
-function regularSeasons(seasons: ServarrSeriesResource["seasons"]): number[] {
-  return [...new Set((seasons ?? []).map((season) => season.seasonNumber))]
-    .filter((season) => Number.isInteger(season) && season > 0)
-    .sort((left, right) => left - right);
-}
 
 interface ResolvedOptions {
   qualityProfileId: number;

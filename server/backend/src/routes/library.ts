@@ -3,14 +3,30 @@ import type { FastifyInstance } from "fastify";
 import { expireSession, requireAuth } from "../auth.js";
 import type { AppConfig } from "../config.js";
 import { ApiError, isUnauthorized, UpstreamError } from "../errors.js";
-import type { LibraryItem, LibraryResponse, LibraryState } from "../types.js";
+import type { ReleaseSearchService } from "../release-search.js";
+import type {
+  CancelJellyfinItemResponse,
+  LibraryItem,
+  LibraryResponse,
+  LibraryState,
+} from "../types.js";
 import {
   createJellyfinClient,
   mapJellyfinItem,
   type JellyfinImageQuery,
+  type JellyfinItem,
 } from "../upstream/jellyfin.js";
+import {
+  cancelRequestedTitle,
+  findArrTitleMatch,
+  removeQbittorrentForTitle,
+} from "./requested.js";
 
-export function registerLibraryRoutes(app: FastifyInstance, config: AppConfig): void {
+export function registerLibraryRoutes(
+  app: FastifyInstance,
+  config: AppConfig,
+  releaseSearch: ReleaseSearchService,
+): void {
   app.get("/api/library", async (request, reply) => {
     reply.header("cache-control", "no-store");
     const auth = requireAuth(request);
@@ -60,6 +76,66 @@ export function registerLibraryRoutes(app: FastifyInstance, config: AppConfig): 
     }
   });
 
+  app.delete<{ Params: { itemId: string } }>(
+    "/api/library/jellyfin/:itemId",
+    async (request, reply) => {
+      reply.header("cache-control", "no-store");
+      const auth = requireAuth(request);
+      const itemId = parseJellyfinItemId(request.params.itemId);
+      const service = config.services.jellyfin;
+      if (!service.apiKey) {
+        throw new ApiError(503, "jellyfin_unconfigured", "Set JELLYFIN_API_KEY in server/.env");
+      }
+
+      const client = createJellyfinClient(service, config.requestTimeoutMs);
+      let item: JellyfinItem;
+      try {
+        // Jellyfin 10.11 rejects an API-key-only item lookup with HTTP 400.
+        item = await client.getItem(itemId, auth.user.id);
+      } catch (error) {
+        if (error instanceof UpstreamError && error.status === 404) {
+          throw new ApiError(404, "not_found", "Title was not found in Jellyfin");
+        }
+        throw error;
+      }
+      if (item.Type !== "Movie" && item.Type !== "Series") {
+        throw new ApiError(400, "invalid_item_type", "Only movies and series can be removed");
+      }
+      const title = item.Name?.trim();
+      if (!title) {
+        throw new ApiError(400, "invalid_item", "Jellyfin item has no title");
+      }
+      const kind = item.Type === "Movie" ? "movie" : "series";
+      const providerIds = {
+        tmdbId: parseProviderId(item.ProviderIds?.Tmdb),
+        tvdbId: parseProviderId(item.ProviderIds?.Tvdb),
+      };
+
+      // Preserve Sonarr/Radarr ownership when the local catalog key differed.
+      const arrMatch = await findArrTitleMatch(
+        config,
+        kind,
+        title,
+        item.ProductionYear,
+        providerIds,
+      );
+      if (arrMatch) {
+        return cancelRequestedTitle(config, arrMatch.service, arrMatch.arrId, releaseSearch);
+      }
+
+      await client.deleteItem(itemId);
+      await removeQbittorrentForTitle(config, kind, title, item.ProductionYear);
+
+      const response: CancelJellyfinItemResponse = {
+        status: "cancelled",
+        service: "jellyfin",
+        kind,
+        id: itemId,
+      };
+      return response;
+    },
+  );
+
   app.get<{ Params: { itemId: string }; Querystring: Record<string, unknown> }>(
     "/api/library/images/:itemId",
     async (request, reply) => {
@@ -104,6 +180,21 @@ export function registerLibraryRoutes(app: FastifyInstance, config: AppConfig): 
       }
     },
   );
+}
+
+function parseJellyfinItemId(value: string): string {
+  if (!/^[A-Za-z0-9-]{1,64}$/.test(value)) {
+    throw new ApiError(400, "invalid_item_id", "Invalid library item id");
+  }
+  return value;
+}
+
+function parseProviderId(value: string | undefined): number | undefined {
+  if (!value || !/^\d{1,12}$/.test(value)) {
+    return undefined;
+  }
+  const parsed = Number.parseInt(value, 10);
+  return Number.isSafeInteger(parsed) ? parsed : undefined;
 }
 
 function parseImageQuery(query: Record<string, unknown>): JellyfinImageQuery {

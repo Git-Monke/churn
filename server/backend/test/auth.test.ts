@@ -57,6 +57,10 @@ function makeConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     qbittorrent: {
       url: "http://qbittorrent.test:8080",
     },
+    prowlarr: {
+      url: "http://prowlarr.test:9696",
+      apiKey: "prowlarr-key",
+    },
     vpn: {
       statusUrl: "http://vpn-status.test:8098",
       timeoutMs: 500,

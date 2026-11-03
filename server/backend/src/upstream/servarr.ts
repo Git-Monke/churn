@@ -15,6 +15,14 @@ export interface ServarrQualityProfile {
   name: string;
 }
 
+export interface ServarrIndexer {
+  id?: number;
+  name?: string;
+  implementation?: string;
+  enable?: boolean;
+  protocol?: string;
+}
+
 export interface ServarrRootFolder {
   id?: number;
   path: string;
@@ -138,6 +146,42 @@ export interface ServarrLanguage {
   name?: string;
 }
 
+export interface ServarrSeriesTitleInfo {
+  title?: string;
+  titleWithoutYear?: string;
+  year?: number;
+}
+
+/** Sonarr's parsed release metadata from `/api/v3/parse`. */
+export interface ServarrParsedEpisodeInfo {
+  releaseTitle?: string;
+  seriesTitle?: string;
+  seriesTitleInfo?: ServarrSeriesTitleInfo;
+  quality?: ServarrReleaseQualityModel;
+  seasonNumber?: number;
+  episodeNumbers?: number[];
+  absoluteEpisodeNumbers?: number[];
+  fullSeason?: boolean;
+  isPartialSeason?: boolean;
+  isMultiSeason?: boolean;
+  releaseType?: string;
+}
+
+/** Radarr's parsed release metadata from `/api/v3/parse`. */
+export interface ServarrParsedMovieInfo {
+  movieTitles?: string[];
+  movieTitle?: string;
+  primaryMovieTitle?: string;
+  year?: number;
+  quality?: ServarrReleaseQualityModel;
+}
+
+export interface ServarrParseResponse {
+  title?: string;
+  parsedEpisodeInfo?: ServarrParsedEpisodeInfo;
+  parsedMovieInfo?: ServarrParsedMovieInfo;
+}
+
 export interface ServarrReleaseEpisode {
   id?: number;
   seasonNumber?: number;
@@ -245,12 +289,22 @@ export function createArrClient(service: ArrServiceId, config: ServiceConfig, ti
       return get<ServarrMovieResource[]>(`/api/v3/movie/lookup?${query.toString()}`);
     },
 
+    /** Parse a release title with the arr's own release-name parser. */
+    async parseTitle(title: string): Promise<ServarrParseResponse> {
+      const query = new URLSearchParams({ title });
+      return get<ServarrParseResponse>(`/api/v3/parse?${query.toString()}`);
+    },
+
     async listSeries(): Promise<ServarrSeriesResource[]> {
       return get<ServarrSeriesResource[]>("/api/v3/series");
     },
 
     async listMovies(): Promise<ServarrMovieResource[]> {
       return get<ServarrMovieResource[]>("/api/v3/movie");
+    },
+
+    async getIndexers(): Promise<ServarrIndexer[]> {
+      return get<ServarrIndexer[]>("/api/v3/indexer");
     },
 
     async getQualityProfiles(): Promise<ServarrQualityProfile[]> {
@@ -328,11 +382,18 @@ export function createArrClient(service: ArrServiceId, config: ServiceConfig, ti
       return get<ServarrEpisode[]>(`/api/v3/episode?${query.toString()}`);
     },
 
-    async getSeasonReleases(seriesId: number, seasonNumber: number): Promise<ServarrRelease[]> {
+    async getSeasonReleases(
+      seriesId: number,
+      seasonNumber: number,
+      options: { indexerId?: number } = {},
+    ): Promise<ServarrRelease[]> {
       const query = new URLSearchParams({
         seriesId: String(seriesId),
         seasonNumber: String(seasonNumber),
       });
+      if (options.indexerId !== undefined) {
+        query.set("indexerId", String(options.indexerId));
+      }
       return get<ServarrRelease[]>(`/api/v3/release?${query.toString()}`);
     },
 
@@ -344,8 +405,14 @@ export function createArrClient(service: ArrServiceId, config: ServiceConfig, ti
       return get<ServarrRelease[]>(`/api/v3/release?${query.toString()}`);
     },
 
-    async getMovieReleases(movieId: number): Promise<ServarrRelease[]> {
+    async getMovieReleases(
+      movieId: number,
+      options: { indexerId?: number } = {},
+    ): Promise<ServarrRelease[]> {
       const query = new URLSearchParams({ movieId: String(movieId) });
+      if (options.indexerId !== undefined) {
+        query.set("indexerId", String(options.indexerId));
+      }
       return get<ServarrRelease[]>(`/api/v3/release?${query.toString()}`);
     },
 

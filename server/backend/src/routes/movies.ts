@@ -5,21 +5,12 @@ import { movieMetadata } from "../activity.js";
 import { requireAuth, type AuthContext } from "../auth.js";
 import { ApiError, isUnauthorized, isUpstreamNotFound, UpstreamError } from "../errors.js";
 import { grabWithDuplicateRecovery } from "../download-recovery.js";
-import type { ReleaseCache } from "../release-cache.js";
-import { buildCachedReleasesResponse } from "../release-options.js";
-import {
-  buildReleaseGrabPayload,
-  findRelease,
-  releaseNeedsOverride,
-} from "../releases.js";
+import { findMatchingArrRelease, type ReleaseSearchService } from "../release-search.js";
+import { buildReleaseGrabPayload, releaseNeedsOverride } from "../releases.js";
 import { requestedMovieItem } from "../routes/requested.js";
 import type { GrabShowReleaseResponse, MovieDetailResponse } from "../types.js";
 import { createJellyfinClient, type JellyfinItem } from "../upstream/jellyfin.js";
-import {
-  createArrClient,
-  type ServarrMovieResource,
-  type ServarrRelease,
-} from "../upstream/servarr.js";
+import { createArrClient, type ServarrMovieResource } from "../upstream/servarr.js";
 import { errorMessage, stateForError } from "../upstream/states.js";
 
 const RELEASE_SEARCH_TIMEOUT_MS = 30_000;
@@ -27,7 +18,7 @@ const RELEASE_SEARCH_TIMEOUT_MS = 30_000;
 export function registerMovieRoutes(
   app: FastifyInstance,
   config: AppConfig,
-  releaseCache: ReleaseCache,
+  releaseSearch: ReleaseSearchService,
 ): void {
   app.get<{ Params: { source: string; id: string } }>(
     "/api/library/movies/:source/:id",
@@ -46,23 +37,7 @@ export function registerMovieRoutes(
     async (request, reply) => {
       reply.header("cache-control", "no-store");
       const movieId = parseMovieId(request.params.id);
-      const client = releaseClient(config);
-      const view = await releaseCache.getMovie(movieId);
-      if (view.searching && !view.refreshing && view.lastError === undefined) {
-        void releaseCache.warmMovie(movieId, () => client.getMovieReleases(movieId));
-        return buildCachedReleasesResponse({
-          kind: "movie",
-          service: "radarr",
-          targetId: movieId,
-          view: await releaseCache.getMovie(movieId),
-        });
-      }
-      return buildCachedReleasesResponse({
-        kind: "movie",
-        service: "radarr",
-        targetId: movieId,
-        view,
-      });
+      return releaseSearch.getMovie(movieId);
     },
   );
 
@@ -71,14 +46,7 @@ export function registerMovieRoutes(
     async (request, reply) => {
       reply.header("cache-control", "no-store");
       const movieId = parseMovieId(request.params.id);
-      const client = releaseClient(config);
-      void releaseCache.warmMovie(movieId, () => client.getMovieReleases(movieId));
-      return buildCachedReleasesResponse({
-        kind: "movie",
-        service: "radarr",
-        targetId: movieId,
-        view: await releaseCache.getMovie(movieId),
-      });
+      return releaseSearch.refreshMovie(movieId);
     },
   );
 
@@ -87,7 +55,7 @@ export function registerMovieRoutes(
     async (request, reply) => {
       reply.header("cache-control", "no-store");
       const movieId = parseMovieId(request.params.id);
-      return grabMovieRelease(config, releaseCache, movieId, parseGrabInput(request.body));
+      return grabMovieRelease(config, releaseSearch, movieId, parseGrabInput(request.body));
     },
   );
 }
@@ -239,29 +207,44 @@ function movieDetailFromResource(movie: ServarrMovieResource) {
 
 async function grabMovieRelease(
   config: AppConfig,
-  releaseCache: ReleaseCache,
+  releaseSearch: ReleaseSearchService,
   movieId: number,
   input: { releaseId: string },
 ): Promise<GrabShowReleaseResponse> {
-  const client = releaseClient(config);
-  let release = (await releaseCache.findRelease({ kind: "movie", movieId }, input.releaseId))
-    ?.release;
+  const found = await releaseSearch.findRelease({ kind: "movie", movieId }, input.releaseId);
+  if (!found) {
+    throw new ApiError(
+      404,
+      "release_not_found",
+      "That release is no longer in the search results; search again",
+    );
+  }
 
-  if (!release) {
-    let releases: ServarrRelease[];
-    try {
-      releases = await client.getMovieReleases(movieId);
-    } catch (error) {
-      throw releaseApiError(error, "Could not search Radarr for releases");
-    }
-    release = findRelease(releases, input.releaseId);
+  const indexerId =
+    found.arrIndexerId ??
+    (await releaseSearch.resolveArrIndexer("movie", found.release.indexer));
+  if (indexerId === undefined) {
+    throw new ApiError(
+      409,
+      "indexer_not_in_radarr",
+      `Radarr does not have the ${found.release.indexer} indexer. Add it in Prowlarr's app sync and retry.`,
+    );
+  }
+
+  const client = releaseClient(config);
+  let release: ReturnType<typeof findMatchingArrRelease>;
+  try {
+    const releases = await client.getMovieReleases(movieId, { indexerId });
+    release = findMatchingArrRelease(releases, found.release);
+  } catch (error) {
+    throw releaseApiError(error, "Could not prepare that release in Radarr");
   }
 
   if (!release) {
     throw new ApiError(
       404,
       "release_not_found",
-      "That release is no longer available; search again",
+      "Radarr could not find that release on its indexer; search again",
     );
   }
 
@@ -283,7 +266,7 @@ async function grabMovieRelease(
     throw releaseApiError(error, "Radarr could not grab that release", 409);
   }
 
-  return { status: "grabbed", title: release.title?.trim() || "Release" };
+  return { status: "grabbed", title: release.title?.trim() || found.release.title };
 }
 
 function releaseClient(config: AppConfig) {

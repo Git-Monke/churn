@@ -83,8 +83,8 @@ describe("search result mapping", () => {
       rating: 8,
       network: "Legendary Pictures",
       inLibrary: true,
-      available: true,
     });
+    expect(result?.available).toBeUndefined();
   });
 
   it("drops results without the id needed to request them", () => {

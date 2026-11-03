@@ -368,6 +368,22 @@ export function createJellyfinClient(
       await postNoContent(`${config.url}/Library/Refresh`, {});
     },
 
+    /** Delete a movie/series from the Jellyfin library and its filesystem. */
+    async deleteItem(itemId: string): Promise<void> {
+      if (!token) {
+        throw new UpstreamError("jellyfin", "unauthorized", "Jellyfin API key is not configured");
+      }
+      const response = await fetchWithTimeout(
+        "jellyfin",
+        `${config.url}/Items/${encodeURIComponent(itemId)}`,
+        { method: "DELETE", headers: authHeaders() },
+        timeoutMs,
+      );
+      if (!response.ok) {
+        throw await upstreamResponseError("jellyfin", response);
+      }
+    },
+
     async getPrimaryImage(itemId: string, query: JellyfinImageQuery): Promise<JellyfinImage | null> {
       if (!token) {
         throw new UpstreamError("jellyfin", "unauthorized", "Jellyfin API key is not configured");

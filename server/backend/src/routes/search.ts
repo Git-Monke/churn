@@ -1,16 +1,16 @@
 import type { FastifyInstance } from "fastify";
 
 import type { AppConfig, ServiceConfig } from "../config.js";
+import { requireAuth, type AuthContext } from "../auth.js";
 import { ApiError, UpstreamError } from "../errors.js";
 import {
   interleaveResults,
   isAllowedArtworkUrl,
-  isMovieAvailable,
-  isSeriesAvailable,
   mapMovieResource,
   mapSeriesResource,
 } from "../search.js";
 import type { SearchResponse, SearchResult, SearchServiceState } from "../types.js";
+import { createJellyfinClient, mapJellyfinItem } from "../upstream/jellyfin.js";
 import { createArrClient, type ArrServiceId } from "../upstream/servarr.js";
 import { errorMessage, stateForError } from "../upstream/states.js";
 
@@ -22,11 +22,13 @@ interface ServiceSearch {
 export function registerSearchRoutes(app: FastifyInstance, config: AppConfig): void {
   app.get<{ Querystring: { q?: unknown } }>("/api/search", async (request, reply) => {
     reply.header("cache-control", "no-store");
+    const auth = requireAuth(request);
     const query = parseSearchQuery(request.query.q);
     const timeoutMs = Math.max(config.requestTimeoutMs, config.searchTimeoutMs);
+    const jellyfin = await loadJellyfinAvailability(config, auth);
     const [sonarr, radarr] = await Promise.all([
-      searchSonarr(config.services.sonarr, query, timeoutMs),
-      searchRadarr(config.services.radarr, query, timeoutMs),
+      searchSonarr(config.services.sonarr, query, timeoutMs, jellyfin),
+      searchRadarr(config.services.radarr, query, timeoutMs, jellyfin),
     ]);
 
     const response: SearchResponse = {
@@ -73,6 +75,7 @@ async function searchSonarr(
   service: ServiceConfig,
   query: string,
   timeoutMs: number,
+  jellyfin: JellyfinAvailability | undefined,
 ): Promise<ServiceSearch> {
   if (!service.apiKey) {
     return failedSearch("sonarr", "unconfigured", unconfiguredDetail("sonarr"));
@@ -112,7 +115,9 @@ async function searchSonarr(
           : series.id !== undefined && series.id > 0
             ? true
             : null,
-        existing ? isSeriesAvailable(existing) : libraryByTvdbId ? false : undefined,
+        series.tvdbId !== undefined && jellyfin
+          ? jellyfin.tvdbIds.has(series.tvdbId)
+          : undefined,
       );
     })
     .filter((result): result is SearchResult => result !== null);
@@ -124,6 +129,7 @@ async function searchRadarr(
   service: ServiceConfig,
   query: string,
   timeoutMs: number,
+  jellyfin: JellyfinAvailability | undefined,
 ): Promise<ServiceSearch> {
   if (!service.apiKey) {
     return failedSearch("radarr", "unconfigured", unconfiguredDetail("radarr"));
@@ -163,12 +169,46 @@ async function searchRadarr(
           : movie.id !== undefined && movie.id > 0
             ? true
             : null,
-        existing ? isMovieAvailable(existing) : libraryByTmdbId ? false : undefined,
+        movie.tmdbId !== undefined && jellyfin
+          ? jellyfin.tmdbIds.has(movie.tmdbId)
+          : undefined,
       );
     })
     .filter((result): result is SearchResult => result !== null);
 
   return { results, status: { id: "radarr", state: "ok", count: results.length, detail } };
+}
+
+interface JellyfinAvailability {
+  tvdbIds: Set<number>;
+  tmdbIds: Set<number>;
+}
+
+/** Playability in search results comes only from the signed-in Jellyfin user. */
+async function loadJellyfinAvailability(
+  config: AppConfig,
+  auth: AuthContext,
+): Promise<JellyfinAvailability | undefined> {
+  const service = config.services.jellyfin;
+  const client = createJellyfinClient(service, config.requestTimeoutMs, auth.accessToken);
+  try {
+    const items = (await client.listLibrary(auth.user.id))
+      .map(mapJellyfinItem)
+      .filter((item): item is NonNullable<typeof item> => item !== null);
+    const tvdbIds = new Set<number>();
+    const tmdbIds = new Set<number>();
+    for (const item of items) {
+      if (item.type === "Series" && item.tvdbId !== undefined) {
+        tvdbIds.add(item.tvdbId);
+      }
+      if (item.type === "Movie" && item.tmdbId !== undefined) {
+        tmdbIds.add(item.tmdbId);
+      }
+    }
+    return { tvdbIds, tmdbIds };
+  } catch {
+    return undefined;
+  }
 }
 
 function parseSearchQuery(value: unknown): string {

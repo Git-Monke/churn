@@ -4,7 +4,12 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { loadConfig, readApiKeyFromConfigXml, readQbittorrentApiKey } from "../src/config.js";
+import {
+  loadConfig,
+  readApiKeyFromConfigXml,
+  readProwlarrApiKey,
+  readQbittorrentApiKey,
+} from "../src/config.js";
 
 function tempServerDir(): string {
   return mkdtempSync(path.join(tmpdir(), "churn-config-"));
@@ -18,6 +23,12 @@ function writeQbittorrentConfig(root: string, contents: string): void {
   const dir = path.join(root, "torrent", "config", "qbittorrent", "qBittorrent");
   mkdirSync(dir, { recursive: true });
   writeFileSync(path.join(dir, "qBittorrent.conf"), contents);
+}
+
+function writeProwlarrConfig(root: string, key: string): void {
+  const dir = path.join(root, "torrent", "config", "prowlarr");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(path.join(dir, "config.xml"), `<Config>\n  <ApiKey>${key}</ApiKey>\n</Config>\n`);
 }
 
 function writeConfigXml(serverDir: string, app: "sonarr" | "radarr", key: string): void {
@@ -55,9 +66,23 @@ describe("config loading", () => {
     expect(config.services.sonarr.url).toBe("http://127.0.0.1:8989");
     expect(config.services.sonarr.apiKey).toBe("sonarr-key");
     expect(config.services.radarr.apiKey).toBe("radarr-key");
+    expect(config.prowlarr).toEqual({ url: "http://127.0.0.1:9696" });
     expect(config.vpn).toEqual({
       statusUrl: "http://127.0.0.1:8098",
       timeoutMs: 25_000,
+    });
+  });
+
+  it("reads the Prowlarr key from the torrent stack config", () => {
+    const root = tempRoot();
+    const serverDir = path.join(root, "server");
+    mkdirSync(serverDir, { recursive: true });
+    writeProwlarrConfig(root, "prowlarr-key");
+
+    expect(readProwlarrApiKey(serverDir)).toBe("prowlarr-key");
+    expect(loadConfig({ serverDir, env: {}, readDotEnv: false }).prowlarr).toEqual({
+      url: "http://127.0.0.1:9696",
+      apiKey: "prowlarr-key",
     });
   });
 
@@ -196,6 +221,8 @@ describe("config loading", () => {
         SONARR_API_KEY: "env-key",
         CHURN_SESSION_TTL_MS: "3600000",
         CHURN_COOKIE_SECURE: "true",
+        PROWLARR_URL: "http://prowlarr:9696/",
+        PROWLARR_API_KEY: "prowlarr-env-key",
         VPN_STATUS_URL: "http://vpn-status:8098/",
         VPN_STATUS_TIMEOUT_MS: "30000",
         SEARCH_TIMEOUT_MS: "15000",
@@ -213,6 +240,10 @@ describe("config loading", () => {
     expect(config.searchTimeoutMs).toBe(15_000);
     expect(config.sessionTtlMs).toBe(3_600_000);
     expect(config.cookieSecure).toBe(true);
+    expect(config.prowlarr).toEqual({
+      url: "http://prowlarr:9696",
+      apiKey: "prowlarr-env-key",
+    });
     expect(config.vpn).toEqual({
       statusUrl: "http://vpn-status:8098",
       timeoutMs: 30_000,

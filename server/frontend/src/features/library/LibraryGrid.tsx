@@ -88,7 +88,7 @@ function LibraryCard({ entry }: { entry: LibraryEntry }) {
             >
               Scan problem
             </Badge>
-          ) : library || requested?.available ? (
+          ) : library ? (
             <Badge variant="outline" className="bg-background/85 backdrop-blur">
               Available
             </Badge>
@@ -167,20 +167,33 @@ function cancelTarget(entry: LibraryEntry): CancelTarget | undefined {
   if (activity?.kind === "series" && activity.seriesId !== undefined) {
     return { service: "sonarr", id: activity.seriesId };
   }
+  if (entry.library) {
+    return {
+      service: "jellyfin",
+      id: entry.library.id,
+      kind: entry.type === "Movie" ? "movie" : "series",
+    };
+  }
   return undefined;
 }
 
 function CancelButton({ target, title }: { target: CancelTarget; title: string }) {
   const [open, setOpen] = useState(false);
-  const serviceName = target.service === "sonarr" ? "Sonarr" : "Radarr";
+  const serviceName =
+    target.service === "jellyfin"
+      ? "Jellyfin"
+      : target.service === "sonarr"
+        ? "Sonarr"
+        : "Radarr";
+  const action = target.service === "jellyfin" ? "Remove" : "Cancel";
 
   return (
     <>
       <Button
         variant="ghost"
         size="icon-sm"
-        aria-label={`Cancel ${title}`}
-        title={`Cancel ${title} and remove it from ${serviceName}`}
+        aria-label={`${action} ${title}`}
+        title={`${action} ${title} and remove it from ${serviceName}`}
         className="absolute right-2 top-2 z-10 bg-background/85 text-muted-foreground shadow-sm backdrop-blur hover:bg-destructive/10 hover:text-destructive"
         onClick={() => setOpen(true)}
       >

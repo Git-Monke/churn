@@ -102,10 +102,7 @@ export function LibraryPage({ jellyfinUrl }: { jellyfinUrl?: string }) {
     (service) => service.state !== "ok" || service.detail,
   );
   const requestedNotices = requestedQuery.data?.services.filter(
-    (service) =>
-      service.state !== "ok" &&
-      service.state !== "unconfigured" &&
-      !activityNotices?.some((activityService) => activityService.id === service.id),
+    (service) => service.state !== "ok" && service.state !== "unconfigured",
   );
   const libraryOk = libraryQuery.data?.state === "ok";
   const activitySettled =
@@ -133,7 +130,7 @@ export function LibraryPage({ jellyfinUrl }: { jellyfinUrl?: string }) {
           ) : null}
         </div>
         <p className="text-sm text-muted-foreground">
-          Movies and shows in Jellyfin, requested titles, plus downloads in progress.
+          Playable titles from Jellyfin, your added library, and live qBittorrent downloads.
         </p>
       </div>
 
@@ -295,7 +292,7 @@ function RequestedServiceNotice({ service }: { service: RequestedLibraryServiceS
 }
 
 function ActivityServiceNotice({ service }: { service: ActivityServiceState }) {
-  const name = service.id === "sonarr" ? "Sonarr" : "Radarr";
+  const name = "qBittorrent";
   return (
     <Alert variant={service.state === "unconfigured" ? "default" : "destructive"}>
       <CircleAlertIcon />

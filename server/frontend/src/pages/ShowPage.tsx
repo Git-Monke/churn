@@ -94,12 +94,14 @@ export function ShowPage({ source, id }: { source: ShowSource; id: string }) {
       !(episode.download.untracked && episode.download.status === "warning"),
   );
   const seasonHasFile = episodes.some(
-    (episode) => episode.availability === "jellyfin" || episode.availability === "sonarr",
+    (episode) => episode.availability === "jellyfin" || episode.imported,
   );
   const showReleasePrompt =
     sonarrSeriesId !== undefined &&
     selectedSeason !== null &&
-    episodes.some((episode) => episode.availability === "missing") &&
+    episodes.some(
+      (episode) => episode.availability === "missing" && !episode.imported,
+    ) &&
     !seasonHasDownload &&
     !seasonHasFile;
 
@@ -317,14 +319,14 @@ export function ShowPage({ source, id }: { source: ShowSource; id: string }) {
                       onChooseRelease={
                         sonarrSeriesId !== undefined &&
                         episode.download === undefined &&
-                        episode.availability === "missing"
+                        episode.availability === "missing" &&
+                        !episode.imported
                           ? () => setReleaseEpisode(episode)
                           : undefined
                       }
                       onCancelDownload={
                         sonarrSeriesId !== undefined &&
-                        episode.download !== undefined &&
-                        !episode.download.untracked
+                        episode.download !== undefined
                           ? () => setCancelEpisode(episode)
                           : undefined
                       }
@@ -446,7 +448,9 @@ function EpisodeRow({
         <div className="flex min-w-0 flex-1 flex-col gap-2">
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="font-medium">{episode.title}</h3>
-            {episode.availability !== "missing" || !download ? (
+            {episode.imported && episode.availability === "missing" ? (
+              <Badge variant="outline">Waiting for Jellyfin</Badge>
+            ) : episode.availability !== "missing" || !download ? (
               <AvailabilityBadge availability={episode.availability} />
             ) : null}
             {download ? <DownloadBadge download={download} /> : null}
@@ -488,7 +492,6 @@ function EpisodeRow({
             ) : null}
             {download?.quality ? <span>{download.quality}</span> : null}
             {download ? <span>{downloadClientLabel(download)}</span> : null}
-            {download?.untracked ? <span>Not tracked by Sonarr</span> : null}
           </div>
 
           {episode.overview ? (
@@ -520,8 +523,6 @@ function AvailabilityBadge({ availability }: { availability: ShowEpisode["availa
   switch (availability) {
     case "jellyfin":
       return <Badge variant="secondary">Available</Badge>;
-    case "sonarr":
-      return <Badge variant="outline">In Sonarr</Badge>;
     case "upcoming":
       return <Badge variant="outline">Upcoming</Badge>;
     default:

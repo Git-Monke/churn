@@ -42,7 +42,11 @@ export function CancelEpisodeDownloadDialog({
         description:
           data.queueRemoved > 0
             ? `Removed ${data.queueRemoved} queue ${data.queueRemoved === 1 ? "item" : "items"} and blocklisted the release.`
-            : "The download was already gone.",
+            : (data.downloadClientRemoved ?? 0) > 0
+              ? `Removed ${data.downloadClientRemoved} qBittorrent ${
+                  data.downloadClientRemoved === 1 ? "torrent" : "torrents"
+                }.`
+              : "The download was already gone.",
       });
       void queryClient.invalidateQueries({ queryKey: ["show"] });
       void queryClient.invalidateQueries({ queryKey: ["activity"] });
@@ -69,8 +73,9 @@ export function CancelEpisodeDownloadDialog({
           <DialogTitle>Cancel this episode download?</DialogTitle>
           <DialogDescription>
             <span className="font-medium text-foreground">{episodeTitle}</span> stops
-            downloading and is removed from the download client. Sonarr blocklists the release so
-            it is not grabbed again; files that already finished importing are kept.
+            downloading and is removed from the download client. If Sonarr is tracking it,
+            Sonarr blocklists the release so it is not grabbed again; files that already
+            finished importing are kept.
             {seasonPack
               ? " This is a season pack, so cancelling it stops the download for every episode it covers."
               : ""}

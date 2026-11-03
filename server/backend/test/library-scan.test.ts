@@ -40,6 +40,10 @@ function makeConfig(
       url: "http://qbittorrent.test:8080",
       apiKey: "qbt-key",
     },
+    prowlarr: {
+      url: "http://prowlarr.test:9696",
+      apiKey: "prowlarr-key",
+    },
     vpn: {
       statusUrl: "http://vpn-status.test:8098",
       timeoutMs: 500,

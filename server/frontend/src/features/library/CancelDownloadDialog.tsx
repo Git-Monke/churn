@@ -2,7 +2,11 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loader2Icon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
 
-import { cancelLibraryItem } from "@/api/client";
+import { cancelJellyfinLibraryItem, cancelLibraryItem } from "@/api/client";
+import type {
+  CancelJellyfinItemResponse,
+  CancelLibraryItemResponse,
+} from "@/api/types";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -14,10 +18,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-export interface CancelTarget {
-  service: "sonarr" | "radarr";
-  id: number;
-}
+export type CancelTarget =
+  | { service: "sonarr" | "radarr"; id: number }
+  | { service: "jellyfin"; id: string; kind: "movie" | "series" };
 
 interface CancelDownloadDialogProps {
   open: boolean;
@@ -33,17 +36,30 @@ export function CancelDownloadDialog({
   title,
 }: CancelDownloadDialogProps) {
   const queryClient = useQueryClient();
-  const serviceName = target.service === "sonarr" ? "Sonarr" : "Radarr";
+  const jellyfinTarget = target.service === "jellyfin";
+  const serviceName = jellyfinTarget
+    ? "Jellyfin"
+    : target.service === "sonarr"
+      ? "Sonarr"
+      : "Radarr";
 
-  const cancelMutation = useMutation({
-    mutationFn: () => cancelLibraryItem(target.service, target.id),
+  const cancelMutation = useMutation<
+    CancelLibraryItemResponse | CancelJellyfinItemResponse,
+    Error,
+    void
+  >({
+    mutationFn: () =>
+      target.service === "jellyfin"
+        ? cancelJellyfinLibraryItem(target.id)
+        : cancelLibraryItem(target.service, target.id),
     onSuccess: (data) => {
       const queueDetail =
-        data.queueRemoved > 0
+        "queueRemoved" in data && data.queueRemoved > 0
           ? ` Removed ${data.queueRemoved} queue ${data.queueRemoved === 1 ? "item" : "items"}.`
           : "";
+      const deletedBy = data.service === "jellyfin" ? "Jellyfin" : serviceName;
       toast.success(`Removed ${title}`, {
-        description: `${serviceName} deleted the title and its files.${queueDetail}`,
+        description: `${deletedBy} deleted the title and its files.${queueDetail}`,
       });
       void queryClient.invalidateQueries({ queryKey: ["requested-library"] });
       void queryClient.invalidateQueries({ queryKey: ["activity"] });
@@ -69,12 +85,16 @@ export function CancelDownloadDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Cancel and remove this title?</DialogTitle>
+          <DialogTitle>
+            {jellyfinTarget ? "Remove this title from Jellyfin?" : "Cancel and remove this title?"}
+          </DialogTitle>
           <DialogDescription>
             <span className="font-medium text-foreground">{title}</span> will be removed from{" "}
-            {serviceName}. Its download stops and is removed from the download client, and any
-            downloaded files are deleted. You can request it again with a smaller quality profile
-            afterwards.
+            {serviceName}.{" "}
+            {jellyfinTarget
+              ? "Its media files are deleted from disk. If churn finds a matching Sonarr/Radarr title, it removes that instead."
+              : "Its download stops and is removed from the download client, and any downloaded files are deleted."}{" "}
+            You can request it again with a smaller quality profile afterwards.
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
@@ -93,7 +113,11 @@ export function CancelDownloadDialog({
             ) : (
               <Trash2Icon data-icon="inline-start" />
             )}
-            {cancelMutation.isPending ? "Removing…" : "Cancel & remove"}
+            {cancelMutation.isPending
+              ? "Removing…"
+              : jellyfinTarget
+                ? "Remove from Jellyfin"
+                : "Cancel & remove"}
           </Button>
         </DialogFooter>
       </DialogContent>

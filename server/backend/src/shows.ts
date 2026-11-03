@@ -7,18 +7,11 @@ import type {
   ShowSeriesSummary,
   ShowSource,
 } from "./types.js";
-import {
-  isSeasonPack,
-  queueRecordProgress,
-  queueRecordSeasons,
-  queueRecordStatus,
-} from "./activity.js";
 import { mapShowTorrentDownloads } from "./qbittorrent-show.js";
 import type { JellyfinItem } from "./upstream/jellyfin.js";
 import type { QbittorrentTorrent } from "./upstream/qbittorrent.js";
 import type {
   ServarrEpisode,
-  ServarrQueueRecord,
   ServarrSeriesResource,
 } from "./upstream/servarr.js";
 
@@ -28,8 +21,7 @@ export interface BuildShowDetailInput {
   jellyfinSeasons?: JellyfinItem[];
   jellyfinEpisodes?: JellyfinItem[];
   sonarrEpisodes?: ServarrEpisode[];
-  queueRecords?: ServarrQueueRecord[];
-  /** Used only for downloads Sonarr never queued. */
+  /** Download status comes only from qBittorrent. */
   qbittorrentTorrents?: QbittorrentTorrent[];
 }
 
@@ -39,11 +31,6 @@ interface EpisodeCandidate {
   episodeNumber: number;
   jellyfin?: JellyfinItem;
   sonarr?: ServarrEpisode;
-}
-
-interface DownloadCandidate {
-  record: ServarrQueueRecord;
-  seasonPack: boolean;
 }
 
 export function buildShowDetail(input: BuildShowDetailInput): {
@@ -99,18 +86,13 @@ export function buildShowDetail(input: BuildShowDetailInput): {
     }
   }
 
-  const downloads = downloadOverlay(
-    [...candidates.values()],
-    input.sonarrEpisodes ?? [],
-    input.queueRecords ?? [],
-  );
-  const missingEpisodes = [...candidates.values()].filter(
-    (candidate) => !candidate.jellyfin && !candidate.sonarr?.hasFile,
-  );
-  const untrackedDownloads = mapShowTorrentDownloads(
+  // Match active qBittorrent downloads against every episode candidate, not
+  // just missing ones, so an upgrade/replacement stays visible beside a playable
+  // Jellyfin episode. Sonarr/Radarr queue state is deliberately not consulted.
+  const downloads = mapShowTorrentDownloads(
     input.qbittorrentTorrents ?? [],
     input.series.title,
-    missingEpisodes,
+    [...candidates.values()],
   );
   const fallbackImage = input.series.imageUrl;
   const episodes = [...candidates.values()]
@@ -120,22 +102,12 @@ export function buildShowDetail(input: BuildShowDetailInput): {
         : left.seasonNumber - right.seasonNumber,
     )
     .map((candidate) =>
-      mapEpisode(
-        candidate,
-        downloads.get(candidate.key),
-        untrackedDownloads.get(candidate.key),
-        fallbackImage,
-      ),
+      mapEpisode(candidate, downloads.get(candidate.key), fallbackImage),
     );
 
   const seasonNumbers = new Set<number>(jellyfinSeasonNumbers);
   for (const episode of episodes) {
     seasonNumbers.add(episode.seasonNumber);
-  }
-  for (const seasonNumber of downloads.values()) {
-    if (Number.isInteger(seasonNumber.record.seasonNumber)) {
-      seasonNumbers.add(seasonNumber.record.seasonNumber as number);
-    }
   }
 
   const seasons = [...seasonNumbers]
@@ -149,60 +121,9 @@ export function buildShowDetail(input: BuildShowDetailInput): {
   };
 }
 
-function downloadOverlay(
-  candidates: EpisodeCandidate[],
-  sonarrEpisodes: ServarrEpisode[],
-  queueRecords: ServarrQueueRecord[],
-): Map<string, DownloadCandidate> {
-  const best = new Map<string, DownloadCandidate>();
-  const episodeById = new Map<number, EpisodeCandidate>();
-  for (const episode of sonarrEpisodes) {
-    if (episode.id === undefined) {
-      continue;
-    }
-    const candidate = candidates.find(
-      (item) =>
-        item.seasonNumber === episode.seasonNumber && item.episodeNumber === episode.episodeNumber,
-    );
-    if (candidate) {
-      episodeById.set(episode.id, candidate);
-    }
-  }
-
-  const consider = (key: string, candidate: DownloadCandidate) => {
-    const current = best.get(key);
-    if (!current || compareDownloads(candidate, current) > 0) {
-      best.set(key, candidate);
-    }
-  };
-
-  for (const record of queueRecords) {
-    const recordSeasons = queueRecordSeasons(record);
-    const multiSeason = recordSeasons.length > 1;
-    if (record.episodeId !== undefined && !multiSeason) {
-      const episode = episodeById.get(record.episodeId);
-      if (episode) {
-        consider(episode.key, { record, seasonPack: false });
-        continue;
-      }
-    }
-    if (recordSeasons.length > 0) {
-      const covered = new Set(recordSeasons);
-      for (const candidate of candidates) {
-        if (covered.has(candidate.seasonNumber)) {
-          consider(candidate.key, { record, seasonPack: multiSeason || isSeasonPack(record) });
-        }
-      }
-    }
-  }
-
-  return best;
-}
-
 function mapEpisode(
   candidate: EpisodeCandidate,
-  download: DownloadCandidate | undefined,
-  untrackedDownload: ShowDownload | undefined,
+  download: ShowDownload | undefined,
   fallbackImage: string | undefined,
 ): ShowEpisode {
   const { jellyfin, sonarr } = candidate;
@@ -223,48 +144,28 @@ function mapEpisode(
   assignIfDefined(episode, "imageUrl", jellyfinImageUrl(jellyfin) ?? fallbackImage);
   assignIfDefined(episode, "monitored", sonarr?.monitored);
   assignIfDefined(episode, "jellyfinId", jellyfin?.Id);
-
+  if (!jellyfin && sonarr?.hasFile) {
+    episode.imported = true;
+  }
   if (download) {
-    episode.download = mapDownload(download);
-  } else if (untrackedDownload) {
-    episode.download = untrackedDownload;
+    episode.download = download;
   }
   return episode;
 }
 
-function mapDownload(candidate: DownloadCandidate): ShowDownload {
-  const { record } = candidate;
-  const download: ShowDownload = {
-    status: queueRecordStatus(record),
-    progress: queueRecordProgress(record),
-  };
-  assignIfDefined(download, "timeLeft", record.timeleft);
-  assignIfDefined(download, "estimatedCompletionTime", record.estimatedCompletionTime);
-  assignIfDefined(download, "sizeBytes", record.size);
-  assignIfDefined(download, "downloadClient", record.downloadClient);
-  assignIfDefined(download, "protocol", protocol(record.protocol));
-  assignIfDefined(download, "quality", record.quality?.quality?.name);
-  if (candidate.seasonPack) {
-    download.seasonPack = true;
-  }
-  const messages = (record.statusMessages ?? []).flatMap((message) => [
-    ...(message.title ? [message.title] : []),
-    ...(message.messages ?? []),
-  ]);
-  if (messages.length > 0) {
-    download.statusMessages = [...new Set(messages)];
-  }
-  return download;
-}
-
+/**
+ * Jellyfin alone determines playability. A Sonarr file that Jellyfin has not
+ * indexed is exposed through `imported`, not through an availability value that
+ * would make the episode look playable.
+ */
 function availabilityFor(candidate: EpisodeCandidate): ShowAvailability {
   if (candidate.jellyfin) {
     return "jellyfin";
   }
-  if (candidate.sonarr?.hasFile) {
-    return "sonarr";
-  }
-  if (candidate.sonarr?.airDateUtc && Date.parse(candidate.sonarr.airDateUtc) > Date.now()) {
+  if (
+    candidate.sonarr?.airDateUtc &&
+    Date.parse(candidate.sonarr.airDateUtc) > Date.now()
+  ) {
     return "upcoming";
   }
   return "missing";
@@ -297,27 +198,6 @@ function pickDefaultSeason(seasons: ShowSeason[], episodes: ShowEpisode[]): numb
   return seasons[0]?.seasonNumber ?? episodes[0]?.seasonNumber;
 }
 
-function compareDownloads(left: DownloadCandidate, right: DownloadCandidate): number {
-  const statusDifference = downloadScore(left.record) - downloadScore(right.record);
-  if (statusDifference !== 0) {
-    return statusDifference;
-  }
-  return queueRecordProgress(left.record) - queueRecordProgress(right.record);
-}
-
-function downloadScore(record: ServarrQueueRecord): number {
-  switch (queueRecordStatus(record)) {
-    case "warning":
-      return 4;
-    case "downloading":
-      return 3;
-    case "importing":
-      return 2;
-    default:
-      return 1;
-  }
-}
-
 function seasonsName(seasonNumber: number, jellyfinNames: Map<number, string>): string {
   if (seasonNumber === 0) {
     return jellyfinNames.get(0) ?? "Specials";
@@ -339,10 +219,6 @@ function jellyfinImageUrl(item: JellyfinItem | undefined): string | undefined {
 
 function runtimeMinutes(ticks: number | undefined): number | undefined {
   return ticks === undefined ? undefined : Math.round(ticks / 600_000_000);
-}
-
-function protocol(value: string | undefined): "torrent" | "usenet" | undefined {
-  return value === "torrent" || value === "usenet" ? value : undefined;
 }
 
 function assignIfDefined<T extends object, K extends keyof T>(

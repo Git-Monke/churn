@@ -14,7 +14,8 @@ import {
 import type { AppConfig } from "./config.js";
 import { ApiError, UpstreamError } from "./errors.js";
 import { createLibraryScanWatcher } from "./library-scan.js";
-import { createReleaseCache } from "./release-cache.js";
+import { createMediaCache } from "./media-cache.js";
+import { createReleaseSearchService } from "./release-search.js";
 import { createReleaseEventStore } from "./release-events.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerActivityRoutes } from "./routes/activity.js";
@@ -42,8 +43,10 @@ export async function buildServer(
   const sessionStore = createMemorySessionStore({ ttlMs: config.sessionTtlMs });
   const loginThrottle = createLoginThrottle();
   const releaseEvents = createReleaseEventStore();
-  const releaseCache = createReleaseCache({
-    cacheDir: resolveReleaseCacheDir(config.serverDir),
+  const cacheDir = resolveReleaseCacheDir(config.serverDir);
+  const mediaCache = createMediaCache({ cacheDir: path.join(cacheDir, "media") });
+  const releaseSearch = createReleaseSearchService(config, mediaCache, {
+    cacheDir: path.join(cacheDir, "prowlarr"),
   });
   const libraryScan = createLibraryScanWatcher(config);
   libraryScan.start();
@@ -121,14 +124,14 @@ export async function buildServer(
   registerAuthRoutes(app, config, { store: sessionStore, throttle: loginThrottle });
   registerStatusRoutes(app, config);
   registerVpnRoutes(app, config);
-  registerLibraryRoutes(app, config);
+  registerLibraryRoutes(app, config, releaseSearch);
   registerPlaybackRoutes(app, config);
-  registerRequestedLibraryRoutes(app, config, releaseCache);
-  registerMovieRoutes(app, config, releaseCache);
+  registerRequestedLibraryRoutes(app, config, mediaCache, releaseSearch);
+  registerMovieRoutes(app, config, releaseSearch);
   registerSearchRoutes(app, config);
-  registerRequestRoutes(app, config, releaseCache);
+  registerRequestRoutes(app, config, mediaCache, releaseSearch);
   registerActivityRoutes(app, config, releaseEvents);
-  registerShowRoutes(app, config, releaseCache);
+  registerShowRoutes(app, config, releaseSearch);
   registerServiceRoutes(app, config);
 
   const hasFrontend = existsSync(path.join(config.frontendDist, "index.html"));

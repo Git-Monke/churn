@@ -1,6 +1,7 @@
 import type {
   ActivityResponse,
   AuthSessionResponse,
+  CancelJellyfinItemResponse,
   CancelLibraryItemResponse,
   CancelEpisodeDownloadResponse,
   LoginInput,
@@ -111,6 +112,14 @@ export function cancelLibraryItem(
 ): Promise<CancelLibraryItemResponse> {
   return deleteJson<CancelLibraryItemResponse>(
     `/api/library/requested/${service}/${encodeURIComponent(String(id))}`,
+  );
+}
+
+export function cancelJellyfinLibraryItem(
+  id: string,
+): Promise<CancelJellyfinItemResponse> {
+  return deleteJson<CancelJellyfinItemResponse>(
+    `/api/library/jellyfin/${encodeURIComponent(id)}`,
   );
 }
 

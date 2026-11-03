@@ -62,7 +62,7 @@ export function mapShowTorrentDownloads(
 }
 
 /** Compare the title words before the `S01`/`S01E02` marker. */
-function torrentBelongsToShow(name: string, titleTokens: string[]): boolean {
+export function torrentBelongsToShow(name: string, titleTokens: string[]): boolean {
   const tokens = tokenize(name);
   const markerIndex = tokens.findIndex((token) => /^s\d{1,3}(?:e\d{1,3})?$/.test(token));
   if (markerIndex < titleTokens.length) {
@@ -87,7 +87,7 @@ function torrentDownload(torrent: QbittorrentTorrent, name: string): ShowDownloa
   const queued = isQueued(torrent);
 
   const download: ShowDownload = {
-    status: failed || complete ? "warning" : queued ? "queued" : "downloading",
+    status: failed ? "warning" : complete ? "importing" : queued ? "queued" : "downloading",
     progress: percent,
     downloadClient: "qBittorrent",
     protocol: "torrent",
@@ -104,9 +104,12 @@ function torrentDownload(torrent: QbittorrentTorrent, name: string): ShowDownloa
   if (quality) {
     download.quality = quality;
   }
+  if (episodeNumberFromTitle(name) === undefined) {
+    download.seasonPack = true;
+  }
   if (complete) {
     download.statusMessages = [
-      "Download finished in qBittorrent, but Sonarr is not tracking it, so it will not import automatically.",
+      "Download finished in qBittorrent. Sonarr has not imported it yet.",
     ];
   } else if (failed) {
     download.statusMessages = [`qBittorrent reports ${torrent.state}.`];
@@ -126,7 +129,7 @@ function isQueued(torrent: QbittorrentTorrent): boolean {
   );
 }
 
-function seasonNumberFromTitle(name: string): number | undefined {
+export function seasonNumberFromTitle(name: string): number | undefined {
   const match = name.match(/(?:^|[^A-Za-z0-9])S(\d{1,3})(?:[\s._-]*E\d{1,3})?(?=$|[^A-Za-z0-9])/i);
   if (!match) {
     return undefined;
@@ -144,12 +147,12 @@ function episodeNumberFromTitle(name: string): number | undefined {
   return Number.isInteger(episode) ? episode : undefined;
 }
 
-function qualityFromTitle(name: string): string | undefined {
+export function qualityFromTitle(name: string): string | undefined {
   const match = name.match(/(?:^|[^0-9])(2160p|1080p|720p|480p)(?=$|[^0-9])/i);
   return match?.[1]?.toLowerCase();
 }
 
-function tokenize(value: string): string[] {
+export function tokenize(value: string): string[] {
   return value
     .toLowerCase()
     .replace(/['’]/g, "")

@@ -85,7 +85,7 @@ export function mapSeriesResource(
     imdbId: resource.imdbId,
     imageUrl: mediaCoverUrl("sonarr", resource.images),
     inLibrary,
-    available: available ?? (inLibrary === true ? isSeriesAvailable(resource) : undefined),
+    available,
     seasons,
   };
 }
@@ -114,7 +114,7 @@ export function mapMovieResource(
     imdbId: resource.imdbId,
     imageUrl: mediaCoverUrl("radarr", resource.images),
     inLibrary,
-    available: available ?? (inLibrary === true ? Boolean(resource.hasFile) : undefined),
+    available,
   };
 }
 

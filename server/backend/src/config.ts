@@ -21,6 +21,11 @@ export interface QbittorrentConfig {
   apiKey?: string;
 }
 
+export interface ProwlarrConfig {
+  url: string;
+  apiKey?: string;
+}
+
 export interface VpnConfig {
   /** Loopback-only address of the torrent stack's vpn-status agent. */
   statusUrl: string;
@@ -52,6 +57,7 @@ export interface AppConfig {
   lanAddress?: string;
   services: Record<ServiceId, ServiceConfig>;
   qbittorrent: QbittorrentConfig;
+  prowlarr: ProwlarrConfig;
   vpn: VpnConfig;
 }
 
@@ -70,6 +76,7 @@ const SERVICE_DEFAULTS: Record<ServiceId, { name: string; url: string }> = {
 };
 
 const QBITTORRENT_DEFAULT_URL = "http://127.0.0.1:8080";
+const PROWLARR_DEFAULT_URL = "http://127.0.0.1:9696";
 const VPN_STATUS_DEFAULT_URL = "http://127.0.0.1:8098";
 
 /** Resolve the `server/` directory from this module, under both src/ and dist/. */
@@ -143,6 +150,28 @@ export function readQbittorrentApiKey(serverDir: string): string | undefined {
   }
 }
 
+/** Read the Prowlarr key seeded by `prowlarr-init` in the torrent stack. */
+export function readProwlarrApiKey(serverDir: string): string | undefined {
+  const configPath = path.resolve(
+    serverDir,
+    "..",
+    "torrent",
+    "config",
+    "prowlarr",
+    "config.xml",
+  );
+  if (!existsSync(configPath)) {
+    return undefined;
+  }
+  try {
+    const contents = readFileSync(configPath, "utf8");
+    const match = contents.match(/<ApiKey>\s*([^<\s]+)\s*<\/ApiKey>/);
+    return match?.[1];
+  } catch {
+    return undefined;
+  }
+}
+
 export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
   const serverDir = path.resolve(options.serverDir ?? resolveServerDir());
   const env = options.env ?? process.env;
@@ -178,6 +207,11 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
     apiKey: cleanApiKey(values.QBITTORRENT_API_KEY) ?? readQbittorrentApiKey(serverDir),
   };
 
+  const prowlarr: ProwlarrConfig = {
+    url: normalizeUrl(values.PROWLARR_URL, PROWLARR_DEFAULT_URL),
+    apiKey: cleanApiKey(values.PROWLARR_API_KEY) ?? readProwlarrApiKey(serverDir),
+  };
+
   const vpn: VpnConfig = {
     statusUrl: normalizeUrl(values.VPN_STATUS_URL, VPN_STATUS_DEFAULT_URL),
     timeoutMs: parseVpnTimeout(values.VPN_STATUS_TIMEOUT_MS),
@@ -200,6 +234,7 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
     lanAddress,
     services,
     qbittorrent,
+    prowlarr,
     vpn,
   };
 }

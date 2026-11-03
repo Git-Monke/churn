@@ -75,14 +75,15 @@ export function isSeasonPack(record: ServarrQueueRecord): boolean {
  * which seasons the download covers (for example `S01-03`).
  */
 export function queueRecordSeasons(record: ServarrQueueRecord): number[] {
-  const fromTitle = seasonsFromTitle(record.title);
+  const fromTitle = seasonRangeFromTitle(record.title);
   if (fromTitle.length > 0) {
     return fromTitle;
   }
   return Number.isInteger(record.seasonNumber) ? [record.seasonNumber as number] : [];
 }
 
-function seasonsFromTitle(title: string | undefined): number[] {
+/** Expand `S01-03` / `Season 1-3` into [1, 2, 3]. */
+export function seasonRangeFromTitle(title: string | undefined): number[] {
   if (!title) {
     return [];
   }
