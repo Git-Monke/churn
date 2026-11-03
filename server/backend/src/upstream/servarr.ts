@@ -44,6 +44,12 @@ export interface ServarrRating {
 export interface ServarrSeason {
   seasonNumber: number;
   monitored: boolean;
+  statistics?: {
+    episodeFileCount?: number;
+    episodeCount?: number;
+    totalEpisodeCount?: number;
+    percentOfEpisodes?: number;
+  };
 }
 
 export interface ServarrSeriesStatistics {
@@ -64,6 +70,9 @@ export interface ServarrLookupBase {
   images?: ServarrImage[];
   titleSlug?: string;
   imdbId?: string;
+  /** Absolute library folder as seen inside the arr container. */
+  path?: string;
+  rootFolderPath?: string;
 }
 
 export interface ServarrSeriesResource extends ServarrLookupBase {
@@ -382,18 +391,15 @@ export function createArrClient(service: ArrServiceId, config: ServiceConfig, ti
       return get<ServarrEpisode[]>(`/api/v3/episode?${query.toString()}`);
     },
 
+    /** The arr release API has no indexer filter; it searches every enabled indexer. */
     async getSeasonReleases(
       seriesId: number,
       seasonNumber: number,
-      options: { indexerId?: number } = {},
     ): Promise<ServarrRelease[]> {
       const query = new URLSearchParams({
         seriesId: String(seriesId),
         seasonNumber: String(seasonNumber),
       });
-      if (options.indexerId !== undefined) {
-        query.set("indexerId", String(options.indexerId));
-      }
       return get<ServarrRelease[]>(`/api/v3/release?${query.toString()}`);
     },
 
@@ -405,14 +411,9 @@ export function createArrClient(service: ArrServiceId, config: ServiceConfig, ti
       return get<ServarrRelease[]>(`/api/v3/release?${query.toString()}`);
     },
 
-    async getMovieReleases(
-      movieId: number,
-      options: { indexerId?: number } = {},
-    ): Promise<ServarrRelease[]> {
+    /** The arr release API has no indexer filter; it searches every enabled indexer. */
+    async getMovieReleases(movieId: number): Promise<ServarrRelease[]> {
       const query = new URLSearchParams({ movieId: String(movieId) });
-      if (options.indexerId !== undefined) {
-        query.set("indexerId", String(options.indexerId));
-      }
       return get<ServarrRelease[]>(`/api/v3/release?${query.toString()}`);
     },
 

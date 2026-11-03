@@ -148,7 +148,15 @@ function mapEpisode(
     episode.imported = true;
   }
   if (download) {
-    episode.download = download;
+    // A finished torrent can stay in qBittorrent while it seeds, but once
+    // Jellyfin exposes the episode the "waiting for indexing" overlay is stale
+    // and contradicts the play button. Keep active downloads/upgrades visible.
+    const staleImport =
+      (episode.availability === "jellyfin" || episode.imported === true) &&
+      download.status === "importing";
+    if (!staleImport) {
+      episode.download = download;
+    }
   }
   return episode;
 }

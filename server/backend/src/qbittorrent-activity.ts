@@ -194,6 +194,37 @@ function matchCatalog(
   return best;
 }
 
+/** Torrents that name this movie, including completed ones. */
+export function matchMovieTorrents(
+  torrents: QbittorrentTorrent[],
+  movieTitle: string,
+  year?: number,
+): QbittorrentTorrent[] {
+  return torrents.filter((torrent) => {
+    const name = torrent.name?.trim();
+    return name !== undefined && movieTitleMatches(name, movieTitle, year);
+  });
+}
+
+/**
+ * Live qBittorrent state for one movie, using the same aggregation as the
+ * library cards. Completed torrents are excluded.
+ */
+export function movieTorrentActivity(
+  torrents: QbittorrentTorrent[],
+  movie: ServarrMovieResource,
+): ActivityItem | undefined {
+  const title = movie.title?.trim();
+  if (!title) {
+    return undefined;
+  }
+  const active = matchMovieTorrents(torrents, title, movie.year).filter(isActiveTorrent);
+  if (active.length === 0) {
+    return undefined;
+  }
+  return buildQbittorrentActivity(active, { series: [], movies: [movie] })[0];
+}
+
 /** Match a movie only when its full title is followed by a year or release tag. */
 export function movieTitleMatches(
   torrentName: string,

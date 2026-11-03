@@ -259,6 +259,9 @@ async function addSeriesRequest(
     const entry = seriesMetadataEntry(existing);
     if (entry) {
       await mediaCache.putSeries(entry);
+      if (existing.id !== undefined) {
+        void releaseSearch.warmSeries(existing.id, entry.seasons);
+      }
     }
     return {
       status: "already_exists",
@@ -288,10 +291,17 @@ async function addSeriesRequest(
     },
   });
 
-  const entry = seriesMetadataEntry(added) ?? seriesMetadataEntry(resource);
+  const entry = seriesMetadataEntry({
+    ...resource,
+    ...added,
+    id: added.id,
+    seasons: mergeSeriesSeasons(added.seasons, resource.seasons),
+  });
   if (entry) {
     await mediaCache.putSeries(entry);
     if (added.id !== undefined) {
+      // Prefetch every regular season now so opening a season later does not
+      // have to wait for a fresh Prowlarr search.
       void releaseSearch.warmSeries(added.id, entry.seasons);
     }
   }
@@ -307,6 +317,21 @@ async function addSeriesRequest(
   };
 }
 
+
+function mergeSeriesSeasons(
+  added: ServarrSeriesResource["seasons"],
+  lookup: ServarrSeriesResource["seasons"],
+): ServarrSeriesResource["seasons"] {
+  const byNumber = new Map<number, NonNullable<ServarrSeriesResource["seasons"]>[number]>();
+  for (const season of [...(lookup ?? []), ...(added ?? [])]) {
+    if (Number.isInteger(season.seasonNumber)) {
+      byNumber.set(season.seasonNumber, season);
+    }
+  }
+  return [...byNumber.values()].sort(
+    (left, right) => left.seasonNumber - right.seasonNumber,
+  );
+}
 
 interface ResolvedOptions {
   qualityProfileId: number;

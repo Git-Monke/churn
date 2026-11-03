@@ -28,6 +28,7 @@ function release(overrides: Partial<ServarrRelease> = {}): ServarrRelease {
     mappedEpisodeInfo: [{ id: 10, seasonNumber: 1, episodeNumber: 1 }],
     languages: [{ id: 1, name: "English" }],
     protocol: "torrent",
+    downloadUrl: "https://sonarr.test/1/download",
     ...overrides,
   };
 }
@@ -80,7 +81,19 @@ describe("show releases", () => {
       canGrab: true,
       recommended: false,
     });
-    expect(result[3]).toMatchObject({ canGrab: false, recommended: false });
+    expect(result[3]).toMatchObject({ canGrab: true, recommended: false });
+  });
+
+  it("only enables Download for a release with a direct source", () => {
+    const result = toShowReleases([
+      release({
+        guid: "https://example.test/landing-page",
+        downloadUrl: undefined,
+        magnetUrl: undefined,
+      }),
+    ]);
+
+    expect(result[0]).toMatchObject({ canGrab: false });
   });
 
   it("recommends the smallest mapped pack when no release is automatic", () => {

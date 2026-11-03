@@ -446,6 +446,15 @@ export interface MovieDetailResponse {
   };
   jellyfinId?: string;
   radarrId?: number;
+  /** Active qBittorrent download for this movie, if any. */
+  download?: ActivityItem;
+}
+
+export interface CancelMovieDownloadResponse {
+  status: "cancelled";
+  service: "radarr";
+  queueRemoved: number;
+  downloadClientRemoved?: number;
 }
 
 export interface GrabMovieReleaseInput {

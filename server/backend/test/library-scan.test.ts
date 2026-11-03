@@ -2,9 +2,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AppConfig } from "../src/config.js";
 import { createLibraryScanWatcher, type ImportEvent } from "../src/library-scan.js";
+import type { QbittorrentTorrent } from "../src/upstream/qbittorrent.js";
 
 function makeConfig(
-  overrides: { sonarrKey?: boolean; radarrKey?: boolean; jellyfinKey?: boolean } = {},
+  overrides: {
+    sonarrKey?: boolean;
+    radarrKey?: boolean;
+    jellyfinKey?: boolean;
+    qbittorrentKey?: boolean;
+  } = {},
 ): AppConfig {
   return {
     host: "127.0.0.1",
@@ -12,6 +18,7 @@ function makeConfig(
     serverDir: "/tmp/churn-test",
     frontendDist: "/tmp/churn-test/frontend/dist",
     requestTimeoutMs: 500,
+    releaseTimeoutMs: 500,
     searchTimeoutMs: 2_000,
     sessionTtlMs: 12 * 60 * 60 * 1000,
     cookieSecure: "auto",
@@ -38,7 +45,7 @@ function makeConfig(
     },
     qbittorrent: {
       url: "http://qbittorrent.test:8080",
-      apiKey: "qbt-key",
+      apiKey: overrides.qbittorrentKey === false ? undefined : "qbt-key",
     },
     prowlarr: {
       url: "http://prowlarr.test:9696",
@@ -67,6 +74,7 @@ function watcherFor(
   overrides: {
     refresh?: () => Promise<void>;
     resolve?: (pending: ImportEvent[]) => Promise<ImportEvent[]>;
+    getTorrents?: () => Promise<QbittorrentTorrent[]>;
     now?: () => number;
     sleep?: (ms: number) => Promise<void>;
     resolveTimeoutMs?: number;
@@ -77,6 +85,7 @@ function watcherFor(
   const resolve = vi.fn(overrides.resolve ?? (async () => []));
   const watcher = createLibraryScanWatcher(overrides.config ?? makeConfig(), {
     getImports: async () => imports,
+    getTorrents: overrides.getTorrents ?? (async () => []),
     refresh,
     resolve,
     now: overrides.now,
@@ -108,6 +117,7 @@ describe("library scan watcher", () => {
     const refresh = vi.fn(async () => undefined);
     const watcher = createLibraryScanWatcher(makeConfig(), {
       getImports: async () => imports,
+      getTorrents: async () => [],
       refresh,
       resolve: async () => [],
     });
@@ -191,10 +201,11 @@ describe("library scan watcher", () => {
 
     for (const config of [
       makeConfig({ jellyfinKey: false }),
-      makeConfig({ sonarrKey: false, radarrKey: false }),
+      makeConfig({ sonarrKey: false, radarrKey: false, qbittorrentKey: false }),
     ]) {
       const watcher = createLibraryScanWatcher(config, {
         getImports,
+        getTorrents: async () => [],
         refresh: async () => undefined,
         resolve: async () => [],
       });
@@ -206,12 +217,65 @@ describe("library scan watcher", () => {
     expect(getImports).not.toHaveBeenCalled();
   });
 
+  it("refreshes Jellyfin once when a churn-direct torrent finishes", async () => {
+    const nowMs = 1_000_000_000_000;
+    const torrent = {
+      hash: "direct-hash",
+      name: "Parks.and.Recreation.S01.1080p",
+      progress: 1,
+      completion_on: nowMs / 1_000 - 5,
+      tags: "churn-direct",
+    };
+    const { watcher, refresh } = watcherFor([], {
+      now: () => nowMs,
+      getTorrents: async () => [torrent],
+    });
+
+    await watcher.pollOnce();
+    expect(refresh).toHaveBeenCalledTimes(1);
+
+    // The same completed torrent must not trigger a scan on every poll.
+    await watcher.pollOnce();
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores incomplete, non-direct, and old direct torrents", async () => {
+    const nowMs = 1_000_000_000_000;
+    const { watcher, refresh } = watcherFor([], {
+      now: () => nowMs,
+      getTorrents: async () => [
+        {
+          hash: "still-downloading",
+          progress: 0.5,
+          completion_on: 0,
+          tags: "churn-direct",
+        },
+        {
+          hash: "arr-managed",
+          progress: 1,
+          completion_on: nowMs / 1_000 - 5,
+          tags: "sonarr",
+        },
+        {
+          hash: "old-direct",
+          progress: 1,
+          completion_on: nowMs / 1_000 - 3_600,
+          tags: "churn-direct",
+        },
+      ],
+    });
+
+    await watcher.pollOnce();
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
   it("stops polling after stop()", async () => {
     vi.useFakeTimers();
     const getImports = vi.fn(async () => [] as ImportEvent[]);
     const watcher = createLibraryScanWatcher(makeConfig(), {
       intervalMs: 1_000,
       getImports,
+      getTorrents: async () => [],
       refresh: async () => undefined,
       resolve: async () => [],
     });

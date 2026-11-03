@@ -32,6 +32,28 @@ export interface QbittorrentTorrent {
   completion_on?: number;
   /** Absolute path to the torrent's files on qBittorrent's filesystem. */
   content_path?: string;
+  /** Comma-separated qBittorrent tags. */
+  tags?: string;
+}
+
+export type QbittorrentContentLayout = "Original" | "Subfolder" | "NoSubfolder";
+
+export interface QbittorrentAddTorrentInput {
+  /** Magnet link or HTTP(S) URL qBittorrent can fetch. */
+  url: string;
+  savePath: string;
+  category?: string;
+  tags?: string[];
+  contentLayout?: QbittorrentContentLayout;
+  autoTMM?: boolean;
+  paused?: boolean;
+}
+
+export interface QbittorrentAddTorrentResult {
+  added: number;
+  pending: number;
+  failed: number;
+  torrentIds: string[];
 }
 
 /** qBittorrent accepts an optional `urn:btih:` prefix; compare bare hashes. */
@@ -62,6 +84,96 @@ export function createQbittorrentClient(config: QbittorrentConfig, timeoutMs: nu
       });
     },
 
+    /** Add one magnet or torrent URL. qBittorrent must be able to fetch the URL. */
+    async addTorrent(input: QbittorrentAddTorrentInput): Promise<QbittorrentAddTorrentResult> {
+      const body = new URLSearchParams({
+        urls: input.url,
+        savepath: input.savePath,
+        autoTMM: String(input.autoTMM ?? false),
+        paused: String(input.paused ?? false),
+      });
+      if (input.category) {
+        body.set("category", input.category);
+      }
+      if (input.tags && input.tags.length > 0) {
+        body.set("tags", input.tags.join(","));
+      }
+      if (input.contentLayout) {
+        body.set("contentLayout", input.contentLayout);
+      }
+
+      const response = await fetchWithTimeout(
+        "qbittorrent",
+        `${config.url}/api/v2/torrents/add`,
+        {
+          method: "POST",
+          headers: {
+            ...authHeaders(),
+            "content-type": "application/x-www-form-urlencoded",
+          },
+          body: body.toString(),
+        },
+        timeoutMs,
+      );
+      if (!response.ok) {
+        throw await upstreamResponseError("qbittorrent", response);
+      }
+
+      const text = (await response.text()).trim();
+      if (!text || /^ok\.?$/i.test(text)) {
+        return { added: 1, pending: 0, failed: 0, torrentIds: [] };
+      }
+      if (/^fails\.?$/i.test(text)) {
+        throw new UpstreamError(
+          "qbittorrent",
+          "http",
+          "qBittorrent rejected that torrent",
+        );
+      }
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(text) as unknown;
+      } catch {
+        throw new UpstreamError(
+          "qbittorrent",
+          "invalid_response",
+          "qBittorrent returned an invalid add-torrent response",
+        );
+      }
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+        throw new UpstreamError(
+          "qbittorrent",
+          "invalid_response",
+          "qBittorrent returned an invalid add-torrent response",
+        );
+      }
+      const value = parsed as Record<string, unknown>;
+      const added = integerCount(value.success_count);
+      const pending = value.pending_count === undefined ? 0 : nonNegativeInteger(value.pending_count);
+      const failed = nonNegative(Number(value.failure_count)) ?? 0;
+      const torrentIds = Array.isArray(value.added_torrent_ids)
+        ? value.added_torrent_ids.filter((id): id is string => typeof id === "string")
+        : [];
+      if (added === undefined || pending === undefined || failed < 0) {
+        throw new UpstreamError(
+          "qbittorrent",
+          "invalid_response",
+          "qBittorrent returned an invalid add-torrent response",
+        );
+      }
+      if (added + pending === 0) {
+        throw new UpstreamError(
+          "qbittorrent",
+          "http",
+          failed > 0
+            ? "qBittorrent rejected that torrent"
+            : "qBittorrent did not add that torrent",
+        );
+      }
+      return { added, pending, failed, torrentIds };
+    },
+
     /** Remove a torrent from qBittorrent while leaving its downloaded files on disk. */
     async removeTorrent(hash: string, deleteFiles = false): Promise<void> {
       const body = new URLSearchParams({
@@ -90,3 +202,17 @@ export function createQbittorrentClient(config: QbittorrentConfig, timeoutMs: nu
 }
 
 export type QbittorrentClient = ReturnType<typeof createQbittorrentClient>;
+
+function integerCount(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0
+    ? value
+    : undefined;
+}
+
+function nonNegativeInteger(value: unknown): number | undefined {
+  return integerCount(value);
+}
+
+function nonNegative(value: number): number | undefined {
+  return Number.isFinite(value) && value >= 0 ? value : undefined;
+}

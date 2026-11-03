@@ -18,6 +18,7 @@ function config(): AppConfig {
     serverDir: "/tmp/churn-release-name-test",
     frontendDist: "/tmp/churn-test/frontend/dist",
     requestTimeoutMs: 500,
+    releaseTimeoutMs: 500,
     searchTimeoutMs: 2_000,
     sessionTtlMs: 60_000,
     cookieSecure: "auto",

@@ -45,6 +45,11 @@ export interface AppConfig {
    * forgiving than `requestTimeoutMs`.
    */
   searchTimeoutMs: number;
+  /**
+   * Timeout for Sonarr/Radarr release lookups such as the episode picker.
+   * Direct season and movie grabs are sent to qBittorrent instead.
+   */
+  releaseTimeoutMs: number;
   sessionTtlMs: number;
   cookieSecure: CookieSecureSetting;
   /**
@@ -224,6 +229,7 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
     frontendDist: path.join(serverDir, "frontend", "dist"),
     requestTimeoutMs: parseTimeout(values.REQUEST_TIMEOUT_MS),
     searchTimeoutMs: parseSearchTimeout(values.SEARCH_TIMEOUT_MS),
+    releaseTimeoutMs: parseReleaseTimeout(values.RELEASE_TIMEOUT_MS),
     sessionTtlMs: parseSessionTtl(values.CHURN_SESSION_TTL_MS),
     cookieSecure: parseCookieSecure(values.CHURN_COOKIE_SECURE),
     jellyfinPublicUrl: resolveJellyfinPublicUrl(
@@ -345,6 +351,17 @@ function parseTimeout(value: string | undefined): number {
 const DEFAULT_SEARCH_TIMEOUT_MS = 20_000;
 const MIN_SEARCH_TIMEOUT_MS = 1_000;
 const MAX_SEARCH_TIMEOUT_MS = 120_000;
+
+function parseReleaseTimeout(value: string | undefined): number {
+  if (!value?.trim()) {
+    return 120_000;
+  }
+  const timeout = Number.parseInt(value, 10);
+  if (!Number.isInteger(timeout) || timeout < 30_000 || timeout > 300_000) {
+    throw new Error(`invalid RELEASE_TIMEOUT_MS: ${value}`);
+  }
+  return timeout;
+}
 
 function parseSearchTimeout(value: string | undefined): number {
   if (!value?.trim()) {

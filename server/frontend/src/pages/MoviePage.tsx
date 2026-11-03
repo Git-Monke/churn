@@ -1,12 +1,24 @@
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronLeftIcon, CircleAlertIcon, FilmIcon, PlayIcon } from "lucide-react";
+import {
+  ChevronLeftIcon,
+  CircleAlertIcon,
+  DownloadIcon,
+  FilmIcon,
+  Loader2Icon,
+  PlayIcon,
+  Trash2Icon,
+} from "lucide-react";
 
 import { fetchMovie } from "@/api/client";
-import type { MovieDetailResponse } from "@/api/types";
+import type { ActivityItem, MovieDetailResponse } from "@/api/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
+import { CancelMovieDownloadDialog } from "@/features/movie/CancelMovieDownloadDialog";
 import { ReleaseChooser } from "@/features/releases/ReleaseChooser";
 
 export function MoviePage({
@@ -16,11 +28,42 @@ export function MoviePage({
   source: "jellyfin" | "radarr";
   id: string;
 }) {
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [awaitingDownload, setAwaitingDownload] = useState(false);
+  // Briefly disable Cancel after a grab. The release chooser is replaced by
+  // the download card under the cursor, so a second click (double-click) could
+  // otherwise land on Cancel and open its confirmation dialog by accident.
+  const [cancelReady, setCancelReady] = useState(true);
   const movieQuery = useQuery({
     queryKey: ["movie", source, id],
     queryFn: () => fetchMovie(source, id),
-    refetchInterval: 10_000,
+    // A grab can take a moment to appear in qBittorrent; poll quickly while
+    // waiting so the release chooser is replaced by live progress.
+    refetchInterval: awaitingDownload ? 1_000 : 10_000,
   });
+  const download = movieQuery.data?.download;
+
+  useEffect(() => {
+    if (download) {
+      setAwaitingDownload(false);
+    }
+  }, [download]);
+
+  useEffect(() => {
+    if (!awaitingDownload) {
+      return;
+    }
+    const timer = setTimeout(() => setAwaitingDownload(false), 30_000);
+    return () => clearTimeout(timer);
+  }, [awaitingDownload]);
+
+  useEffect(() => {
+    if (cancelReady) {
+      return;
+    }
+    const timer = setTimeout(() => setCancelReady(true), 1_000);
+    return () => clearTimeout(timer);
+  }, [cancelReady]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -62,11 +105,30 @@ export function MoviePage({
               <AlertDescription>{movieQuery.data.detail}</AlertDescription>
             </Alert>
           ) : null}
-          {movieQuery.data.radarrId !== undefined ? (
+          {download ? (
+            <MovieDownloadCard
+              download={download}
+              cancelDisabled={!cancelReady}
+              onCancel={() => setCancelOpen(true)}
+            />
+          ) : awaitingDownload ? (
+            <Alert>
+              <Loader2Icon className="animate-spin" />
+              <AlertTitle>Starting download</AlertTitle>
+              <AlertDescription>
+                Waiting for qBittorrent to report the new torrent.
+              </AlertDescription>
+            </Alert>
+          ) : movieQuery.data.radarrId !== undefined ? (
             <ReleaseChooser
               kind="movie"
               movieId={movieQuery.data.radarrId}
               title={movieQuery.data.movie.title}
+              onGrabbed={() => {
+                setCancelReady(false);
+                setAwaitingDownload(true);
+                void movieQuery.refetch();
+              }}
             />
           ) : (
             <Alert>
@@ -78,6 +140,15 @@ export function MoviePage({
               </AlertDescription>
             </Alert>
           )}
+          {download ? (
+            <CancelMovieDownloadDialog
+              open={cancelOpen}
+              onOpenChange={setCancelOpen}
+              source={source}
+              id={id}
+              title={movieQuery.data.movie.title}
+            />
+          ) : null}
         </>
       ) : null}
     </div>
@@ -132,6 +203,101 @@ function MovieHeader({ movie }: { movie: MovieDetailResponse }) {
       </div>
     </section>
   );
+}
+
+function MovieDownloadCard({
+  download,
+  cancelDisabled,
+  onCancel,
+}: {
+  download: ActivityItem;
+  cancelDisabled: boolean;
+  onCancel: () => void;
+}) {
+  return (
+    <Card className="gap-0 py-0">
+      <CardContent className="flex flex-col gap-3 p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <DownloadIcon className="size-4 text-muted-foreground" />
+          <h2 className="font-heading text-base font-semibold">Downloading now</h2>
+          <Badge variant={download.status === "warning" ? "destructive" : "default"}>
+            {downloadLabel(download)}
+          </Badge>
+          <span className="text-xs text-muted-foreground">
+            {download.downloadClients[0] ?? "qBittorrent"}
+            {download.protocols[0] === "torrent" ? " · Torrent" : ""}
+            {download.quality ? ` · ${download.quality}` : ""}
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="ml-auto text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+            disabled={cancelDisabled}
+            onClick={onCancel}
+          >
+            <Trash2Icon data-icon="inline-start" />
+            Cancel download
+          </Button>
+        </div>
+        <Progress value={download.progress} label="Movie download progress" />
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+          <span>{download.progress}% complete</span>
+          <span>{downloadEta(download)}</span>
+        </div>
+        {download.statusMessages?.length ? (
+          <p className="text-xs text-destructive">{download.statusMessages.join(" · ")}</p>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+function downloadLabel(download: ActivityItem): string {
+  switch (download.status) {
+    case "downloading":
+      return `Downloading ${download.progress}%`;
+    case "importing":
+      return "Importing";
+    case "warning":
+      return "Needs attention";
+    default:
+      return "Queued";
+  }
+}
+
+function downloadEta(download: ActivityItem): string {
+  if (download.timeLeft) {
+    return `ETA ${download.timeLeft}`;
+  }
+  if (download.estimatedCompletionTime) {
+    return `ETA ${formatEta(download.estimatedCompletionTime)}`;
+  }
+  if (download.sizeLeftBytes !== undefined) {
+    return `${formatBytes(download.sizeLeftBytes)} left`;
+  }
+  if (download.sizeBytes !== undefined) {
+    return formatBytes(download.sizeBytes);
+  }
+  return "";
+}
+
+function formatEta(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: "short",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024 ** 3) {
+    return `${Math.round(bytes / 1024 ** 2)} MB`;
+  }
+  return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
 }
 
 function MoviePageSkeleton() {

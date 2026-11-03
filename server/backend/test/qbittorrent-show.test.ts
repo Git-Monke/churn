@@ -101,6 +101,22 @@ describe("qBittorrent fallback for show downloads", () => {
     });
   });
 
+  it("marks a finished direct download as waiting for Jellyfin", () => {
+    const episodes = [{ key: "s01e01", seasonNumber: 1, episodeNumber: 1 }];
+    const downloads = mapShowTorrentDownloads(
+      [torrent({ progress: 1, state: "uploading", tags: "churn-direct" })],
+      "Parks and Recreation",
+      episodes,
+    );
+
+    expect(downloads.get("s01e01")).toMatchObject({
+      status: "importing",
+      progress: 100,
+      untracked: true,
+      statusMessages: [expect.stringContaining("Jellyfin has not indexed")],
+    });
+  });
+
   it("adds an untracked qBittorrent download through buildShowDetail", () => {
     const detail = buildShowDetail({
       source: "sonarr",

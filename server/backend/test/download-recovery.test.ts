@@ -16,6 +16,7 @@ afterEach(() => {
 function recoveryConfig(): AppConfig {
   return {
     requestTimeoutMs: 500,
+    releaseTimeoutMs: 500,
     qbittorrent: { url: "http://qbittorrent:8080", apiKey: "qbt_test-key" },
   } as AppConfig;
 }

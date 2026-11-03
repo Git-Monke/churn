@@ -1,16 +1,19 @@
 import type { AppConfig } from "./config.js";
+import { isDirectDownloadTorrent } from "./direct-grab.js";
+import { isCompletedTorrent } from "./download-import.js";
 import {
   createJellyfinClient,
   providerString,
   type JellyfinItem,
 } from "./upstream/jellyfin.js";
+import { createQbittorrentClient, type QbittorrentTorrent } from "./upstream/qbittorrent.js";
 import {
   createArrClient,
   type ArrServiceId,
   type ServarrHistoryRecord,
 } from "./upstream/servarr.js";
 
-/** How often the backend asks Sonarr/Radarr for newly imported downloads. */
+/** How often the backend checks the arrs and qBittorrent for finished downloads. */
 export const DEFAULT_SCAN_INTERVAL_MS = 5_000;
 /** Imports older than this are treated as already handled at startup. */
 export const DEFAULT_RECENT_IMPORT_MS = 10 * 60_000;
@@ -44,6 +47,8 @@ export interface LibraryScanWatcherOptions {
   sleep?: (ms: number) => Promise<void>;
   refresh?: () => Promise<void>;
   getImports?: (since: string) => Promise<ImportEvent[]>;
+  /** qBittorrent torrents used to notice finished direct downloads. */
+  getTorrents?: () => Promise<QbittorrentTorrent[]>;
   /** Returns the imports that are not visible in Jellyfin yet. */
   resolve?: (imports: ImportEvent[]) => Promise<ImportEvent[]>;
   intervalMs?: number;
@@ -77,6 +82,11 @@ export async function refreshJellyfinLibrary(config: AppConfig): Promise<void> {
  * emitted after the move, so churn triggers on that instead, then checks that
  * the item actually became visible and rescans once if it did not.
  *
+ * churn-direct downloads never reach an arr, so for those qBittorrent's
+ * completion state is the signal: the files were saved straight into the
+ * library path and only need a Jellyfin scan. They are tracked separately and
+ * refreshed once per completed torrent.
+ *
  * The watcher runs independently of the dashboard so an import is not missed
  * when no browser is open.
  */
@@ -94,15 +104,25 @@ export function createLibraryScanWatcher(
   const resolvePollMs = options.resolvePollMs ?? DEFAULT_RESOLVE_POLL_MS;
   const refresh = options.refresh ?? (() => refreshJellyfinLibrary(config));
   const getImports = options.getImports ?? ((since: string) => fetchImports(config, since));
+  const getTorrents =
+    options.getTorrents ??
+    (() => createQbittorrentClient(config.qbittorrent, config.requestTimeoutMs).getTorrents());
   const resolve =
     options.resolve ?? ((imports: ImportEvent[]) => findUnresolved(config, imports));
 
+  const jellyfinEnabled = Boolean(config.services.jellyfin.apiKey);
+  const directEnabled = jellyfinEnabled && Boolean(config.qbittorrent.apiKey);
   const enabled =
-    Boolean(config.services.jellyfin.apiKey) &&
-    Boolean(config.services.sonarr.apiKey || config.services.radarr.apiKey);
+    jellyfinEnabled &&
+    Boolean(
+      config.services.sonarr.apiKey ||
+      config.services.radarr.apiKey ||
+      directEnabled,
+    );
 
   let since = new Date(now() - recentImportMs).toISOString();
   const seen = new Map<string, number>();
+  const seenDirect = new Set<string>();
   let timer: NodeJS.Timeout | undefined;
   let polling = false;
 
@@ -112,17 +132,29 @@ export function createLibraryScanWatcher(
     }
     polling = true;
     try {
+      // Direct downloads never reach Sonarr/Radarr, so their imports do not
+      // appear in arr history. A finished churn-direct torrent is already in
+      // the library path; ask Jellyfin to index it once.
+      const directCompleted = await pollDirectCompletions();
+
       let imports: ImportEvent[];
       try {
         imports = await getImports(since);
       } catch {
-        // Both arrs may be restarting. Keep the old cursor and try next poll.
+        // Both arrs may be restarting. Keep the old cursor and try next poll,
+        // but still scan for a direct download that finished meanwhile.
+        if (directCompleted) {
+          await tryRefresh();
+        }
         return;
       }
 
       advanceCursor(imports);
       const fresh = imports.filter((event) => !seen.has(importKey(event)));
       if (fresh.length === 0) {
+        if (directCompleted) {
+          await tryRefresh();
+        }
         pruneSeen(seen, now());
         return;
       }
@@ -136,6 +168,38 @@ export function createLibraryScanWatcher(
     } finally {
       polling = false;
     }
+  }
+
+  /** True when a direct torrent finished recently and needs a Jellyfin scan. */
+  async function pollDirectCompletions(): Promise<boolean> {
+    if (!directEnabled) {
+      return false;
+    }
+    let torrents: QbittorrentTorrent[];
+    try {
+      torrents = await getTorrents();
+    } catch {
+      // qBittorrent may be restarting; the next poll can still catch the import.
+      return false;
+    }
+
+    const cutoff = now() - recentImportMs;
+    let completed = false;
+    for (const torrent of torrents) {
+      if (!isDirectDownloadTorrent(torrent) || !isCompletedTorrent(torrent)) {
+        continue;
+      }
+      const completedAt = (torrent.completion_on ?? torrent.added_on ?? 0) * 1_000;
+      const key = `${torrent.hash ?? torrent.infohash_v1 ?? torrent.name ?? ""}:${completedAt}`;
+      if (seenDirect.has(key)) {
+        continue;
+      }
+      seenDirect.add(key);
+      if (completedAt >= cutoff) {
+        completed = true;
+      }
+    }
+    return completed;
   }
 
   /** Refresh, then give Jellyfin a chance to index; retry the refresh once. */

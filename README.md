@@ -143,22 +143,25 @@ run an automatic search. Churn adds the title unmonitored and caches the metadat
 Radarr/Sonarr returned (title, year, TMDB/TVDB/IMDB ids, seasons and poster).
 
 Release search is Prowlarr-first. Opening a movie or season runs one Prowlarr
-search per enabled indexer in parallel, and the chooser updates as each one
-finishes. A progress line shows `5/9 indexers finished`, with a chip for every
-indexer, so you can see whether more results are still coming. Churn's own
-release-name parser filters the results by title, year, season and episode and
+search per enabled indexer in parallel, and the chooser opens as soon as the
+first usable result arrives and keeps updating as each indexer finishes. A
+progress line shows `5/9 indexers finished`, with a chip for every indexer, so
+you can see whether more results are still coming. For a series, seasons are
+searched in ascending order, one season at a time; seasons Sonarr already has
+complete are skipped, and opening another season manually starts it immediately.
+Churn's own release-name parser filters the results by title, year, season and episode and
 extracts quality, season ranges and episode ranges. Results are grouped by
 quality tier (`480p`, `720p`, `1080p`, `2160p`, and `Other`) and sorted by
 seeders, then size. Only the best-seeded release is shown initially; **Show more
 options** expands the tier.
 
-Every enabled Prowlarr indexer is represented. If Prowlarr has not synced an
-indexer to the target Sonarr/Radarr, its results are still visible but Download
-is disabled with an explanation. Otherwise, choosing a release re-queries just
-that indexer through Sonarr/Radarr, matches the release, and grabs it through the
-normal arr path. That keeps monitoring, imports and qBittorrent tracking in the
-arrs. A multi-season pack monitors every season it covers so Sonarr imports the
-whole pack.
+Every enabled Prowlarr indexer is represented and every result with a torrent
+or magnet URL can be downloaded, whether or not Sonarr/Radarr has that indexer.
+Choosing a release sends exactly that torrent straight to qBittorrent; there is
+no second arr search and no arr grab. qBittorrent saves into the existing
+Sonarr/Radarr show or movie folder, using `Show/Season N` for a single season
+and the show folder for a multi-season pack. The `churn-direct` tag identifies
+these downloads so churn does not ask Sonarr to re-import them.
 
 Release-search snapshots persist in `server/cache/releases/prowlarr` (or
 `server/.churn-cache/releases/prowlarr` when the container-owned `cache/`
@@ -238,10 +241,11 @@ The wiring is automatic on first `docker compose up`:
    everything else.
 
 Because every container mounts the same `${DATA_DIR}` at `/data`, download
-paths line up without translation. qBittorrent saves to `/data/` (incomplete
-files under `/data/incomplete`) and Prowlarr tags its downloads with the
-`prowlarr` category. Media lives in `/data/media`, which is what Jellyfin's
-libraries point at; never add `/data` itself as a Jellyfin library.
+paths line up without translation. Direct release grabs are saved into
+`/data/media/tv` and `/data/media/movies`; older arr-managed downloads still use
+`/data` (incomplete files under `/data/incomplete`). Media lives in
+`/data/media`, which is what Jellyfin's libraries point at; never add `/data`
+itself as a Jellyfin library.
 
 Re-run the one-shots by recreating the stack (a plain `docker compose up -d`
 leaves already-exited one-shots alone):

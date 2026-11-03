@@ -4,6 +4,7 @@ import path from "node:path";
 
 import type { AppConfig } from "./config.js";
 import { mapWithConcurrency } from "./concurrency.js";
+import { directDownloadSource } from "./direct-grab.js";
 import { UpstreamError } from "./errors.js";
 import {
   movieMetadataEntry,
@@ -33,14 +34,13 @@ import type {
 import { createProwlarrClient, type ProwlarrIndexer } from "./upstream/prowlarr.js";
 import {
   createArrClient,
-  type ServarrIndexer,
   type ServarrMovieResource,
   type ServarrRelease,
   type ServarrSeriesResource,
 } from "./upstream/servarr.js";
 import { errorMessage } from "./upstream/states.js";
 
-const SNAPSHOT_VERSION = 1;
+const SNAPSHOT_VERSION = 2;
 const RELEASE_SEARCH_TIMEOUT_MS = 30_000;
 const MAX_RETAINED_JOBS = 100;
 
@@ -62,6 +62,9 @@ export interface RawIndexerRelease {
   ageHours?: number;
   publishDate?: string;
   infoHash?: string;
+  /** Server-side torrent source; never included in browser responses. */
+  downloadUrl?: string;
+  magnetUrl?: string;
   parsed: ParsedReleaseName;
 }
 
@@ -72,12 +75,18 @@ export interface ReleaseSearchService {
   refreshSeriesSeason(seriesId: number, seasonNumber: number): Promise<CachedReleasesResponse>;
   /** Start missing background searches without waiting for them. */
   warmMovie(movieId: number): Promise<void>;
+  /** Warm missing seasons in ascending order, one at a time. */
   warmSeries(seriesId: number, seasonNumbers: number[]): Promise<void>;
   findRelease(
     target: ReleaseSearchTarget,
     id: string,
-  ): Promise<{ release: RawIndexerRelease; arrIndexerId?: number } | undefined>;
-  resolveArrIndexer(kind: "movie" | "series", indexerName: string): Promise<number | undefined>;
+  ): Promise<
+    | {
+        release: RawIndexerRelease;
+        media: { title: string; year?: number };
+      }
+    | undefined
+  >;
   invalidateMovie(movieId: number): Promise<void>;
   invalidateSeries(seriesId: number): Promise<void>;
 }
@@ -95,7 +104,6 @@ interface JobIndexer {
   state: ReleaseIndexerState;
   count: number;
   detail?: string;
-  arrIndexerId?: number;
 }
 
 interface SearchJob {
@@ -109,7 +117,14 @@ interface SearchJob {
   error?: string;
   indexers: JobIndexer[];
   releasesByIndexer: Map<number, RawIndexerRelease[]>;
-  arrIndexersKnown: boolean;
+  /** Resolves once the job has settled and its snapshot has been written. */
+  settled: Promise<void>;
+  settle: () => void;
+}
+
+interface SeriesWarmQueue {
+  seasons: number[];
+  running: Promise<void>;
 }
 
 interface Snapshot {
@@ -121,11 +136,6 @@ interface Snapshot {
   fetchedAt: string;
   indexers: JobIndexer[];
   releases: RawIndexerRelease[];
-}
-
-interface CachedArrIndexers {
-  value: ServarrIndexer[];
-  expiresAt: number;
 }
 
 export interface ReleaseSearchOptions {
@@ -142,8 +152,17 @@ export function createReleaseSearchService(
   const { cacheDir } = options;
   const now = options.now ?? (() => new Date());
   const jobs = new Map<string, SearchJob>();
-  const arrIndexerCache = new Map<"sonarr" | "radarr", CachedArrIndexers>();
+  const startingJobs = new Map<string, Promise<SearchJob>>();
+  const seriesWarmQueues = new Map<number, SeriesWarmQueue>();
   const releaseParser = createReleaseParser(config);
+
+  function completion(): Pick<SearchJob, "settled" | "settle"> {
+    let settle: () => void = () => {};
+    const settled = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
+    return { settled, settle };
+  }
 
   function targetKey(target: ReleaseSearchTarget): string {
     return target.kind === "movie"
@@ -230,45 +249,10 @@ export function createReleaseSearchService(
       : releaseSearchQuery(media);
   }
 
-  async function loadArrIndexers(kind: "movie" | "series"): Promise<{
-    indexers: ServarrIndexer[];
-    known: boolean;
-  }> {
-    const serviceId = kind === "movie" ? "radarr" : "sonarr";
-    const cached = arrIndexerCache.get(serviceId);
-    if (cached && now().getTime() < cached.expiresAt) {
-      return { indexers: cached.value, known: true };
-    }
-    const service = config.services[serviceId];
-    if (!service.apiKey) {
-      return { indexers: [], known: false };
-    }
-    try {
-      const client = createArrClient(serviceId, service, config.requestTimeoutMs);
-      const indexers = await client.getIndexers();
-      arrIndexerCache.set(serviceId, {
-        value: indexers,
-        expiresAt: now().getTime() + 60_000,
-      });
-      return { indexers, known: true };
-    } catch {
-      return { indexers: [], known: false };
-    }
-  }
-
-  function arrIndexerFor(
-    prowlarrName: string,
-    arrIndexers: ServarrIndexer[],
-  ): number | undefined {
-    const wanted = normalizeIndexerName(prowlarrName);
-    return arrIndexers.find((indexer) => normalizeIndexerName(indexer.name ?? "") === wanted)?.id;
-  }
-
   function newJob(
     target: ReleaseSearchTarget,
     media: SearchMedia,
     prowlarrIndexers: ProwlarrIndexer[],
-    arrIndexers: ServarrIndexer[],
     snapshot?: Snapshot,
   ): SearchJob {
     const key = targetKey(target);
@@ -293,23 +277,39 @@ export function createReleaseSearchService(
         name: indexer.name?.trim() || `Indexer ${indexer.id}`,
         state: "pending",
         count: seeded.get(indexer.id as number)?.length ?? 0,
-        arrIndexerId: arrIndexerFor(indexer.name ?? "", arrIndexers),
       })),
       releasesByIndexer: seeded,
-      arrIndexersKnown: true,
+      ...completion(),
     };
   }
 
-  async function startJob(
+  function startJob(
     target: ReleaseSearchTarget,
     seedSnapshot?: Snapshot,
   ): Promise<SearchJob> {
     const key = targetKey(target);
     const previous = jobs.get(key);
     if (previous && previous.completedAt === undefined) {
-      return previous;
+      return Promise.resolve(previous);
     }
+    const starting = startingJobs.get(key);
+    if (starting) {
+      return starting;
+    }
+    const run = startJobNow(target, seedSnapshot).finally(() => {
+      if (startingJobs.get(key) === run) {
+        startingJobs.delete(key);
+      }
+    });
+    startingJobs.set(key, run);
+    return run;
+  }
 
+  async function startJobNow(
+    target: ReleaseSearchTarget,
+    seedSnapshot?: Snapshot,
+  ): Promise<SearchJob> {
+    const key = targetKey(target);
     if (!config.prowlarr.apiKey) {
       const media = await loadMedia(target);
       const job: SearchJob = {
@@ -321,19 +321,20 @@ export function createReleaseSearchService(
         startedAt: now().toISOString(),
         indexers: seedSnapshot?.indexers ?? [],
         releasesByIndexer: snapshotReleases(seedSnapshot),
-        arrIndexersKnown: true,
         error:
           "Prowlarr API key is not configured. Set PROWLARR_API_KEY or keep torrent/config/prowlarr/config.xml.",
+        ...completion(),
       };
+      job.completedAt = now().toISOString();
+      job.settle();
       jobs.set(key, job);
       pruneJobs();
       return job;
     }
 
-    const [media, prowlarrCatalog, arr] = await Promise.all([
+    const [media, prowlarrCatalog] = await Promise.all([
       loadMedia(target),
       loadProwlarrIndexers(),
-      loadArrIndexers(target.kind),
     ]);
     if (prowlarrCatalog.error) {
       const job: SearchJob = {
@@ -345,22 +346,29 @@ export function createReleaseSearchService(
         startedAt: now().toISOString(),
         indexers: seedSnapshot?.indexers ?? [],
         releasesByIndexer: snapshotReleases(seedSnapshot),
-        arrIndexersKnown: arr.known,
         error: prowlarrCatalog.error,
+        ...completion(),
       };
+      job.completedAt = now().toISOString();
+      job.settle();
       jobs.set(key, job);
       pruneJobs();
       return job;
     }
 
-    const job = newJob(target, media, prowlarrCatalog.indexers, arr.indexers, seedSnapshot);
-    job.arrIndexersKnown = arr.known;
+    const job = newJob(target, media, prowlarrCatalog.indexers, seedSnapshot);
     jobs.set(key, job);
     pruneJobs();
     if (job.indexers.length === 0) {
       job.completedAt = now().toISOString();
       job.error = "Prowlarr has no enabled indexers.";
-      await persist(job);
+      try {
+        await persist(job);
+      } catch {
+        // Keep the in-memory job usable even if the snapshot cannot be written.
+      } finally {
+        job.settle();
+      }
       return job;
     }
 
@@ -370,7 +378,11 @@ export function createReleaseSearchService(
     );
     void Promise.all(
       job.indexers.map((indexer) => runIndexer(job, indexer, prowlarr.searchIndexer.bind(prowlarr))),
-    );
+    ).catch(() => {
+      // Individual indexer failures are recorded on the job. Persistence
+      // failures must not leave the completion promise pending forever.
+      job.settle();
+    });
     return job;
   }
 
@@ -405,7 +417,14 @@ export function createReleaseSearchService(
       return;
     }
     job.completedAt = now().toISOString();
-    await persist(job);
+    try {
+      await persist(job);
+    } catch {
+      // Results remain available in memory; a later refresh can rewrite the
+      // snapshot.
+    } finally {
+      job.settle();
+    }
   }
 
   async function persist(job: SearchJob): Promise<void> {
@@ -441,6 +460,8 @@ export function createReleaseSearchService(
       id: target.kind === "movie" ? target.movieId : target.seriesId,
       title: "",
     } satisfies SearchMedia;
+    const completed = completion();
+    completed.settle();
     return {
       key: targetKey(target),
       target,
@@ -451,7 +472,7 @@ export function createReleaseSearchService(
       completedAt: snapshot.fetchedAt,
       indexers: snapshot.indexers,
       releasesByIndexer: snapshotReleases(snapshot),
-      arrIndexersKnown: true,
+      ...completed,
     };
   }
 
@@ -544,10 +565,10 @@ export function createReleaseSearchService(
     indexer: JobIndexer,
     job: SearchJob,
   ): ShowRelease {
-    const canGrab = !job.arrIndexersKnown || indexer.arrIndexerId !== undefined;
+    const canGrab = directDownloadSource(release) !== undefined;
     const downloadDetail = canGrab
       ? undefined
-      : `This indexer is not synced to ${job.target.kind === "movie" ? "Radarr" : "Sonarr"}. Add it in Prowlarr's app sync to download it.`;
+      : "This result does not include a torrent or magnet URL. Refresh the search to try again.";
     return {
       id: release.id,
       title: release.title,
@@ -587,7 +608,7 @@ export function createReleaseSearchService(
       name: indexer.name,
       state: indexer.state,
       count: indexer.count,
-      canGrab: !job.arrIndexersKnown || indexer.arrIndexerId !== undefined,
+      canGrab: true,
       ...(indexer.detail ? { detail: indexer.detail } : {}),
     }));
     return {
@@ -600,7 +621,13 @@ export function createReleaseSearchService(
   async function findRelease(
     target: ReleaseSearchTarget,
     id: string,
-  ): Promise<{ release: RawIndexerRelease; arrIndexerId?: number } | undefined> {
+  ): Promise<
+    | {
+        release: RawIndexerRelease;
+        media: { title: string; year?: number };
+      }
+    | undefined
+  > {
     const key = targetKey(target);
     let job = jobs.get(key);
     if (!job) {
@@ -617,8 +644,21 @@ export function createReleaseSearchService(
       if (release.id !== id) {
         continue;
       }
-      const indexer = job.indexers.find((entry) => entry.id === release.indexerId);
-      return { release, ...(indexer?.arrIndexerId !== undefined ? { arrIndexerId: indexer.arrIndexerId } : {}) };
+      let media: SearchMedia = job.media;
+      if (!media.title) {
+        try {
+          media = await loadMedia(target);
+        } catch {
+          media = { ...media, title: release.title };
+        }
+      }
+      return {
+        release,
+        media: {
+          title: media.title,
+          ...(media.year !== undefined ? { year: media.year } : {}),
+        },
+      };
     }
     return undefined;
   }
@@ -677,6 +717,74 @@ export function createReleaseSearchService(
   }
 
 
+  async function warmSeriesSeasons(seriesId: number, seasonNumbers: number[]): Promise<void> {
+    const seasons = [...new Set(seasonNumbers)]
+      .filter((season) => Number.isInteger(season) && season > 0)
+      .sort((left, right) => left - right);
+    if (seasons.length === 0) {
+      return;
+    }
+
+    const existing = seriesWarmQueues.get(seriesId);
+    if (existing) {
+      const known = new Set(existing.seasons);
+      for (const season of seasons) {
+        if (!known.has(season)) {
+          existing.seasons.push(season);
+        }
+      }
+      existing.seasons.sort((left, right) => left - right);
+      await existing.running;
+      return;
+    }
+
+    const queue: SeriesWarmQueue = {
+      seasons,
+      running: Promise.resolve(),
+    };
+    seriesWarmQueues.set(seriesId, queue);
+    queue.running = runSeriesWarmQueue(seriesId, queue).finally(() => {
+      if (seriesWarmQueues.get(seriesId) === queue) {
+        seriesWarmQueues.delete(seriesId);
+      }
+    });
+    await queue.running;
+  }
+
+  async function runSeriesWarmQueue(
+    seriesId: number,
+    queue: SeriesWarmQueue,
+  ): Promise<void> {
+    // Load the series once here so a cold media cache still knows which seasons
+    // are already complete and can skip their searches.
+    const cached = await ensureSeriesMedia(seriesId).catch(() => undefined);
+    const complete = new Set(cached?.completeSeasons ?? []);
+    queue.seasons = queue.seasons.filter((season) => !complete.has(season));
+
+    while (queue.seasons.length > 0) {
+      const seasonNumber = queue.seasons.shift() as number;
+      const target: ReleaseSearchTarget = { kind: "series", seriesId, seasonNumber };
+      const key = targetKey(target);
+      const existing = jobs.get(key);
+      if (existing) {
+        if (existing.completedAt === undefined) {
+          await existing.settled;
+        }
+        continue;
+      }
+      if (await loadSnapshot(target)) {
+        continue;
+      }
+      try {
+        const job = await startJob(target);
+        await job.settled;
+      } catch {
+        // One season failing must not stop the queue from reaching later
+        // seasons. The next explicit request will retry it.
+      }
+    }
+  }
+
   return {
     getMovie(movieId) {
       return get({ kind: "movie", movieId });
@@ -693,22 +801,8 @@ export function createReleaseSearchService(
         await startJob(target);
       }
     },
-    async warmSeries(seriesId, seasonNumbers) {
-      const seasons = [...new Set(seasonNumbers)]
-        .filter((season) => Number.isInteger(season) && season > 0)
-        .sort((left, right) => left - right);
-      for (const seasonNumber of seasons) {
-        const target: ReleaseSearchTarget = { kind: "series", seriesId, seasonNumber };
-        if (!jobs.has(targetKey(target))) {
-          await startJob(target);
-        }
-      }
-    },
+    warmSeries: warmSeriesSeasons,
     findRelease,
-    async resolveArrIndexer(kind, indexerName) {
-      const arr = await loadArrIndexers(kind);
-      return arrIndexerFor(indexerName, arr.indexers);
-    },
     invalidateMovie,
     invalidateSeries,
   };
@@ -764,6 +858,8 @@ export function createReleaseSearchService(
       ageHours: nonNegative(raw.ageHours),
       publishDate: typeof raw.publishDate === "string" ? raw.publishDate : undefined,
       infoHash: typeof raw.infoHash === "string" ? raw.infoHash : undefined,
+      downloadUrl: nonEmptyString(raw.downloadUrl),
+      magnetUrl: nonEmptyString(raw.magnetUrl),
       parsed,
     };
   }
@@ -793,12 +889,6 @@ export function findMatchingArrRelease(
   return releases.find((release) => normalizeTitle(release.title ?? "") === title);
 }
 
-function normalizeIndexerName(name: string): string {
-  return name
-    .replace(/\(prowlarr\)/gi, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "");
-}
 
 
 function normalizeTitle(value: string): string {
@@ -884,9 +974,15 @@ function isSnapshotRelease(value: unknown): value is RawIndexerRelease {
     typeof value.guid === "string" &&
     typeof value.title === "string" &&
     typeof value.size === "number" &&
+    (value.downloadUrl === undefined || typeof value.downloadUrl === "string") &&
+    (value.magnetUrl === undefined || typeof value.magnetUrl === "string") &&
     isObject(value.parsed) &&
     Array.isArray((value.parsed as Record<string, unknown>).titleTokens)
   );
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function finiteNumber(value: unknown): number | undefined {

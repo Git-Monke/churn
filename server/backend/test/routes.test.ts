@@ -16,6 +16,7 @@ function makeConfig(overrides: Partial<AppConfig["services"]> = {}): AppConfig {
     serverDir,
     frontendDist: "/tmp/churn-test/frontend/dist",
     requestTimeoutMs: 500,
+    releaseTimeoutMs: 500,
     searchTimeoutMs: 2_000,
     sessionTtlMs: 12 * 60 * 60 * 1000,
     cookieSecure: "auto",
@@ -1299,6 +1300,7 @@ const seriesLookup = {
 const movieLookup = {
   title: "Dune",
   year: 2021,
+  path: "/data/media/movies/Dune (2021)",
   tmdbId: 438631,
   imdbId: "tt1160419",
   ratings: { imdb: { value: 8 } },
@@ -1691,25 +1693,19 @@ describe("create requests", () => {
     await app.close();
   });
 
-  it("uses per-indexer Prowlarr results and grabs only that indexer through Radarr", async () => {
-    const movieRelease = {
-      guid: "dune-1080",
-      indexerId: 2,
-      indexer: "YTS (Prowlarr)",
-      title: "Dune.2021.1080p.BluRay.x264",
-      size: 2_000_000_000,
-      quality: { quality: { id: 7, name: "Bluray-1080p" } },
-      approved: false,
-      rejected: true,
-      downloadAllowed: false,
-      rejections: ["Quality Bluray-1080p is not wanted in profile"],
-      protocol: "torrent",
-      seeders: 84,
-    };
-    const releaseSearches: string[] = [];
-    let updated: Record<string, unknown> | undefined;
-    let grabbed: Record<string, unknown> | undefined;
+  it("sends the selected Prowlarr movie torrent straight to qBittorrent", async () => {
+    let qbittorrentAdd: URLSearchParams | undefined;
+    const radarrReleaseSearches: string[] = [];
+    let radarrGrab: Record<string, unknown> | undefined;
+    let radarrUpdate: Record<string, unknown> | undefined;
     installFetch((url, init) => {
+      if (url === "http://qbittorrent.test:8080/api/v2/torrents/info") {
+        return jsonResponse([]);
+      }
+      if (url === "http://qbittorrent.test:8080/api/v2/torrents/add") {
+        qbittorrentAdd = new URLSearchParams(String(init?.body));
+        return new Response("Ok.", { status: 200 });
+      }
       if (url.includes("/movie/lookup")) return jsonResponse([movieLookup]);
       if (url.endsWith("/api/v3/movie")) {
         if (init?.method === "POST") {
@@ -1721,18 +1717,15 @@ describe("create requests", () => {
         return jsonResponse({ ...movieLookup, id: 7, monitored: false });
       }
       if (url.endsWith("/api/v3/movie/7") && init?.method === "PUT") {
-        updated = readBody(init);
-        return jsonResponse(updated);
-      }
-      if (url.endsWith("/api/v3/indexer")) {
-        return jsonResponse([{ id: 2, name: "YTS (Prowlarr)" }]);
+        radarrUpdate = readBody(init);
+        return jsonResponse(radarrUpdate);
       }
       if (url.includes("/api/v3/release?movieId=7")) {
-        releaseSearches.push(url);
-        return jsonResponse([movieRelease]);
+        radarrReleaseSearches.push(url);
+        return jsonResponse([]);
       }
       if (url.endsWith("/api/v3/release") && init?.method === "POST") {
-        grabbed = readBody(init);
+        radarrGrab = readBody(init);
         return jsonResponse({ id: 1 });
       }
       if (url.endsWith("/api/v1/indexer")) {
@@ -1753,6 +1746,7 @@ describe("create requests", () => {
             indexer: "YTS",
             protocol: "torrent",
             infoHash: "dune-info-hash",
+            downloadUrl: "https://prowlarr.test/2/download?link=dune",
           },
         ]);
       }
@@ -1761,7 +1755,9 @@ describe("create requests", () => {
       throw new Error(`unexpected URL ${url}`);
     });
 
-    const app = await buildAuthedServer(makeConfig());
+    const config = makeConfig();
+    config.qbittorrent.apiKey = "qbt-test-key";
+    const app = await buildAuthedServer(config);
     await app.inject({
       method: "POST",
       url: "/api/requests",
@@ -1771,7 +1767,6 @@ describe("create requests", () => {
     const release = flattenCachedReleases(list)[0] as { id: string; title: string };
     expect(release.title).toBe("Dune.2021.1080p.BluRay.x264");
     expect(list.progress).toMatchObject({ finished: 1, total: 1 });
-    expect(releaseSearches).toHaveLength(0);
 
     const response = await app.inject({
       method: "POST",
@@ -1781,16 +1776,16 @@ describe("create requests", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({ status: "grabbed", title: release.title });
-    expect(releaseSearches).toHaveLength(1);
-    expect(releaseSearches[0]).toContain("indexerId=2");
-    expect(updated).toMatchObject({ id: 7, monitored: true });
-    expect(grabbed).toMatchObject({
-      guid: "dune-1080",
-      indexerId: 2,
-      movieId: 7,
-      shouldOverride: true,
-      quality: { quality: { id: 7, name: "Bluray-1080p" } },
-    });
+    expect(qbittorrentAdd?.get("urls")).toBe(
+      "https://prowlarr.test/2/download?link=dune",
+    );
+    expect(qbittorrentAdd?.get("savepath")).toBe("/data/media/movies/Dune (2021)");
+    expect(qbittorrentAdd?.get("category")).toBe("movies");
+    expect(qbittorrentAdd?.get("tags")).toBe("churn-direct");
+    expect(qbittorrentAdd?.get("contentLayout")).toBe("NoSubfolder");
+    expect(radarrReleaseSearches).toHaveLength(0);
+    expect(radarrGrab).toBeUndefined();
+    expect(radarrUpdate).toBeUndefined();
     await app.close();
   });
 
@@ -1849,6 +1844,69 @@ describe("create requests", () => {
     });
     expect(grabbed).toBeUndefined();
     expect(requestedUrls.some((url) => url.includes("/api/v3/release"))).toBe(false);
+    await app.close();
+  });
+
+  it("prefetches every regular season after a series is added", async () => {
+    const searches: string[] = [];
+    const multiSeasonLookup = {
+      ...seriesLookup,
+      seasons: [
+        { seasonNumber: 0, monitored: false },
+        { seasonNumber: 1, monitored: false },
+        { seasonNumber: 2, monitored: false },
+        { seasonNumber: 3, monitored: false },
+      ],
+    };
+    installFetch((url, init) => {
+      if (url.includes("/series/lookup")) return jsonResponse([multiSeasonLookup]);
+      if (url.endsWith("/api/v3/series")) {
+        if (init?.method === "POST") {
+          // Sonarr can return the added series without its seasons; the lookup
+          // entry still has them, and every season must be warmed.
+          return jsonResponse({ ...multiSeasonLookup, id: 12, seasons: [] });
+        }
+        return jsonResponse([]);
+      }
+      if (url.includes("/qualityprofile")) return jsonResponse(profiles);
+      if (url.includes("/rootfolder")) return jsonResponse(rootFolders);
+      if (url.endsWith("/api/v1/indexer")) {
+        return jsonResponse([{ id: 1, name: "EZTV", enable: true }]);
+      }
+      if (url.includes("/api/v1/search")) {
+        searches.push(new URL(url).searchParams.get("query") ?? "");
+        return jsonResponse([]);
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildAuthedServer(makeConfig());
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/requests",
+      payload: {
+        kind: "series",
+        tvdbId: 371980,
+        options: {
+          qualityProfileId: 4,
+          rootFolderPath: "/data/media/tv",
+        },
+      },
+    });
+    expect(response.statusCode).toBe(200);
+
+    for (let attempt = 0;
+      attempt < 100 && new Set(searches).size < 3;
+      attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    // Other tests can leave a background warm running; only assert that every
+    // regular season was requested, not that no duplicate request occurred.
+    expect([...new Set(searches)]).toEqual([
+      "Severance S01",
+      "Severance S02",
+      "Severance S03",
+    ]);
     await app.close();
   });
 
@@ -2627,6 +2685,186 @@ describe("movie detail", () => {
     });
     await app.close();
   });
+
+  it("shows an active qBittorrent download on the movie", async () => {
+    const config = makeConfig();
+    config.qbittorrent.apiKey = "qbittorrent-key";
+    installFetch((url) => {
+      if (url.includes("radarr.test") && url.endsWith("/api/v3/movie/7")) {
+        return jsonResponse({ ...movieLookup, id: 7 });
+      }
+      if (url === "http://qbittorrent.test:8080/api/v2/torrents/info") {
+        return jsonResponse([
+          {
+            hash: "dune-hash",
+            name: "Dune.2021.1080p.BluRay.x264",
+            category: "movies",
+            progress: 0.42,
+            size: 2_000_000_000,
+            dlspeed: 8_000_000,
+            eta: 120,
+            state: "downloading",
+          },
+        ]);
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildAuthedServer(config);
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/library/movies/radarr/7",
+    });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(body.download).toMatchObject({
+      kind: "movie",
+      title: "Dune",
+      status: "downloading",
+      progress: 42,
+      quality: "1080p",
+      queueCount: 1,
+    });
+    await app.close();
+  });
+
+  it("cancels the movie download without deleting the Radarr movie", async () => {
+    const config = makeConfig();
+    config.qbittorrent.apiKey = "qbittorrent-key";
+    const calls: Array<{ url: string; method?: string; body?: string }> = [];
+    installFetch((url, init) => {
+      calls.push({
+        url,
+        method: init?.method,
+        body: typeof init?.body === "string" ? init.body : undefined,
+      });
+      if (url.includes("radarr.test") && url.endsWith("/api/v3/movie/7")) {
+        return jsonResponse({ ...movieLookup, id: 7 });
+      }
+      if (url.includes("radarr.test") && url.includes("/api/v3/queue?")) {
+        return jsonResponse({
+          records: [
+            { id: 11, movieId: 7, title: "Dune.2021.1080p", status: "downloading" },
+            { id: 12, movieId: 8, title: "Other.Movie.2020.1080p", status: "downloading" },
+          ],
+        });
+      }
+      if (url.includes("radarr.test") && url.includes("/api/v3/queue/11?")) {
+        return new Response(null, { status: 200 });
+      }
+      if (url === "http://qbittorrent.test:8080/api/v2/torrents/info") {
+        return jsonResponse([
+          {
+            hash: "dune-hash",
+            name: "Dune.2021.1080p.BluRay.x264",
+            category: "movies",
+            progress: 0.42,
+            size: 2_000_000_000,
+            state: "downloading",
+          },
+          {
+            hash: "other-hash",
+            name: "Other.Movie.2020.1080p",
+            category: "movies",
+            progress: 0.5,
+            size: 1_000_000_000,
+            state: "downloading",
+          },
+        ]);
+      }
+      if (url === "http://qbittorrent.test:8080/api/v2/torrents/delete") {
+        return new Response(null, { status: 200 });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildAuthedServer(config);
+    const response = await app.inject({
+      method: "DELETE",
+      url: "/api/library/movies/radarr/7/download",
+    });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(body).toMatchObject({
+      status: "cancelled",
+      queueRemoved: 1,
+      downloadClientRemoved: 1,
+    });
+    expect(
+      calls.find((call) => call.url.includes("/api/v3/queue/11?"))?.method,
+    ).toBe("DELETE");
+    expect(calls.some((call) => call.url.includes("/api/v3/queue/12"))).toBe(false);
+    expect(calls.some((call) => call.url.includes("/api/v3/movie/7") && call.method === "DELETE")).toBe(false);
+    const deleteTorrent = calls.find((call) =>
+      call.url.endsWith("/api/v2/torrents/delete"),
+    );
+    expect(deleteTorrent?.body).toContain("hashes=dune-hash");
+    expect(deleteTorrent?.body).not.toContain("other-hash");
+    await app.close();
+  });
+
+  it("cancels an untracked movie download from a Jellyfin-only movie", async () => {
+    const config = makeConfig({
+      jellyfin: {
+        id: "jellyfin",
+        name: "Jellyfin",
+        url: "http://jellyfin.test:8096",
+        apiKey: "jellyfin-key",
+      },
+    });
+    config.qbittorrent.apiKey = "qbittorrent-key";
+    let deletedBody: string | undefined;
+    installFetch((url, init) => {
+      if (url.includes("jellyfin.test") && url.includes("/Items/jellyfin-movie")) {
+        return jsonResponse({
+          Id: "jellyfin-movie",
+          Name: "Dune",
+          Type: "Movie",
+          ProductionYear: 2021,
+          ProviderIds: { Tmdb: "438631" },
+        });
+      }
+      if (url.includes("radarr.test") && url.endsWith("/api/v3/movie")) {
+        return jsonResponse([]);
+      }
+      if (url === "http://qbittorrent.test:8080/api/v2/torrents/info") {
+        return jsonResponse([
+          {
+            hash: "dune-hash",
+            name: "Dune.2021.1080p.BluRay.x264",
+            category: "movies",
+            tags: "churn-direct",
+            progress: 0.42,
+            size: 2_000_000_000,
+            state: "downloading",
+          },
+        ]);
+      }
+      if (url === "http://qbittorrent.test:8080/api/v2/torrents/delete") {
+        deletedBody = typeof init?.body === "string" ? init.body : undefined;
+        return new Response(null, { status: 200 });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildAuthedServer(config);
+    const response = await app.inject({
+      method: "DELETE",
+      url: "/api/library/movies/jellyfin/jellyfin-movie/download",
+    });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(body).toMatchObject({
+      status: "cancelled",
+      queueRemoved: 0,
+      downloadClientRemoved: 1,
+    });
+    expect(deletedBody).toContain("hashes=dune-hash");
+    await app.close();
+  });
 });
 
 describe("show releases", () => {
@@ -2647,6 +2885,7 @@ describe("show releases", () => {
       languages: [{ id: 1, name: "English" }],
       protocol: "torrent",
       seeders: 12,
+      downloadUrl: "https://prowlarr.test/1/download?link=single",
     },
     {
       guid: "pack-guid",
@@ -2668,6 +2907,7 @@ describe("show releases", () => {
       languages: [{ id: 1, name: "English" }],
       protocol: "torrent",
       seeders: 16,
+      downloadUrl: "https://prowlarr.test/2/download?link=pack",
     },
   ];
 
@@ -2684,6 +2924,7 @@ describe("show releases", () => {
       infoHash: "single-hash",
       publishDate: "2026-01-01T00:00:00Z",
       ageHours: 12,
+      downloadUrl: "https://prowlarr.test/1/download?link=single",
     },
     {
       guid: "pack-guid",
@@ -2697,6 +2938,7 @@ describe("show releases", () => {
       infoHash: "pack-hash",
       publishDate: "2026-01-01T00:00:00Z",
       ageHours: 24,
+      downloadUrl: "https://prowlarr.test/2/download?link=pack",
     },
   ];
 
@@ -2705,6 +2947,7 @@ describe("show releases", () => {
     title: "Example Show",
     year: 2024,
     tvdbId: 1234,
+    path: "/data/media/tv/Example Show",
     seasons: [
       { seasonNumber: 1, monitored: true },
       { seasonNumber: 2, monitored: false },
@@ -2719,6 +2962,12 @@ describe("show releases", () => {
       const handled = handler(url, init);
       if (handled) {
         return handled;
+      }
+      if (url === "http://qbittorrent.test:8080/api/v2/torrents/info") {
+        return jsonResponse([]);
+      }
+      if (url === "http://qbittorrent.test:8080/api/v2/torrents/add") {
+        return new Response("Ok.", { status: 200 });
       }
       if (url.includes("sonarr.test") && url.endsWith("/api/v3/series/42") && init?.method !== "PUT" && init?.method !== "DELETE") {
         return jsonResponse(series);
@@ -2799,7 +3048,7 @@ describe("show releases", () => {
     await app.close();
   });
 
-  it("keeps an indexer outside Sonarr visible but disables Download", async () => {
+  it("keeps an indexer outside Sonarr grabbable directly", async () => {
     installShowReleaseFetch((url) => {
       if (url.includes("prowlarr.test") && url.endsWith("/api/v1/indexer")) {
         return jsonResponse([
@@ -2828,35 +3077,25 @@ describe("show releases", () => {
     );
     const releases = flattenCachedReleases(body);
     const unsynced = releases.find((release) => release.indexer === "Unsynced");
-    expect(unsynced).toMatchObject({ canGrab: false, approved: true });
-    expect(unsynced?.downloadDetail).toContain("not synced to Sonarr");
+    expect(unsynced).toMatchObject({ canGrab: true, approved: true });
+    expect(unsynced?.downloadDetail).toBeUndefined();
     expect(body.releaseCount).toBe(2);
     await app.close();
   });
 
-  it("grabs an overridden multi-season pack by querying only its indexer", async () => {
-    let posted: Record<string, unknown> | undefined;
-    const releaseSearches: string[] = [];
+  it("sends a multi-season pack to the show root through qBittorrent", async () => {
+    let addBody: URLSearchParams | undefined;
     installShowReleaseFetch((url, init) => {
-      if (
-        url.includes("sonarr.test") &&
-        url.includes("/api/v3/release?seriesId=42&seasonNumber=1")
-      ) {
-        releaseSearches.push(url);
-        return jsonResponse(arrSeasonReleases);
-      }
-      if (
-        url.includes("sonarr.test") &&
-        url.endsWith("/api/v3/release") &&
-        init?.method === "POST"
-      ) {
-        posted = readBody(init);
-        return jsonResponse({ ...arrSeasonReleases[1], id: 1 });
+      if (url === "http://qbittorrent.test:8080/api/v2/torrents/add") {
+        addBody = new URLSearchParams(String(init?.body));
+        return new Response("Ok.", { status: 200 });
       }
       return undefined;
     });
 
-    const app = await buildAuthedServer(makeConfig());
+    const config = makeConfig();
+    config.qbittorrent.apiKey = "qbt-test-key";
+    const app = await buildAuthedServer(config);
     const list = await waitForCachedReleases(
       app,
       "/api/library/shows/sonarr/42/releases?season=1",
@@ -2864,7 +3103,6 @@ describe("show releases", () => {
     const pack = flattenCachedReleases(list).find(
       (item) => item.title === "Example.Show.S01-03",
     ) as { id: string };
-    expect(releaseSearches).toHaveLength(0);
 
     const response = await app.inject({
       method: "POST",
@@ -2874,65 +3112,35 @@ describe("show releases", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({ status: "grabbed", title: "Example.Show.S01-03" });
-    expect(releaseSearches).toHaveLength(1);
-    expect(releaseSearches[0]).toContain("indexerId=2");
-    expect(posted).toMatchObject({
-      guid: "pack-guid",
-      indexerId: 2,
-      seriesId: 42,
-      shouldOverride: true,
-      episodeIds: [501, 502],
-      quality: { quality: { id: 0, name: "Unknown" } },
-      languages: [{ id: 1, name: "English" }],
-    });
+    expect(addBody?.get("urls")).toBe("https://prowlarr.test/2/download?link=pack");
+    expect(addBody?.get("savepath")).toBe("/data/media/tv/Example Show");
+    expect(addBody?.get("category")).toBe("tv");
+    expect(addBody?.get("tags")).toBe("churn-direct");
+    expect(addBody?.get("contentLayout")).toBe("NoSubfolder");
     await app.close();
   });
 
-  it("monitors every season before manually grabbing a multi-season pack", async () => {
-    const pack = {
-      ...seasonReleasesAt(1),
-      fullSeason: true,
-      seasonNumbers: [1],
-      title: "Example.Show.S01-03",
-    };
-    let updated: Record<string, unknown> | undefined;
-    let posted: Record<string, unknown> | undefined;
-    const calls: string[] = [];
+  it("sends a single-season release to the season folder", async () => {
+    let addBody: URLSearchParams | undefined;
     installShowReleaseFetch((url, init) => {
-      calls.push(`${init?.method ?? "GET"} ${url}`);
-      if (
-        url.includes("sonarr.test") &&
-        url.includes("/api/v3/release?seriesId=42&seasonNumber=1")
-      ) {
-        return jsonResponse([pack]);
-      }
-      if (
-        url.includes("sonarr.test") &&
-        url.endsWith("/api/v3/series/42") &&
-        init?.method === "PUT"
-      ) {
-        updated = readBody(init);
-        return jsonResponse(updated);
-      }
-      if (
-        url.includes("sonarr.test") &&
-        url.endsWith("/api/v3/release") &&
-        init?.method === "POST"
-      ) {
-        posted = readBody(init);
-        return jsonResponse({ id: 1 });
+      if (url === "http://qbittorrent.test:8080/api/v2/torrents/add") {
+        addBody = new URLSearchParams(String(init?.body));
+        return new Response("Ok.", { status: 200 });
       }
       return undefined;
     });
 
-    const app = await buildAuthedServer(makeConfig());
+    const config = makeConfig();
+    config.qbittorrent.apiKey = "qbt-test-key";
+    const app = await buildAuthedServer(config);
     const list = await waitForCachedReleases(
       app,
       "/api/library/shows/sonarr/42/releases?season=1",
     );
     const release = flattenCachedReleases(list).find(
-      (item) => item.title === "Example.Show.S01-03",
+      (item) => item.title === "Example.Show.S01E01.1080p",
     ) as { id: string };
+
     const response = await app.inject({
       method: "POST",
       url: "/api/library/shows/sonarr/42/releases/grab",
@@ -2940,20 +3148,10 @@ describe("show releases", () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(updated).toMatchObject({
-      seasons: [
-        { seasonNumber: 1, monitored: true },
-        { seasonNumber: 2, monitored: true },
-        { seasonNumber: 3, monitored: true },
-      ],
-    });
-    expect(posted).toMatchObject({ guid: "pack-guid", seriesId: 42 });
-    const updateIndex = calls.findIndex((call) => call.startsWith("PUT "));
-    const grabIndex = calls.findIndex(
-      (call) => call.includes("/api/v3/release") && call.startsWith("POST "),
+    expect(addBody?.get("urls")).toBe("https://prowlarr.test/1/download?link=single");
+    expect(addBody?.get("savepath")).toBe(
+      "/data/media/tv/Example Show/Season 1",
     );
-    expect(updateIndex).toBeGreaterThanOrEqual(0);
-    expect(grabIndex).toBeGreaterThan(updateIndex);
     await app.close();
   });
 
@@ -3047,7 +3245,7 @@ describe("show releases", () => {
     await app.close();
   });
 
-  it("grabs a single episode release using the episode lookup", async () => {
+  it("sends a single episode release straight to qBittorrent", async () => {
     const episodeRelease = {
       ...arrSeasonReleases[0],
       approved: false,
@@ -3055,8 +3253,19 @@ describe("show releases", () => {
       downloadAllowed: false,
       rejections: ["Not enough seeders: 0. Minimum seeders: 1"],
     };
+    let addBody: URLSearchParams | undefined;
     let posted: Record<string, unknown> | undefined;
     installFetch((url, init) => {
+      if (url === "http://qbittorrent.test:8080/api/v2/torrents/info") {
+        return jsonResponse([]);
+      }
+      if (url === "http://qbittorrent.test:8080/api/v2/torrents/add") {
+        addBody = new URLSearchParams(String(init?.body));
+        return new Response("Ok.", { status: 200 });
+      }
+      if (url.includes("sonarr.test") && url.endsWith("/api/v3/series/42")) {
+        return jsonResponse(series);
+      }
       if (url.includes("sonarr.test") && url.endsWith("/api/v3/episode?seriesId=42")) {
         return jsonResponse([{ id: 501, seasonNumber: 1, episodeNumber: 1 }]);
       }
@@ -3070,7 +3279,9 @@ describe("show releases", () => {
       throw new Error(`unexpected URL ${url}`);
     });
 
-    const app = await buildAuthedServer(makeConfig());
+    const config = makeConfig();
+    config.qbittorrent.apiKey = "qbt-test-key";
+    const app = await buildAuthedServer(config);
     const list = await app.inject({
       method: "GET",
       url: "/api/library/shows/sonarr/42/releases?season=1&episode=1",
@@ -3083,13 +3294,10 @@ describe("show releases", () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(posted).toMatchObject({
-      guid: "single-guid",
-      indexerId: 1,
-      seriesId: 42,
-      shouldOverride: true,
-      episodeIds: [501],
-    });
+    expect(addBody?.get("urls")).toBe("https://prowlarr.test/1/download?link=single");
+    expect(addBody?.get("savepath")).toBe("/data/media/tv/Example Show/Season 1");
+    expect(addBody?.get("category")).toBe("tv");
+    expect(posted).toBeUndefined();
     await app.close();
   });
 
@@ -3124,6 +3332,7 @@ describe("show releases", () => {
       indexer: "EZTV",
       protocol: "torrent",
       infoHash: `hash-${title}`,
+      downloadUrl: `https://prowlarr.test/${indexerId}/download?link=${encodeURIComponent(title)}`,
     };
   }
 

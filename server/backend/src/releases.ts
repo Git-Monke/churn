@@ -167,8 +167,12 @@ function mapRelease(
   const mappedEpisodeCount = (release.mappedEpisodeInfo ?? []).filter(
     (episode) => Number.isInteger(episode.id),
   ).length;
+  const downloadSource =
+    release.magnetUrl?.trim() ||
+    release.downloadUrl?.trim() ||
+    (release.guid?.toLowerCase().startsWith("magnet:") ? release.guid : undefined);
   const canGrab =
-    kind === "movie" ? movieReleaseCanGrab(release) : approved || mappedEpisodeCount > 0;
+    kind === "movie" ? movieReleaseCanGrab(release) : Boolean(downloadSource);
   const protocol =
     release.protocol === "torrent" || release.protocol === "usenet"
       ? release.protocol

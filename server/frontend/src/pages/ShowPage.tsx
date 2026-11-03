@@ -96,6 +96,10 @@ export function ShowPage({ source, id }: { source: ShowSource; id: string }) {
   const seasonHasFile = episodes.some(
     (episode) => episode.availability === "jellyfin" || episode.imported,
   );
+  const seasonDownloadActive = episodes.some(
+    (episode) =>
+      episode.download !== undefined && episode.download.status !== "warning",
+  );
   const showReleasePrompt =
     sonarrSeriesId !== undefined &&
     selectedSeason !== null &&
@@ -118,7 +122,7 @@ export function ShowPage({ source, id }: { source: ShowSource; id: string }) {
     refetchOnWindowFocus: false,
     refetchInterval: (query) =>
       query.state.data?.state === "searching" || query.state.data?.refreshing
-        ? 2_000
+        ? 1_000
         : false,
   });
 
@@ -127,13 +131,19 @@ export function ShowPage({ source, id }: { source: ShowSource; id: string }) {
   }, [sonarrSeriesId, selectedSeason]);
 
   useEffect(() => {
+    if (seasonDownloadActive) {
+      setReleasesOpen(false);
+    }
+  }, [seasonDownloadActive]);
+
+  useEffect(() => {
     const releases = seasonReleasesQuery.data;
     if (
       sonarrSeriesId === undefined ||
       selectedSeason === null ||
       !showReleasePrompt ||
       releasesOpen ||
-      releases?.state !== "ready" ||
+      releases === undefined ||
       releases.releaseCount === 0
     ) {
       return;
@@ -154,7 +164,10 @@ export function ShowPage({ source, id }: { source: ShowSource; id: string }) {
 
   const searchingSeasonReleases =
     showReleasePrompt &&
-    (seasonReleasesQuery.isLoading || seasonReleasesQuery.data?.state === "searching");
+    !releasesOpen &&
+    (seasonReleasesQuery.isLoading ||
+      (seasonReleasesQuery.data?.state === "searching" &&
+        seasonReleasesQuery.data.releaseCount === 0));
 
   return (
     <div className="flex flex-col gap-6">
@@ -226,9 +239,14 @@ export function ShowPage({ source, id }: { source: ShowSource; id: string }) {
                     variant="outline"
                     size="sm"
                     onClick={() => setReleasesOpen((open) => !open)}
+                    disabled={seasonDownloadActive}
                   >
                     <DownloadIcon data-icon="inline-start" />
-                    {releasesOpen ? "Hide releases" : "Choose release"}
+                    {seasonDownloadActive
+                      ? "Download in progress"
+                      : releasesOpen
+                        ? "Hide releases"
+                        : "Choose release"}
                   </Button>
                 ) : null}
               </div>
@@ -237,11 +255,16 @@ export function ShowPage({ source, id }: { source: ShowSource; id: string }) {
               releasesOpen &&
               selectedSeason !== null ? (
                 <ReleaseChooser
+                  key={`${sonarrSeriesId}:${selectedSeason}`}
                   kind="series"
                   seriesId={sonarrSeriesId}
                   seasonNumber={selectedSeason}
                   title={showQuery.data.series.title}
-                  onGrabbed={() => setReleasesOpen(false)}
+                  onGrabbed={() => {
+                    autoOpenedReleaseKey.current = `${sonarrSeriesId}:${selectedSeason}`;
+                    setReleasesOpen(false);
+                    void showQuery.refetch();
+                  }}
                 />
               ) : null}
 
@@ -284,7 +307,7 @@ export function ShowPage({ source, id }: { source: ShowSource; id: string }) {
                   </AlertTitle>
                   <AlertDescription>
                     This runs in the background. The release options will open automatically
-                    when they are ready.
+                    as soon as the first results arrive.
                   </AlertDescription>
                 </Alert>
               ) : null}

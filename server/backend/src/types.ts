@@ -275,7 +275,7 @@ export interface ShowRelease {
   publishDate?: string;
   /** Season search that produced this release, used to look it up again on grab. */
   searchSeasonNumber?: number;
-  /** Why a result is visible but cannot be grabbed through the target arr. */
+  /** Why a result is visible but cannot be sent to qBittorrent. */
   downloadDetail?: string;
 }
 
@@ -297,7 +297,7 @@ export interface ReleaseIndexerProgress {
   name: string;
   state: ReleaseIndexerState;
   count: number;
-  /** True when the target Sonarr/Radarr has a matching indexer for grabbing. */
+  /** True when results from this indexer can be sent to qBittorrent. */
   canGrab: boolean;
   detail?: string;
 }
@@ -349,6 +349,17 @@ export interface MovieDetailResponse {
   jellyfinId?: string;
   /** Radarr movie id, when the movie is tracked in Radarr. */
   radarrId?: number;
+  /** Active qBittorrent download for this movie, if any. */
+  download?: ActivityItem;
+}
+
+export interface CancelMovieDownloadResponse {
+  status: "cancelled";
+  service: "radarr";
+  /** Number of Radarr queue records removed for this movie. */
+  queueRemoved: number;
+  /** Number of untracked qBittorrent torrents removed directly. */
+  downloadClientRemoved?: number;
 }
 
 export interface ShowReleasesResponse {

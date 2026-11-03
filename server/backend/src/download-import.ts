@@ -1,4 +1,5 @@
 import type { AppConfig } from "./config.js";
+import { isDirectDownloadTorrent } from "./direct-grab.js";
 import { mapShowTorrentDownloads } from "./qbittorrent-show.js";
 import type { ShowEpisode } from "./types.js";
 import type { QbittorrentTorrent } from "./upstream/qbittorrent.js";
@@ -41,7 +42,7 @@ export async function recoverCompletedShowDownloads(
 
   const paths = new Map<string, string[]>();
   for (const torrent of torrents) {
-    if (!isCompletedTorrent(torrent)) {
+    if (!isCompletedTorrent(torrent) || isDirectDownloadTorrent(torrent)) {
       continue;
     }
     const contentPath = torrent.content_path?.trim();

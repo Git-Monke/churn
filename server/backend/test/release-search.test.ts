@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -17,6 +17,7 @@ function config(): AppConfig {
     serverDir: root,
     frontendDist: path.join(root, "frontend"),
     requestTimeoutMs: 500,
+    releaseTimeoutMs: 500,
     searchTimeoutMs: 2_000,
     sessionTtlMs: 60_000,
     cookieSecure: "auto",
@@ -105,7 +106,18 @@ function cachedRelease(title: string, seeders: number, indexerId = 1) {
     publishDate: "2026-01-01T00:00:00Z",
     ageHours: 12,
     infoHash: `hash-${indexerId}-${title}`,
+    downloadUrl: `https://prowlarr.test/${indexerId}/download?link=${encodeURIComponent(title)}`,
   };
+}
+
+async function waitFor(condition: () => boolean | Promise<boolean>): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    if (await condition()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error("condition was not met");
 }
 
 beforeEach(async () => {
@@ -236,7 +248,7 @@ describe("progressive Prowlarr release search", () => {
     expect(release?.multiSeason).toBe(true);
   });
 
-  it("keeps unsynced indexers visible but disables grabbing", async () => {
+  it("keeps every Prowlarr indexer grabbable directly", async () => {
     installFetch((url) => {
       if (url.endsWith("/api/v1/indexer")) {
         return json([
@@ -278,11 +290,9 @@ describe("progressive Prowlarr release search", () => {
     const finished = await service.getMovie(7);
     const releases = finished.groups.flatMap((group) => group.releases);
     expect(releases).toHaveLength(2);
-    expect(releases.find((release) => release.indexer === "YTS")?.canGrab).toBe(false);
+    expect(releases.find((release) => release.indexer === "YTS")?.canGrab).toBe(true);
     expect(releases.find((release) => release.indexer === "Uindex")?.canGrab).toBe(true);
-    expect(releases.find((release) => release.indexer === "YTS")?.downloadDetail).toContain(
-      "not synced to Radarr",
-    );
+    expect(releases.find((release) => release.indexer === "YTS")?.downloadDetail).toBeUndefined();
   });
 
   it("persists a finished snapshot and reloads it without another search", async () => {
@@ -330,4 +340,226 @@ describe("progressive Prowlarr release search", () => {
     expect(reloaded.releaseCount).toBe(1);
     expect(searches).toBe(1);
   });
+
+  it("persists direct download sources and discards older snapshots", async () => {
+    let searches = 0;
+    installFetch((url) => {
+      if (url.endsWith("/api/v1/indexer")) {
+        return json([{ id: 1, name: "EZTV", enable: true }]);
+      }
+      if (url.includes("/api/v3/indexer")) {
+        return json([{ id: 11, name: "EZTV (Prowlarr)" }]);
+      }
+      if (url.includes("/api/v3/parse")) {
+        return parseResponse(new URL(url).searchParams.get("title") ?? "");
+      }
+      if (url.includes("/api/v1/search")) {
+        searches += 1;
+        return json([cachedRelease("Dune.2021.1080p", 80, 1)]);
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const media = createMediaCache({ cacheDir: path.join(root, "media") });
+    await media.putMovie({
+      version: 1,
+      kind: "movie",
+      id: 7,
+      title: "Dune",
+      year: 2021,
+      cachedAt: "2026-01-01T00:00:00Z",
+    });
+    const cacheDir = path.join(root, "prowlarr");
+    const first = createReleaseSearchService(config(), media, { cacheDir });
+    await first.getMovie(7);
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      if ((await first.getMovie(7)).state === "ready") {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+
+    const body = await first.getMovie(7);
+    const id = body.groups[0]?.releases[0]?.id as string;
+    const found = await first.findRelease({ kind: "movie", movieId: 7 }, id);
+    expect(found?.release.downloadUrl).toBe(
+      "https://prowlarr.test/1/download?link=Dune.2021.1080p",
+    );
+
+    const file = path.join(cacheDir, "movie-7.json");
+    const snapshot = JSON.parse(await readFile(file, "utf8")) as Record<string, unknown>;
+    snapshot.version = 1;
+    await writeFile(file, JSON.stringify(snapshot), "utf8");
+
+    const second = createReleaseSearchService(config(), media, { cacheDir });
+    await second.getMovie(7);
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      if ((await second.getMovie(7)).state === "ready") {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(searches).toBe(2);
+  });
+
+  it("warms series seasons one at a time in ascending order", async () => {
+    const searches: string[] = [];
+    const finishSearch = new Map<string, () => void>();
+    installFetch((url) => {
+      if (url.endsWith("/api/v1/indexer")) {
+        return json([{ id: 1, name: "EZTV", enable: true }]);
+      }
+      if (url.includes("/api/v3/indexer")) {
+        return json([{ id: 11, name: "EZTV (Prowlarr)" }]);
+      }
+      if (url.includes("/api/v3/parse")) {
+        return parseResponse(new URL(url).searchParams.get("title") ?? "");
+      }
+      if (url.includes("/api/v1/search")) {
+        const query = new URL(url).searchParams.get("query") ?? "";
+        searches.push(query);
+        return new Promise<Response>((resolve) => {
+          finishSearch.set(query, () => {
+            const season = query.match(/S(\d+)/)?.[1] ?? "01";
+            resolve(json([cachedRelease(`Example.Show.S${season}.1080p`, 20, 1)]));
+          });
+        });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const media = createMediaCache({ cacheDir: path.join(root, "media") });
+    await media.putSeries({
+      version: 1,
+      kind: "series",
+      id: 42,
+      title: "Example Show",
+      seasons: [1, 2, 3],
+      cachedAt: "2026-01-01T00:00:00Z",
+    });
+    const service = createReleaseSearchService(config(), media, {
+      cacheDir: path.join(root, "prowlarr"),
+    });
+
+    const warming = service.warmSeries(42, [3, 1, 2]);
+    await waitFor(() => searches.length === 1);
+    expect(searches).toEqual(["Example Show S01"]);
+
+    finishSearch.get("Example Show S01")?.();
+    await waitFor(() => searches.length === 2);
+    expect(searches).toEqual(["Example Show S01", "Example Show S02"]);
+
+    finishSearch.get("Example Show S02")?.();
+    await waitFor(() => searches.length === 3);
+    expect(searches).toEqual([
+      "Example Show S01",
+      "Example Show S02",
+      "Example Show S03",
+    ]);
+
+    finishSearch.get("Example Show S03")?.();
+    await warming;
+    expect((await service.getSeriesSeason(42, 3)).state).toBe("ready");
+  });
+
+  it("lets an explicitly requested season jump the warm queue", async () => {
+    const searches: string[] = [];
+    const finishSearch = new Map<string, () => void>();
+    installFetch((url) => {
+      if (url.endsWith("/api/v1/indexer")) {
+        return json([{ id: 1, name: "EZTV", enable: true }]);
+      }
+      if (url.includes("/api/v3/indexer")) {
+        return json([{ id: 11, name: "EZTV (Prowlarr)" }]);
+      }
+      if (url.includes("/api/v3/parse")) {
+        return parseResponse(new URL(url).searchParams.get("title") ?? "");
+      }
+      if (url.includes("/api/v1/search")) {
+        const query = new URL(url).searchParams.get("query") ?? "";
+        searches.push(query);
+        return new Promise<Response>((resolve) => {
+          finishSearch.set(query, () => {
+            const season = query.match(/S(\d+)/)?.[1] ?? "01";
+            resolve(json([cachedRelease(`Example.Show.S${season}.1080p`, 20, 1)]));
+          });
+        });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const media = createMediaCache({ cacheDir: path.join(root, "media") });
+    await media.putSeries({
+      version: 1,
+      kind: "series",
+      id: 42,
+      title: "Example Show",
+      seasons: [1, 2, 3],
+      cachedAt: "2026-01-01T00:00:00Z",
+    });
+    const service = createReleaseSearchService(config(), media, {
+      cacheDir: path.join(root, "prowlarr"),
+    });
+
+    const warming = service.warmSeries(42, [1, 2, 3]);
+    await waitFor(() => searches.length === 1);
+    expect(searches).toEqual(["Example Show S01"]);
+
+    await service.getSeriesSeason(42, 3);
+    expect(searches).toEqual(["Example Show S01", "Example Show S03"]);
+
+    finishSearch.get("Example Show S03")?.();
+    await waitFor(async () => (await service.getSeriesSeason(42, 3)).state === "ready");
+
+    finishSearch.get("Example Show S01")?.();
+    await waitFor(() => searches.length === 3);
+    expect(searches).toEqual([
+      "Example Show S01",
+      "Example Show S03",
+      "Example Show S02",
+    ]);
+
+    finishSearch.get("Example Show S02")?.();
+    await warming;
+    expect(searches.filter((query) => query === "Example Show S03")).toHaveLength(1);
+  });
+
+  it("skips seasons that Sonarr already has complete", async () => {
+    const searches: string[] = [];
+    installFetch((url) => {
+      if (url.endsWith("/api/v1/indexer")) {
+        return json([{ id: 1, name: "EZTV", enable: true }]);
+      }
+      if (url.includes("/api/v3/indexer")) {
+        return json([{ id: 11, name: "EZTV (Prowlarr)" }]);
+      }
+      if (url.includes("/api/v3/parse")) {
+        return parseResponse(new URL(url).searchParams.get("title") ?? "");
+      }
+      if (url.includes("/api/v1/search")) {
+        const query = new URL(url).searchParams.get("query") ?? "";
+        searches.push(query);
+        return json([cachedRelease("Example.Show.S02.1080p", 20, 1)]);
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const media = createMediaCache({ cacheDir: path.join(root, "media") });
+    await media.putSeries({
+      version: 1,
+      kind: "series",
+      id: 42,
+      title: "Example Show",
+      seasons: [1, 2],
+      completeSeasons: [1],
+      cachedAt: "2026-01-01T00:00:00Z",
+    });
+    const service = createReleaseSearchService(config(), media, {
+      cacheDir: path.join(root, "prowlarr"),
+    });
+
+    await service.warmSeries(42, [1, 2]);
+    expect(searches).toEqual(["Example Show S02"]);
+  });
+
 });

@@ -4,6 +4,7 @@ import type {
   CancelJellyfinItemResponse,
   CancelLibraryItemResponse,
   CancelEpisodeDownloadResponse,
+  CancelMovieDownloadResponse,
   LoginInput,
   LoginResponse,
   CreateRequestInput,
@@ -226,6 +227,15 @@ export function fetchMovie(
 ): Promise<MovieDetailResponse> {
   return getJson<MovieDetailResponse>(
     `/api/library/movies/${source}/${encodeURIComponent(id)}`,
+  );
+}
+
+export function cancelMovieDownload(
+  source: "jellyfin" | "radarr",
+  id: string,
+): Promise<CancelMovieDownloadResponse> {
+  return deleteJson<CancelMovieDownloadResponse>(
+    `/api/library/movies/${source}/${encodeURIComponent(id)}/download`,
   );
 }
 

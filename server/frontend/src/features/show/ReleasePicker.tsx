@@ -44,7 +44,7 @@ export function ReleasePicker({
         releaseId: release.id,
       }),
     onSuccess: (data) => {
-      toast.success(`Sent ${data.title} to Sonarr's download queue`);
+      toast.success(`Sent ${data.title} to qBittorrent`);
       void queryClient.invalidateQueries({ queryKey: ["activity"] });
       void queryClient.invalidateQueries({ queryKey: ["show"] });
       void queryClient.invalidateQueries({ queryKey: ["episode-releases"] });
@@ -115,8 +115,8 @@ export function ReleasePicker({
         {releases.map((release) => (
           <div key={release.id} className="flex flex-col gap-2 rounded-lg border p-3">
             <div className="flex flex-wrap items-center gap-1.5">
-              <Badge variant={release.approved ? "secondary" : "outline"}>
-                {release.approved ? "Automatic" : release.canGrab ? "Needs override" : "Unavailable"}
+              <Badge variant={release.canGrab ? "secondary" : "outline"}>
+                {release.canGrab ? "Torrent" : "Unavailable"}
               </Badge>
               <span className="text-xs text-muted-foreground">
                 {release.episodeLabel ?? release.seasonLabel}
@@ -141,7 +141,7 @@ export function ReleasePicker({
             <div className="flex justify-end">
               <Button
                 size="sm"
-                variant={release.approved ? "default" : "outline"}
+                variant={release.canGrab ? "default" : "outline"}
                 disabled={!release.canGrab || grabMutation.isPending}
                 onClick={() => grabMutation.mutate(release)}
               >

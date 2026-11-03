@@ -1,4 +1,5 @@
 import { queueRecordSeasons } from "./activity.js";
+import { isDirectDownloadTorrent } from "./direct-grab.js";
 import { formatDuration } from "./torrent-progress.js";
 import type { ShowDownload } from "./types.js";
 import type { QbittorrentTorrent } from "./upstream/qbittorrent.js";
@@ -109,7 +110,9 @@ function torrentDownload(torrent: QbittorrentTorrent, name: string): ShowDownloa
   }
   if (complete) {
     download.statusMessages = [
-      "Download finished in qBittorrent. Sonarr has not imported it yet.",
+      isDirectDownloadTorrent(torrent)
+        ? "Download finished in qBittorrent. Jellyfin has not indexed it yet."
+        : "Download finished in qBittorrent. Sonarr has not imported it yet.",
     ];
   } else if (failed) {
     download.statusMessages = [`qBittorrent reports ${torrent.state}.`];

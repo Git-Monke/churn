@@ -4,16 +4,27 @@ import type { AppConfig } from "../config.js";
 import { movieMetadata } from "../activity.js";
 import { requireAuth, type AuthContext } from "../auth.js";
 import { ApiError, isUnauthorized, isUpstreamNotFound, UpstreamError } from "../errors.js";
-import { grabWithDuplicateRecovery } from "../download-recovery.js";
-import { findMatchingArrRelease, type ReleaseSearchService } from "../release-search.js";
-import { buildReleaseGrabPayload, releaseNeedsOverride } from "../releases.js";
+import { directGrabError, grabTorrentDirect } from "../direct-grab.js";
+import {
+  isActiveTorrent,
+  matchMovieTorrents,
+  movieTorrentActivity,
+} from "../qbittorrent-activity.js";
+import type { ReleaseSearchService } from "../release-search.js";
 import { requestedMovieItem } from "../routes/requested.js";
-import type { GrabShowReleaseResponse, MovieDetailResponse } from "../types.js";
+import type {
+  CancelMovieDownloadResponse,
+  GrabShowReleaseResponse,
+  MovieDetailResponse,
+} from "../types.js";
 import { createJellyfinClient, type JellyfinItem } from "../upstream/jellyfin.js";
-import { createArrClient, type ServarrMovieResource } from "../upstream/servarr.js";
+import { createQbittorrentClient } from "../upstream/qbittorrent.js";
+import {
+  createArrClient,
+  type ServarrMovieResource,
+  type ServarrQueueRecord,
+} from "../upstream/servarr.js";
 import { errorMessage, stateForError } from "../upstream/states.js";
-
-const RELEASE_SEARCH_TIMEOUT_MS = 30_000;
 
 export function registerMovieRoutes(
   app: FastifyInstance,
@@ -29,6 +40,35 @@ export function registerMovieRoutes(
         return loadJellyfinMovie(config, parseJellyfinId(request.params.id), requireAuth(request));
       }
       return loadRadarrMovie(config, parseMovieId(request.params.id));
+    },
+  );
+
+  app.delete<{ Params: { source: string; id: string } }>(
+    "/api/library/movies/:source/:id/download",
+    async (request, reply) => {
+      reply.header("cache-control", "no-store");
+      const source = parseSource(request.params.source);
+      const detail =
+        source === "jellyfin"
+          ? await loadJellyfinMovie(
+              config,
+              parseJellyfinId(request.params.id),
+              requireAuth(request),
+            )
+          : await loadRadarrMovie(config, parseMovieId(request.params.id));
+      if (detail.state !== "ok" || !detail.movie.title) {
+        throw new ApiError(
+          503,
+          "movie_unavailable",
+          detail.detail ?? "Could not load this movie to cancel its download",
+        );
+      }
+      return cancelMovieDownload(
+        config,
+        detail.movie.title,
+        detail.movie.year,
+        detail.radarrId,
+      );
     },
   );
 
@@ -77,11 +117,13 @@ async function loadRadarrMovie(
   const client = createArrClient("radarr", service, config.requestTimeoutMs);
   try {
     const movie = await client.getMovie(movieId);
+    const download = await loadMovieDownload(config, movie);
     return {
       source: "radarr",
       state: "ok",
       movie: movieDetailFromResource(movie),
       radarrId: movieId,
+      ...(download ? { download } : {}),
     };
   } catch (error) {
     if (isUpstreamNotFound(error)) {
@@ -180,6 +222,14 @@ async function loadJellyfinMovie(
         : {}),
   };
 
+  const download = await loadMovieDownload(
+    config,
+    radarrMovie ?? {
+      title: movie.title,
+      year: movie.year,
+      ...(tmdbId !== undefined ? { tmdbId } : {}),
+    },
+  );
   return {
     source: "jellyfin",
     state: "ok",
@@ -187,6 +237,7 @@ async function loadJellyfinMovie(
     movie,
     ...(item.Id ? { jellyfinId: item.Id } : {}),
     ...(radarrMovie?.id !== undefined ? { radarrId: radarrMovie.id } : {}),
+    ...(download ? { download } : {}),
   };
 }
 
@@ -205,6 +256,129 @@ function movieDetailFromResource(movie: ServarrMovieResource) {
   };
 }
 
+/** Best-effort live download state; a qBittorrent outage must not hide the movie. */
+async function loadMovieDownload(
+  config: AppConfig,
+  movie: ServarrMovieResource,
+) {
+  if (!config.qbittorrent.apiKey) {
+    return undefined;
+  }
+  try {
+    const client = createQbittorrentClient(
+      config.qbittorrent,
+      Math.min(config.requestTimeoutMs, 2_000),
+    );
+    const torrents = await client.getTorrents();
+    return movieTorrentActivity(torrents, movie);
+  } catch {
+    return undefined;
+  }
+}
+
+async function cancelMovieDownload(
+  config: AppConfig,
+  title: string,
+  year: number | undefined,
+  radarrId: number | undefined,
+): Promise<CancelMovieDownloadResponse> {
+  let queueRemoved = 0;
+
+  // Radarr still owns the queue record until the import completes. Remove that
+  // first so Radarr does not immediately re-add a torrent we remove below.
+  if (radarrId !== undefined && config.services.radarr.apiKey) {
+    const client = createArrClient(
+      "radarr",
+      config.services.radarr,
+      config.requestTimeoutMs,
+    );
+    let records: ServarrQueueRecord[] = [];
+    try {
+      records = (await client.getQueue()).filter(
+        (record) => record.movieId === radarrId && record.id !== undefined,
+      );
+    } catch {
+      // The qBittorrent fallback can still cancel a direct download.
+    }
+    await Promise.all(
+      records.map(async (record) => {
+        try {
+          await client.removeQueueRecord(record.id as number, {
+            blocklist: true,
+            skipRedownload: true,
+          });
+        } catch (error) {
+          if (!isUpstreamNotFound(error)) {
+            throw error;
+          }
+        }
+      }),
+    );
+    queueRemoved = records.length;
+  }
+
+  let downloadClientRemoved = 0;
+  try {
+    downloadClientRemoved = await cancelMovieTorrents(config, title, year);
+  } catch (error) {
+    // Radarr already removed the download; a qBittorrent hiccup must not turn
+    // that success into a failed cancel.
+    if (queueRemoved === 0) {
+      throw error;
+    }
+  }
+  if (queueRemoved === 0 && downloadClientRemoved === 0) {
+    throw new ApiError(
+      404,
+      "download_not_found",
+      "This movie has no active download to cancel",
+    );
+  }
+
+  return {
+    status: "cancelled",
+    service: "radarr",
+    queueRemoved,
+    ...(downloadClientRemoved > 0 ? { downloadClientRemoved } : {}),
+  };
+}
+
+/** Cancel direct/untracked downloads, matching the movie title and year. */
+async function cancelMovieTorrents(
+  config: AppConfig,
+  title: string,
+  year: number | undefined,
+): Promise<number> {
+  if (!config.qbittorrent.apiKey) {
+    return 0;
+  }
+  const client = createQbittorrentClient(
+    config.qbittorrent,
+    Math.min(config.requestTimeoutMs, 2_000),
+  );
+  const torrents = await client.getTorrents();
+  const matched = matchMovieTorrents(torrents, title, year).filter(isActiveTorrent);
+  const hashes = [
+    ...new Set(
+      matched
+        .map((torrent) => torrent.hash ?? torrent.infohash_v1 ?? torrent.infohash_v2)
+        .filter((hash): hash is string => Boolean(hash?.trim())),
+    ),
+  ];
+  let removed = 0;
+  await Promise.all(
+    hashes.map(async (hash) => {
+      try {
+        await client.removeTorrent(hash, false);
+        removed += 1;
+      } catch {
+        // Report only torrents qBittorrent confirmed it removed.
+      }
+    }),
+  );
+  return removed;
+}
+
 async function grabMovieRelease(
   config: AppConfig,
   releaseSearch: ReleaseSearchService,
@@ -220,75 +394,19 @@ async function grabMovieRelease(
     );
   }
 
-  const indexerId =
-    found.arrIndexerId ??
-    (await releaseSearch.resolveArrIndexer("movie", found.release.indexer));
-  if (indexerId === undefined) {
-    throw new ApiError(
-      409,
-      "indexer_not_in_radarr",
-      `Radarr does not have the ${found.release.indexer} indexer. Add it in Prowlarr's app sync and retry.`,
-    );
-  }
-
-  const client = releaseClient(config);
-  let release: ReturnType<typeof findMatchingArrRelease>;
   try {
-    const releases = await client.getMovieReleases(movieId, { indexerId });
-    release = findMatchingArrRelease(releases, found.release);
+    const result = await grabTorrentDirect(config, found.release, {
+      kind: "movie",
+      arrId: movieId,
+      title: found.media.title || found.release.title,
+      ...(found.media.year !== undefined ? { year: found.media.year } : {}),
+    });
+    return { status: "grabbed", title: result.title };
   } catch (error) {
-    throw releaseApiError(error, "Could not prepare that release in Radarr");
+    throw directGrabError(error);
   }
-
-  if (!release) {
-    throw new ApiError(
-      404,
-      "release_not_found",
-      "Radarr could not find that release on its indexer; search again",
-    );
-  }
-
-  try {
-    const movie = await client.getMovie(movieId);
-    await client.updateMovie(movieId, { ...movie, monitored: true });
-  } catch (error) {
-    throw releaseApiError(error, "Radarr could not enable monitoring for this movie");
-  }
-
-  const payload = buildReleaseGrabPayload(
-    release,
-    { movieId },
-    { override: releaseNeedsOverride(release) },
-  );
-  try {
-    await grabWithDuplicateRecovery(config, release, () => client.grabRelease(payload));
-  } catch (error) {
-    throw releaseApiError(error, "Radarr could not grab that release", 409);
-  }
-
-  return { status: "grabbed", title: release.title?.trim() || found.release.title };
 }
 
-function releaseClient(config: AppConfig) {
-  return createArrClient(
-    "radarr",
-    config.services.radarr,
-    Math.max(config.requestTimeoutMs, RELEASE_SEARCH_TIMEOUT_MS),
-  );
-}
-
-function releaseApiError(error: unknown, fallback: string, status = 502): ApiError {
-  if (error instanceof ApiError) {
-    return error;
-  }
-  if (error instanceof UpstreamError) {
-    if (error.status === 400 || error.status === 404) {
-      return new ApiError(error.status, "radarr_release_failed", error.message);
-    }
-    return new ApiError(status, "radarr_release_failed", `${fallback}: ${error.message}`);
-  }
-  return new ApiError(status, "radarr_release_failed", errorMessage(error));
-}
 
 function parseSource(value: string): "jellyfin" | "radarr" {
   if (value === "jellyfin" || value === "radarr") {

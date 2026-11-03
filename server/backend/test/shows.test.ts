@@ -132,12 +132,17 @@ describe("buildShowDetail", () => {
       source: "sonarr",
       series,
       sonarrEpisodes: [sonarrEpisode(1, 1, 1, { hasFile: true })],
+      qbittorrentTorrents: [
+        torrent({ name: "Example.Show.S01E01.1080p", progress: 1, state: "uploading" }),
+      ],
     });
     expect(detail.episodes[0]).toMatchObject({
       availability: "missing",
       imported: true,
     });
     expect(detail.episodes[0]?.jellyfinId).toBeUndefined();
+    // Sonarr already imported it, so the finished qBittorrent row is stale.
+    expect(detail.episodes[0]?.download).toBeUndefined();
   });
 
   it("applies a multi-season pack to every covered season", () => {
@@ -181,6 +186,30 @@ describe("buildShowDetail", () => {
       qbittorrentTorrents: [torrent({ name: "Example.Show.S02E01.1080p" })],
     });
     expect(downloadOnly.defaultSeason).toBe(2);
+  });
+
+  it("hides a finished download once Jellyfin has indexed the episode", () => {
+    const detail = buildShowDetail({
+      source: "jellyfin",
+      series,
+      jellyfinEpisodes: [jellyfinEpisode("j1", 1, 1), jellyfinEpisode("j2", 1, 2)],
+      sonarrEpisodes: [sonarrEpisode(1, 1, 1), sonarrEpisode(2, 1, 2)],
+      qbittorrentTorrents: [
+        torrent({
+          name: "Example.Show.S01.1080p",
+          progress: 1,
+          state: "uploading",
+          tags: "churn-direct",
+        }),
+      ],
+    });
+
+    expect(detail.episodes.map((episode) => episode.availability)).toEqual([
+      "jellyfin",
+      "jellyfin",
+    ]);
+    expect(detail.episodes.every((episode) => episode.download === undefined)).toBe(true);
+    expect(detail.seasons[0]?.downloadingCount).toBe(0);
   });
 
   it("shows a qBittorrent upgrade beside a playable episode", () => {

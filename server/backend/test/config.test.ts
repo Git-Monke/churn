@@ -226,6 +226,7 @@ describe("config loading", () => {
         VPN_STATUS_URL: "http://vpn-status:8098/",
         VPN_STATUS_TIMEOUT_MS: "30000",
         SEARCH_TIMEOUT_MS: "15000",
+        RELEASE_TIMEOUT_MS: "150000",
       },
       readDotEnv: false,
     });
@@ -238,6 +239,7 @@ describe("config loading", () => {
     expect(config.services.sonarr.url).toBe("http://sonarr:8989");
     expect(config.services.sonarr.apiKey).toBe("env-key");
     expect(config.searchTimeoutMs).toBe(15_000);
+    expect(config.releaseTimeoutMs).toBe(150_000);
     expect(config.sessionTtlMs).toBe(3_600_000);
     expect(config.cookieSecure).toBe(true);
     expect(config.prowlarr).toEqual({
@@ -313,6 +315,20 @@ describe("config loading", () => {
         readDotEnv: false,
       }),
     ).toThrow(/SEARCH_TIMEOUT_MS/);
+    expect(() =>
+      loadConfig({
+        serverDir,
+        env: { RELEASE_TIMEOUT_MS: "soon" },
+        readDotEnv: false,
+      }),
+    ).toThrow(/RELEASE_TIMEOUT_MS/);
+    expect(() =>
+      loadConfig({
+        serverDir,
+        env: { RELEASE_TIMEOUT_MS: "1000" },
+        readDotEnv: false,
+      }),
+    ).toThrow(/RELEASE_TIMEOUT_MS/);
   });
 
   it("clamps the session TTL and parses the cookie secure setting", () => {

@@ -53,6 +53,7 @@ survive a rerun.
 | `VPN_STATUS_TIMEOUT_MS` | `25000` | Timeout for the agent's live checks |
 | `REQUEST_TIMEOUT_MS` | `5000` | Upstream timeout for status probes and normal API calls |
 | `SEARCH_TIMEOUT_MS` | `20000` | Timeout for media search and request-option lookups |
+| `RELEASE_TIMEOUT_MS` | `120000` | Timeout for Sonarr/Radarr release lookups; direct grabs go to qBittorrent |
 | `PROWLARR_URL` | `http://127.0.0.1:9696` | Prowlarr base URL for progressive release search |
 | `PROWLARR_API_KEY` | `torrent/config/prowlarr/config.xml` | Optional Prowlarr API-key override |
 | `CHURN_SESSION_TTL_MS` | `43200000` (12 hours) | Server-side idle session TTL; clamped to 5 minutes–30 days |
@@ -115,7 +116,7 @@ token in `.env`, so resume positions and watched state are per user.
 | `GET /api/library/shows/:source/:id` | Show seasons, episodes and download overlays |
 | `GET /api/library/shows/:source/:id/releases?season=N` | Progressive per-indexer Prowlarr search with live progress |
 | `POST /api/library/shows/:source/:id/releases/refresh?season=N` | Start a fresh Prowlarr search |
-| `POST /api/library/shows/:source/:id/releases/grab` | Re-resolve the release through its Sonarr indexer, then grab it |
+| `POST /api/library/shows/:source/:id/releases/grab` | Send the chosen torrent or magnet directly to qBittorrent |
 | `DELETE /api/library/shows/sonarr/:id/episodes/:season/:episode/download` | Cancel one episode's active download and blocklist the release |
 | `GET /api/playback/items/:itemId` | Playable item metadata, resume position and same-origin stream URL |
 | `GET /api/playback/items/:itemId/stream` | Redirect the media element to Jellyfin's direct stream URL for this session |
@@ -175,22 +176,27 @@ state and queue state are not used for availability.
 `localStorage`. Requesting a title only adds it unmonitored; it never starts a
 download. It starts the progressive Prowlarr release search in the background,
 after caching the Radarr/Sonarr metadata for the title (including TMDB/TVDB ids
-and seasons) under `server/cache/releases/media`.
+and seasons) under `server/cache/releases/media`. For a series, every regular
+season is queued for a Prowlarr search immediately, in season order, so opening a
+season usually finds its results already cached. Seasons Sonarr has already
+completed are skipped.
 
 Release search is Prowlarr-first. Opening a movie or season sends one search to
-each enabled Prowlarr indexer in parallel. Results stream into the chooser as
-each indexer finishes, with progress such as `5/9 indexers finished` and a chip
-per indexer. Sonarr/Radarr's own `/api/v3/parse` endpoint supplies title/year,
+each enabled Prowlarr indexer in parallel. The chooser opens as soon as the first
+usable result arrives, then keeps adding results as each indexer finishes, with
+progress such as `5/9 indexers finished` and a chip per indexer. If the user has
+not picked a tier, the chooser follows the best newly arrived tier.
+Sonarr/Radarr's own `/api/v3/parse` endpoint supplies title/year,
 season, episode and quality metadata used to filter unrelated releases. Options are grouped into the quality
 tiers that actually have releases (`480p`, `720p`, `1080p`, `2160p`, `Other`)
 and ordered by seeders, then size. The best-seeded release is shown first, with
 **Show more options** to expand the tier.
 
-Every enabled Prowlarr indexer is shown. If an indexer is not synced to the
-target Sonarr/Radarr, its results remain visible but Download is disabled with
-an explanation. For a downloadable result, churn re-queries only that indexer
-through the arr, matches the release by GUID/title/info hash, and then grabs it.
-The arr keeps ownership of monitoring, import and qBittorrent tracking.
+Every enabled Prowlarr indexer is shown, including indexers that are not synced
+to Sonarr/Radarr. A result with a torrent or magnet URL is downloaded directly
+by qBittorrent; there is no second arr search or arr grab. Direct downloads are
+tagged `churn-direct` and saved into the existing show/movie folder under
+`/data/media`, so Jellyfin sees them without an arr import.
 
 Snapshots persist in `server/cache/releases/prowlarr` (or
 `server/.churn-cache/releases/prowlarr` when the container-owned `cache/`
@@ -199,15 +205,19 @@ snapshot until **Search again** starts a fresh search. A tier whose best release
 has fewer than 50 seeders displays a stale-results warning and a **Search again**
 button.
 
-Picking a release enables monitoring for the movie or the affected season(s)
-and starts the download. A multi-season pack monitors every season it covers.
-Episode level picking remains available for repairing one missing episode and
-still uses Sonarr's direct episode search. If qBittorrent has a download that
-Sonarr never queued, the show page matches its filename to the series and
-season/episode and shows live progress instead of prompting for another release.
-Once that download finishes, churn asks Sonarr to scan its content path so the
-files are imported even when the queue record was lost; the episode changes to
-**Importing** and Jellyfin is refreshed after the import completes.
+Picking a release sends that exact torrent or magnet to qBittorrent. A movie is
+saved in its Radarr movie folder; a single season or episode is saved under
+`Show/Season N`; a multi-season pack is saved in the show folder. These direct
+downloads are tagged `churn-direct`, so Sonarr monitoring and arr import are not
+required. Episode level picking remains available for repairing one missing
+episode and uses Sonarr's direct episode search only to produce the result list.
+If qBittorrent has an older arr-managed download that Sonarr never queued, the
+show page matches its filename to the series and season/episode and shows live
+progress. Once that download finishes, churn asks Sonarr to scan its content
+path; `churn-direct` downloads are already in the library and skip that scan.
+A background watcher sees `churn-direct` torrents finish in qBittorrent and asks
+Jellyfin to refresh, so direct downloads do not depend on Jellyfin's own
+filesystem watcher.
 
 On `POST /api/requests` the backend re-fetches canonical metadata by id, checks
 for duplicates, validates the profile and root folder against the live arr APIs,
@@ -253,10 +263,11 @@ files, and removes matching qBittorrent torrents. If the arr catalog cannot be
 checked, churn refuses the Jellyfin delete rather than risking an orphaned arr
 entry.
 
-The backend also watches Sonarr/Radarr import history. When a download is
-imported it asks Jellyfin to refresh, even when no dashboard tab is open. While a
-Library card is **Scanning**, the page polls Jellyfin every 2 seconds so the card
-becomes playable as soon as the item is indexed.
+The backend watches Sonarr/Radarr import history and qBittorrent for finished
+`churn-direct` downloads. Either event asks Jellyfin to refresh, even when no
+dashboard tab is open. While a Library card is **Scanning**, the page polls
+Jellyfin every 2 seconds so the card becomes playable as soon as the item is
+indexed.
 
 Movies stay at card level. Clicking a show opens
 `/api/library/shows/:source/:id`, which unions Jellyfin and Sonarr episodes by
@@ -279,13 +290,16 @@ minutes) and the page polls every two seconds while that scan is likely still
 running, so the episode list fills in without a manual reload.
 
 For shows tracked in Sonarr — including Jellyfin-backed shows — **Choose
-release** runs the progressive Prowlarr season search. The chooser updates as
-each indexer finishes, and the progress line says how many indexers are still
-running. Results are parsed through Sonarr/Radarr's `/api/v3/parse` endpoint and
-grouped by the quality tiers they actually cover; each row shows size, quality, indexer,
-seeders, season/episode coverage and whether the indexer is available in Sonarr.
-Grabbing a multi-season pack monitors every season it covers first, so Sonarr
-imports the whole pack rather than only the selected season.
+release** runs the progressive Prowlarr season search. The chooser opens on the
+first result and updates as each indexer finishes; the progress line says how
+many indexers are still running. Grabbing a release closes the chooser and stays
+on the current season; while its download is active, **Choose release** is
+disabled so the same season cannot be grabbed twice. Results are parsed through
+Sonarr/Radarr's `/api/v3/parse` endpoint and grouped by the quality tiers they
+actually cover; each row shows size, quality, indexer, seeders and
+season/episode coverage. Grabbing sends the exact torrent to qBittorrent:
+single seasons use `Show/Season N`, while a multi-season pack uses the show
+folder and Jellyfin groups the files by `SxxExx`.
 
 Missing individual episodes also get their own **Choose release** action. That
 uses Sonarr's episode-id search instead of its season search, so single-episode

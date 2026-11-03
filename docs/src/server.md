@@ -64,11 +64,15 @@ Radarr, the torrent stack's live VPN leak status, and searching and requesting
 new media. Requests are added through the Sonarr/Radarr APIs without starting a
 download, and their TMDB/TVDB metadata is cached for release search. Release
 search queries every enabled Prowlarr indexer in parallel and streams
-per-indexer progress to the chooser; results are parsed through Sonarr/Radarr's
-`/api/v3/parse` endpoint and grouped by quality. Choosing a release re-resolves it
-through the matching Sonarr/Radarr indexer and grabs it there, so arr tracking
-and import still work. The app binds to `127.0.0.1` and the browser only calls
-the backend; upstream keys and URLs stay server-side.
+per-indexer progress to the chooser. Series seasons are queued in ascending
+order, one at a time, skipping seasons Sonarr already has complete; results are
+parsed through Sonarr/Radarr's `/api/v3/parse` endpoint and grouped by quality.
+Choosing a release sends its torrent or magnet directly to qBittorrent, tagged
+`churn-direct`, and saves it into the matching `/data/media` show/movie folder.
+A background watcher sees direct downloads finish and asks Jellyfin to scan, so
+no manual refresh is needed and no arr import is required. Sonarr/Radarr remain the metadata,
+indexer and release-search source. The app binds to `127.0.0.1` and the browser
+only calls the backend; upstream keys and URLs stay server-side.
 
 ```bash
 cd server

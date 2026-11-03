@@ -88,9 +88,10 @@ export function ReleaseChooser(props: ReleaseChooserProps) {
           })
         : grabMovieRelease(props.movieId, { releaseId: release.id }),
     onSuccess: (data) => {
-      toast.success(`Sent ${data.title} to the download queue`);
+      toast.success(`Sent ${data.title} to qBittorrent`);
       void queryClient.invalidateQueries({ queryKey: ["activity"] });
       void queryClient.invalidateQueries({ queryKey: ["show"] });
+      void queryClient.invalidateQueries({ queryKey: ["movie"] });
       void queryClient.invalidateQueries({ queryKey: ["requested-library"] });
       void queryClient.invalidateQueries({ queryKey });
       props.onGrabbed?.();
@@ -103,19 +104,21 @@ export function ReleaseChooser(props: ReleaseChooserProps) {
   const data = releasesQuery.data;
   const groups = data?.groups ?? [];
   const [selectedTier, setSelectedTier] = useState<number | null>(null);
+  const [tierPinned, setTierPinned] = useState(false);
   const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
     if (groups.length === 0) {
       setSelectedTier(null);
+      setTierPinned(false);
       return;
     }
     setSelectedTier((current) =>
-      current !== null && groups.some((group) => group.tier === current)
+      tierPinned && current !== null && groups.some((group) => group.tier === current)
         ? current
         : defaultTier(groups),
     );
-  }, [groups]);
+  }, [groups, tierPinned]);
 
   useEffect(() => {
     setExpanded(false);
@@ -227,7 +230,10 @@ export function ReleaseChooser(props: ReleaseChooserProps) {
         {groups.length > 0 && selectedGroup ? (
           <Tabs
             value={String(selectedGroup.tier)}
-            onValueChange={(value) => setSelectedTier(Number(value))}
+            onValueChange={(value) => {
+              setSelectedTier(Number(value));
+              setTierPinned(true);
+            }}
           >
             <TabsList className="flex h-auto flex-wrap justify-start">
               {groups.map((group) => (
@@ -325,7 +331,6 @@ function IndexerChip({ indexer }: { indexer: ReleaseIndexerProgress }) {
       <span className="max-w-32 truncate">{indexer.name}</span>
       {indexer.state === "finished" ? <span>{indexer.count}</span> : null}
       {indexer.state === "error" ? <span>failed</span> : null}
-      {!indexer.canGrab ? <span>· no arr</span> : null}
     </Badge>
   );
 }
@@ -346,11 +351,6 @@ function ReleaseRow({
   return (
     <div className="flex flex-col gap-2 rounded-lg border p-3">
       <div className="flex flex-wrap items-center gap-1.5">
-        {!release.canGrab ? (
-          <Badge variant="outline">Indexer not in arr</Badge>
-        ) : (
-          <Badge variant="secondary">Matched</Badge>
-        )}
         {release.multiSeason ? <Badge variant="outline">Multi-season</Badge> : null}
         {release.seeders !== undefined && release.seeders < 50 ? (
           <Badge variant="outline">Low seeders</Badge>

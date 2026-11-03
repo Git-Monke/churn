@@ -37,6 +37,8 @@ export interface SeriesMetadataCacheEntry {
   rating?: number;
   imageUrl?: string;
   seasons: number[];
+  /** Seasons where Sonarr already has every episode file. */
+  completeSeasons?: number[];
   cachedAt: string;
 }
 
@@ -206,6 +208,7 @@ export function seriesMetadataEntry(
   if (!title) {
     return undefined;
   }
+  const completeSeasons = completeSeasonNumbers(series.seasons);
   return {
     version: MEDIA_CACHE_VERSION,
     kind: "series",
@@ -220,6 +223,7 @@ export function seriesMetadataEntry(
     ...(metadata.rating !== undefined ? { rating: metadata.rating } : {}),
     ...(metadata.imageUrl !== undefined ? { imageUrl: metadata.imageUrl } : {}),
     seasons: regularSeasons(series.seasons),
+    ...(completeSeasons.length > 0 ? { completeSeasons } : {}),
     cachedAt: new Date().toISOString(),
   };
 }
@@ -228,6 +232,24 @@ function regularSeasons(seasons: ServarrSeriesResource["seasons"]): number[] {
   return [...new Set((seasons ?? []).map((season) => season.seasonNumber))]
     .filter((season) => Number.isInteger(season) && season > 0)
     .sort((left, right) => left - right);
+}
+
+function completeSeasonNumbers(seasons: ServarrSeriesResource["seasons"]): number[] {
+  return [...new Set(
+    (seasons ?? [])
+      .filter((season) => {
+        const total = season.statistics?.totalEpisodeCount ?? season.statistics?.episodeCount;
+        const files = season.statistics?.episodeFileCount;
+        return (
+          Number.isInteger(season.seasonNumber) &&
+          season.seasonNumber > 0 &&
+          total !== undefined &&
+          total > 0 &&
+          (files ?? 0) >= total
+        );
+      })
+      .map((season) => season.seasonNumber),
+  )].sort((left, right) => left - right);
 }
 
 function parseMovie(value: unknown): MovieMetadataCacheEntry | undefined {
