@@ -1,18 +1,20 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   ChevronLeftIcon,
   CircleAlertIcon,
   DownloadIcon,
+  Loader2Icon,
   PlayIcon,
   FilmIcon,
   Trash2Icon,
   TriangleAlertIcon,
 } from "lucide-react";
 
-import { fetchShow } from "@/api/client";
+import { fetchSeasonReleases, fetchShow } from "@/api/client";
 import type {
   ActivityStatus,
+  CachedReleasesResponse,
   ShowDetailResponse,
   ShowDownload,
   ShowEpisode,
@@ -38,7 +40,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ReleasePicker } from "@/features/show/ReleasePicker";
+import { ReleaseChooser } from "@/features/releases/ReleaseChooser";
 import { ReleasePickerDialog } from "@/features/show/ReleasePickerDialog";
 import { CancelEpisodeDownloadDialog } from "@/features/show/CancelEpisodeDownloadDialog";
 import type { ShowSource } from "@/hooks/use-hash-route";
@@ -55,6 +57,7 @@ export function ShowPage({ source, id }: { source: ShowSource; id: string }) {
   const [releasesOpen, setReleasesOpen] = useState(false);
   const [releaseEpisode, setReleaseEpisode] = useState<ShowEpisode | null>(null);
   const [cancelEpisode, setCancelEpisode] = useState<ShowEpisode | null>(null);
+  const autoOpenedReleaseKey = useRef<string | null>(null);
 
   useEffect(() => {
     const data = showQuery.data;
@@ -85,7 +88,11 @@ export function ShowPage({ source, id }: { source: ShowSource; id: string }) {
   // Jellyfin-backed shows still expose their Sonarr series id, so release
   // searches and episode cancels work from the same page.
   const sonarrSeriesId = showQuery.data?.sonarrId;
-  const seasonHasDownload = episodes.some((episode) => episode.download !== undefined);
+  const seasonHasDownload = episodes.some(
+    (episode) =>
+      episode.download !== undefined &&
+      !(episode.download.untracked && episode.download.status === "warning"),
+  );
   const seasonHasFile = episodes.some(
     (episode) => episode.availability === "jellyfin" || episode.availability === "sonarr",
   );
@@ -95,6 +102,57 @@ export function ShowPage({ source, id }: { source: ShowSource; id: string }) {
     episodes.some((episode) => episode.availability === "missing") &&
     !seasonHasDownload &&
     !seasonHasFile;
+
+  // Share the chooser's cache key so opening it does not trigger another fetch.
+  const seasonReleasesQuery = useQuery<CachedReleasesResponse>({
+    queryKey: ["season-releases", sonarrSeriesId, selectedSeason],
+    queryFn: () =>
+      fetchSeasonReleases(sonarrSeriesId as number, selectedSeason as number),
+    enabled:
+      sonarrSeriesId !== undefined &&
+      selectedSeason !== null &&
+      showReleasePrompt,
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+    refetchInterval: (query) =>
+      query.state.data?.state === "searching" || query.state.data?.refreshing
+        ? 2_000
+        : false,
+  });
+
+  useEffect(() => {
+    autoOpenedReleaseKey.current = null;
+  }, [sonarrSeriesId, selectedSeason]);
+
+  useEffect(() => {
+    const releases = seasonReleasesQuery.data;
+    if (
+      sonarrSeriesId === undefined ||
+      selectedSeason === null ||
+      !showReleasePrompt ||
+      releasesOpen ||
+      releases?.state !== "ready" ||
+      releases.releaseCount === 0
+    ) {
+      return;
+    }
+    const key = `${sonarrSeriesId}:${selectedSeason}`;
+    if (autoOpenedReleaseKey.current === key) {
+      return;
+    }
+    autoOpenedReleaseKey.current = key;
+    setReleasesOpen(true);
+  }, [
+    sonarrSeriesId,
+    selectedSeason,
+    showReleasePrompt,
+    releasesOpen,
+    seasonReleasesQuery.data,
+  ]);
+
+  const searchingSeasonReleases =
+    showReleasePrompt &&
+    (seasonReleasesQuery.isLoading || seasonReleasesQuery.data?.state === "searching");
 
   return (
     <div className="flex flex-col gap-6">
@@ -176,7 +234,13 @@ export function ShowPage({ source, id }: { source: ShowSource; id: string }) {
               {sonarrSeriesId !== undefined &&
               releasesOpen &&
               selectedSeason !== null ? (
-                <ReleasePicker seriesId={sonarrSeriesId} seasonNumber={selectedSeason} />
+                <ReleaseChooser
+                  kind="series"
+                  seriesId={sonarrSeriesId}
+                  seasonNumber={selectedSeason}
+                  title={showQuery.data.series.title}
+                  onGrabbed={() => setReleasesOpen(false)}
+                />
               ) : null}
 
               <ReleasePickerDialog
@@ -210,17 +274,30 @@ export function ShowPage({ source, id }: { source: ShowSource; id: string }) {
                 seasonPack={cancelEpisode?.download?.seasonPack === true}
               />
 
-              {showReleasePrompt ? (
+              {searchingSeasonReleases && !releasesOpen ? (
+                <Alert>
+                  <Loader2Icon className="animate-spin" />
+                  <AlertTitle>
+                    Searching for {selectedSeason === null ? "season" : seasonName(selectedSeason)} releases
+                  </AlertTitle>
+                  <AlertDescription>
+                    This runs in the background. The release options will open automatically
+                    when they are ready.
+                  </AlertDescription>
+                </Alert>
+              ) : null}
+
+              {showReleasePrompt && !searchingSeasonReleases && !releasesOpen ? (
                 <Alert>
                   <TriangleAlertIcon />
-                  <AlertTitle>No automatic download for this season</AlertTitle>
+                  <AlertTitle>Choose a release for this season</AlertTitle>
                   <AlertDescription>
-                    Sonarr has no eligible release it can grab automatically. Compare single-season
-                    releases and multi-season packs by size, then pick one yourself.
+                    Browse the cached quality options, compare seeders and size, then pick the
+                    torrent you want. Multi-season packs are listed under every season they cover.
                   </AlertDescription>
                   <AlertAction>
                     <Button variant="outline" size="sm" onClick={() => setReleasesOpen(true)}>
-                      Browse releases
+                      Choose release
                     </Button>
                   </AlertAction>
                 </Alert>
@@ -245,7 +322,9 @@ export function ShowPage({ source, id }: { source: ShowSource; id: string }) {
                           : undefined
                       }
                       onCancelDownload={
-                        sonarrSeriesId !== undefined && episode.download !== undefined
+                        sonarrSeriesId !== undefined &&
+                        episode.download !== undefined &&
+                        !episode.download.untracked
                           ? () => setCancelEpisode(episode)
                           : undefined
                       }
@@ -409,6 +488,7 @@ function EpisodeRow({
             ) : null}
             {download?.quality ? <span>{download.quality}</span> : null}
             {download ? <span>{downloadClientLabel(download)}</span> : null}
+            {download?.untracked ? <span>Not tracked by Sonarr</span> : null}
           </div>
 
           {episode.overview ? (
@@ -526,6 +606,10 @@ function ShowPageSkeleton() {
       </div>
     </div>
   );
+}
+
+function seasonName(seasonNumber: number): string {
+  return seasonNumber === 0 ? "Specials" : `Season ${seasonNumber}`;
 }
 
 function episodeCode(episode: ShowEpisode): string {

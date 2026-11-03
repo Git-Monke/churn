@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 
 export type ShowSource = "jellyfin" | "sonarr";
+export type MovieSource = "jellyfin" | "radarr";
 
 export type AppRoute =
   | { page: "services" }
   | { page: "library" }
   | { page: "show"; source: ShowSource; id: string }
+  | { page: "movie"; source: MovieSource; id: string }
   | { page: "play"; id: string }
   | { page: "search" };
 
@@ -49,6 +51,19 @@ export function parseHash(hash: string): AppRoute {
   ) {
     return {
       page: "show",
+      source: parts[2],
+      id: decodeURIComponent(parts[3]),
+    };
+  }
+  if (
+    parts.length === 4 &&
+    parts[0] === "library" &&
+    parts[1] === "movie" &&
+    (parts[2] === "jellyfin" || parts[2] === "radarr") &&
+    parts[3]
+  ) {
+    return {
+      page: "movie",
       source: parts[2],
       id: decodeURIComponent(parts[3]),
     };

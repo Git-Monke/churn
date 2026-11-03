@@ -13,7 +13,9 @@ import {
   queueRecordSeasons,
   queueRecordStatus,
 } from "./activity.js";
+import { mapShowTorrentDownloads } from "./qbittorrent-show.js";
 import type { JellyfinItem } from "./upstream/jellyfin.js";
+import type { QbittorrentTorrent } from "./upstream/qbittorrent.js";
 import type {
   ServarrEpisode,
   ServarrQueueRecord,
@@ -27,6 +29,8 @@ export interface BuildShowDetailInput {
   jellyfinEpisodes?: JellyfinItem[];
   sonarrEpisodes?: ServarrEpisode[];
   queueRecords?: ServarrQueueRecord[];
+  /** Used only for downloads Sonarr never queued. */
+  qbittorrentTorrents?: QbittorrentTorrent[];
 }
 
 interface EpisodeCandidate {
@@ -100,6 +104,14 @@ export function buildShowDetail(input: BuildShowDetailInput): {
     input.sonarrEpisodes ?? [],
     input.queueRecords ?? [],
   );
+  const missingEpisodes = [...candidates.values()].filter(
+    (candidate) => !candidate.jellyfin && !candidate.sonarr?.hasFile,
+  );
+  const untrackedDownloads = mapShowTorrentDownloads(
+    input.qbittorrentTorrents ?? [],
+    input.series.title,
+    missingEpisodes,
+  );
   const fallbackImage = input.series.imageUrl;
   const episodes = [...candidates.values()]
     .sort((left, right) =>
@@ -107,7 +119,14 @@ export function buildShowDetail(input: BuildShowDetailInput): {
         ? left.episodeNumber - right.episodeNumber
         : left.seasonNumber - right.seasonNumber,
     )
-    .map((candidate) => mapEpisode(candidate, downloads.get(candidate.key), fallbackImage));
+    .map((candidate) =>
+      mapEpisode(
+        candidate,
+        downloads.get(candidate.key),
+        untrackedDownloads.get(candidate.key),
+        fallbackImage,
+      ),
+    );
 
   const seasonNumbers = new Set<number>(jellyfinSeasonNumbers);
   for (const episode of episodes) {
@@ -183,6 +202,7 @@ function downloadOverlay(
 function mapEpisode(
   candidate: EpisodeCandidate,
   download: DownloadCandidate | undefined,
+  untrackedDownload: ShowDownload | undefined,
   fallbackImage: string | undefined,
 ): ShowEpisode {
   const { jellyfin, sonarr } = candidate;
@@ -206,6 +226,8 @@ function mapEpisode(
 
   if (download) {
     episode.download = mapDownload(download);
+  } else if (untrackedDownload) {
+    episode.download = untrackedDownload;
   }
   return episode;
 }

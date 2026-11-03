@@ -6,6 +6,8 @@ import {
   releaseMatchesEpisode,
   releaseMatchesSeason,
   releaseSeasonNumbers,
+  groupShowReleases,
+  toReleaseGroups,
   toShowReleases,
 } from "../src/releases.js";
 import type { ServarrRelease } from "../src/upstream/servarr.js";
@@ -158,5 +160,99 @@ describe("show releases", () => {
     expect(findRelease([item], id ?? "")).toBe(item);
     expect(findRelease([item], "0".repeat(24))).toBeUndefined();
     expect(releaseId({ guid: "", indexerId: 1 })).toBeNull();
+  });
+});
+
+
+describe("cached release groups", () => {
+  it("groups populated quality tiers and sorts by seeders", () => {
+    const groups = toReleaseGroups([
+      release({
+        guid: "sd",
+        title: "Example.Show.S01.480p",
+        quality: { quality: { name: "SDTV" } },
+        seeders: 10,
+        size: 1_000,
+      }),
+      release({
+        guid: "720-a",
+        title: "Example.Show.S01.720p",
+        quality: { quality: { name: "HDTV-720p" } },
+        seeders: 2,
+        size: 2_000,
+      }),
+      release({
+        guid: "720-b",
+        title: "Example.Show.S01.720p.PROPER",
+        quality: { quality: { name: "WEBDL-720p" } },
+        seeders: 80,
+        size: 3_000,
+      }),
+      release({
+        guid: "2160",
+        title: "Example.Show.S01.2160p",
+        quality: { quality: { name: "WEBDL-2160p" } },
+        seeders: 4,
+        size: 4_000,
+      }),
+    ]);
+
+    expect(groups.map((group) => group.label)).toEqual(["480p", "720p", "2160p"]);
+    expect(groups[1]?.releases.map((item) => item.title)).toEqual([
+      "Example.Show.S01.720p.PROPER",
+      "Example.Show.S01.720p",
+    ]);
+    expect(groups[1]?.maxSeeders).toBe(80);
+    expect(groups[1]?.lowSeeders).toBe(false);
+    expect(groups[2]?.lowSeeders).toBe(true);
+  });
+
+  it("shows a multi-season pack in every season group", () => {
+    const pack = release({
+      guid: "pack",
+      title: "Example.Show.S01-05.1080p",
+      seasonNumber: 1,
+      seasonNumbers: [1],
+      quality: { quality: { name: "WEBDL-1080p" } },
+      seeders: 60,
+    });
+    const first = groupShowReleases(toShowReleases([pack]));
+    expect(first).toHaveLength(1);
+    expect(releaseSeasonNumbers(pack)).toEqual([1, 2, 3, 4, 5]);
+  });
+});
+
+
+describe("movie release groups", () => {
+  it("keeps overrideable quality rejections but hides unmatchable movies", () => {
+    const qualityReject = release({
+      guid: "quality",
+      title: "Kung.Fu.Panda.3.2016.1080p.BluRay",
+      quality: { quality: { name: "Bluray-1080p" } },
+      approved: false,
+      rejected: true,
+      downloadAllowed: false,
+      rejections: ["Quality Bluray-1080p is not wanted in profile"],
+      mappedEpisodeInfo: undefined,
+      seeders: 90,
+    });
+    const unknownMovie = release({
+      guid: "unknown",
+      title: "Kung.Fu.Panda.Secrets.of.the.Scroll.2016.1080p",
+      quality: { quality: { name: "WEBDL-1080p" } },
+      approved: false,
+      rejected: true,
+      downloadAllowed: false,
+      rejections: ["Unknown Movie. Unable to match to correct movie using release title."],
+      mappedEpisodeInfo: undefined,
+      seeders: 200,
+    });
+
+    const groups = toReleaseGroups([qualityReject, unknownMovie], "movie");
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.label).toBe("1080p");
+    expect(groups[0]?.releases.map((item) => item.title)).toEqual([
+      "Kung.Fu.Panda.3.2016.1080p.BluRay",
+    ]);
   });
 });

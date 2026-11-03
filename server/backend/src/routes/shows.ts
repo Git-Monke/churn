@@ -6,23 +6,26 @@ import { mapWithConcurrency } from "../concurrency.js";
 import { requireAuth, type AuthContext } from "../auth.js";
 import { ApiError, isUnauthorized, isUpstreamNotFound, UpstreamError } from "../errors.js";
 import { refreshJellyfinLibrary } from "../library-scan.js";
+import { grabWithDuplicateRecovery } from "../download-recovery.js";
+import type { ReleaseCache } from "../release-cache.js";
+import { buildCachedReleasesResponse } from "../release-options.js";
 import {
   buildReleaseGrabPayload,
   findRelease,
   mappedEpisodeIds,
   monitorSeriesSeasons,
-  releaseId,
   releaseMatchesEpisode,
-  releaseMatchesSeason,
   releaseNeedsOverride,
   seasonPackSeasons,
   toShowReleases,
 } from "../releases.js";
 import { mediaCoverUrl } from "../search.js";
 import { buildShowDetail } from "../shows.js";
+import { applyTorrentProgress, indexTorrents } from "../torrent-progress.js";
 import type {
   ArrServiceState,
   CancelEpisodeDownloadResponse,
+  CachedReleasesResponse,
   GrabShowReleaseResponse,
   ShowDetailResponse,
   ShowReleasesResponse,
@@ -30,6 +33,7 @@ import type {
   ShowSource,
 } from "../types.js";
 import { createJellyfinClient, type JellyfinItem } from "../upstream/jellyfin.js";
+import { createQbittorrentClient, type QbittorrentTorrent } from "../upstream/qbittorrent.js";
 import {
   createArrClient,
   type ServarrQueueRecord,
@@ -38,7 +42,11 @@ import {
 } from "../upstream/servarr.js";
 import { errorMessage, stateForError } from "../upstream/states.js";
 
-export function registerShowRoutes(app: FastifyInstance, config: AppConfig): void {
+export function registerShowRoutes(
+  app: FastifyInstance,
+  config: AppConfig,
+  releaseCache: ReleaseCache,
+): void {
   app.get<{ Params: { source: string; id: string } }>(
     "/api/library/shows/:source/:id",
     async (request, reply) => {
@@ -46,15 +54,20 @@ export function registerShowRoutes(app: FastifyInstance, config: AppConfig): voi
       const source = parseSource(request.params.source);
       if (source === "jellyfin") {
         const auth = requireAuth(request);
-        return loadJellyfinShow(config, parseJellyfinId(request.params.id), auth);
+        return loadJellyfinShow(
+          config,
+          parseJellyfinId(request.params.id),
+          auth,
+          releaseCache,
+        );
       }
-      return loadSonarrShow(config, parseSonarrId(request.params.id));
+      return loadSonarrShow(config, parseSonarrId(request.params.id), releaseCache);
     },
   );
 
   app.get<{
     Params: { source: string; id: string };
-    Querystring: { season?: unknown; episode?: unknown; scope?: unknown };
+    Querystring: { season?: unknown; episode?: unknown };
   }>(
     "/api/library/shows/:source/:id/releases",
     async (request, reply) => {
@@ -66,11 +79,23 @@ export function registerShowRoutes(app: FastifyInstance, config: AppConfig): voi
       const seriesId = parseSonarrId(request.params.id);
       const seasonNumber = parseSeasonNumber(request.query.season);
       const episodeNumber = parseOptionalEpisodeNumber(request.query.episode);
-      const scope = parseReleaseScope(request.query.scope);
-      return loadShowReleases(config, seriesId, seasonNumber, {
+      return loadShowReleases(config, releaseCache, seriesId, seasonNumber, {
         episodeNumber,
-        allSeasons: scope === "all",
       });
+    },
+  );
+
+  app.post<{ Params: { source: string; id: string }; Querystring: { season?: unknown } }>(
+    "/api/library/shows/:source/:id/releases/refresh",
+    async (request, reply) => {
+      reply.header("cache-control", "no-store");
+      const source = parseSource(request.params.source);
+      if (source !== "sonarr") {
+        throw new ApiError(400, "invalid_source", "Releases are only available for Sonarr-backed shows");
+      }
+      const seriesId = parseSonarrId(request.params.id);
+      const seasonNumber = parseSeasonNumber(request.query.season);
+      return refreshShowReleases(config, releaseCache, seriesId, seasonNumber);
     },
   );
 
@@ -83,7 +108,12 @@ export function registerShowRoutes(app: FastifyInstance, config: AppConfig): voi
         throw new ApiError(400, "invalid_source", "Releases are only available for Sonarr-backed shows");
       }
       const seriesId = parseSonarrId(request.params.id);
-      return grabShowRelease(config, seriesId, parseGrabReleaseInput(request.body));
+      return grabShowRelease(
+        config,
+        releaseCache,
+        seriesId,
+        parseGrabReleaseInput(request.body),
+      );
     },
   );
 
@@ -115,6 +145,7 @@ async function loadJellyfinShow(
   config: AppConfig,
   itemId: string,
   auth: AuthContext,
+  releaseCache: ReleaseCache,
 ): Promise<ShowDetailResponse> {
   const service = config.services.jellyfin;
   if (!service.apiKey) {
@@ -159,6 +190,7 @@ async function loadJellyfinShow(
     ReturnType<ReturnType<typeof createArrClient>["getEpisodes"]>
   > | undefined;
   let queueRecords: ServarrQueueRecord[] = [];
+  let qbittorrentTorrents: QbittorrentTorrent[] = [];
 
   const tvdbId = providerNumber(item, "tvdb");
   if (tvdbId !== undefined) {
@@ -173,9 +205,11 @@ async function loadJellyfinShow(
         if (!sonarrSeries) {
           warnings.push("This show is not tracked in Sonarr; download status is unavailable.");
         } else if (sonarrSeries.id !== undefined) {
-          const [episodesResult, queueResult] = await Promise.allSettled([
+          warmShowReleaseSearches(config, releaseCache, sonarrSeries.id, sonarrSeries.seasons);
+          const [episodesResult, queueResult, torrentsResult] = await Promise.allSettled([
             sonarrClient.getEpisodes(sonarrSeries.id),
             sonarrClient.getQueue(),
+            loadQbittorrentTorrents(config),
           ]);
           if (episodesResult.status === "fulfilled") {
             sonarrEpisodes = episodesResult.value;
@@ -186,6 +220,13 @@ async function loadJellyfinShow(
             queueRecords = queueResult.value;
           } else {
             warnings.push(`Could not load the Sonarr queue: ${errorMessage(queueResult.reason)}`);
+          }
+          qbittorrentTorrents =
+            torrentsResult.status === "fulfilled" ? torrentsResult.value : [];
+          if (torrentsResult.status === "rejected") {
+            warnings.push(
+              `Could not load qBittorrent downloads: ${errorMessage(torrentsResult.reason)}`,
+            );
           }
         }
       } catch (error) {
@@ -203,7 +244,11 @@ async function loadJellyfinShow(
     jellyfinSeasons: seasons,
     jellyfinEpisodes: episodes,
     sonarrEpisodes,
-    queueRecords: queueForSeries(queueRecords, sonarrSeries?.id),
+    queueRecords: applyTorrentProgress(
+      queueForSeries(queueRecords, sonarrSeries?.id),
+      indexTorrents(qbittorrentTorrents),
+    ),
+    qbittorrentTorrents,
   });
   const scanning = detail.episodes.length === 0 && (await refreshJellyfinSeries(config, itemId));
 
@@ -252,17 +297,52 @@ async function refreshJellyfinSeries(config: AppConfig, itemId: string): Promise
 /** Indexer searches routinely take longer than the general API timeout. */
 const RELEASE_SEARCH_TIMEOUT_MS = 30_000;
 
+/**
+ * Opening a show should make its season options available without waiting for
+ * the user to open each season. Missing season searches run in the background;
+ * previously cached seasons are left alone.
+ */
+function warmShowReleaseSearches(
+  config: AppConfig,
+  releaseCache: ReleaseCache,
+  seriesId: number,
+  seasons: ServarrSeriesResource["seasons"],
+): void {
+  const service = config.services.sonarr;
+  if (!service.apiKey) {
+    return;
+  }
+  const seasonNumbers = [...new Set((seasons ?? []).map((season) => season.seasonNumber))].filter(
+    (season): season is number => Number.isInteger(season) && (season ?? 0) > 0,
+  );
+  if (seasonNumbers.length === 0) {
+    return;
+  }
+  const client = createArrClient(
+    "sonarr",
+    service,
+    Math.max(config.requestTimeoutMs, RELEASE_SEARCH_TIMEOUT_MS),
+  );
+  void releaseCache
+    .warmMissingSeries(seriesId, seasonNumbers, (seasonNumber) =>
+      client.getSeasonReleases(seriesId, seasonNumber),
+    )
+    .catch(() => {
+      // Individual search failures are surfaced when the season is opened.
+    });
+}
+
 interface ReleaseSearchOptions {
   episodeNumber?: number;
-  allSeasons?: boolean;
 }
 
 async function loadShowReleases(
   config: AppConfig,
+  releaseCache: ReleaseCache,
   seriesId: number,
   seasonNumber: number,
   options: ReleaseSearchOptions = {},
-): Promise<ShowReleasesResponse> {
+): Promise<ShowReleasesResponse | CachedReleasesResponse> {
   const service = config.services.sonarr;
   if (!service.apiKey) {
     throw new ApiError(503, "sonarr_unconfigured", unconfiguredDetail("sonarr"));
@@ -295,43 +375,52 @@ async function loadShowReleases(
     };
   }
 
-  if (options.allSeasons) {
-    let matches: Array<{ release: ServarrRelease; searchSeasonNumber: number; id: string }>;
-    try {
-      matches = await getAllSeasonReleaseMatches(
-        client,
-        seriesId,
-        seasonNumber,
-      );
-    } catch (error) {
-      throw releaseApiError(error, "Could not search Sonarr for releases");
-    }
-    const releases = toShowReleases(matches.map((match) => match.release));
-    const searchSeasons = new Map(matches.map((match) => [match.id, match.searchSeasonNumber]));
-    for (const release of releases) {
-      const searchSeasonNumber = searchSeasons.get(release.id);
-      if (searchSeasonNumber !== undefined) {
-        release.searchSeasonNumber = searchSeasonNumber;
-      }
-    }
-    return { seriesId, seasonNumber, checkedAt, releases };
+  const view = await releaseCache.getSeriesSeason(seriesId, seasonNumber);
+  if (view.searching && !view.refreshing && view.lastError === undefined) {
+    void releaseCache.warmSeriesSeason(seriesId, seasonNumber, () =>
+      client.getSeasonReleases(seriesId, seasonNumber),
+    );
+    return buildCachedReleasesResponse({
+      kind: "series-season",
+      service: "sonarr",
+      targetId: seriesId,
+      seasonNumber,
+      view: await releaseCache.getSeriesSeason(seriesId, seasonNumber),
+    });
   }
-
-  let releases: ServarrRelease[];
-  try {
-    releases = await client.getSeasonReleases(seriesId, seasonNumber);
-  } catch (error) {
-    throw releaseApiError(error, "Could not search Sonarr for releases");
-  }
-
-  return {
-    seriesId,
+  return buildCachedReleasesResponse({
+    kind: "series-season",
+    service: "sonarr",
+    targetId: seriesId,
     seasonNumber,
-    checkedAt,
-    releases: toShowReleases(
-      releases.filter((release) => releaseMatchesSeason(release, seasonNumber)),
-    ),
-  };
+    view,
+  });
+}
+
+async function refreshShowReleases(
+  config: AppConfig,
+  releaseCache: ReleaseCache,
+  seriesId: number,
+  seasonNumber: number,
+): Promise<CachedReleasesResponse> {
+  if (!config.services.sonarr.apiKey) {
+    throw new ApiError(503, "sonarr_unconfigured", unconfiguredDetail("sonarr"));
+  }
+  const client = createArrClient(
+    "sonarr",
+    config.services.sonarr,
+    Math.max(config.requestTimeoutMs, RELEASE_SEARCH_TIMEOUT_MS),
+  );
+  void releaseCache.warmSeriesSeason(seriesId, seasonNumber, () =>
+    client.getSeasonReleases(seriesId, seasonNumber),
+  );
+  return buildCachedReleasesResponse({
+    kind: "series-season",
+    service: "sonarr",
+    targetId: seriesId,
+    seasonNumber,
+    view: await releaseCache.getSeriesSeason(seriesId, seasonNumber),
+  });
 }
 
 async function getEpisodeReleases(
@@ -351,56 +440,9 @@ async function getEpisodeReleases(
   return client.getEpisodeReleases(seriesId, episode.id);
 }
 
-async function getAllSeasonReleaseMatches(
-  client: ReturnType<typeof createArrClient>,
-  seriesId: number,
-  requestedSeason: number,
-): Promise<Array<{ release: ServarrRelease; searchSeasonNumber: number; id: string }>> {
-  const series = await client.getSeries(seriesId);
-  const seasons = [...new Set((series.seasons ?? []).map((season) => season.seasonNumber))]
-    .filter((season) => Number.isInteger(season) && season > 0)
-    .sort((left, right) => left - right);
-  if (!seasons.includes(requestedSeason)) {
-    seasons.push(requestedSeason);
-    seasons.sort((left, right) => left - right);
-  }
-
-  const failures: unknown[] = [];
-  const bySeason = await mapWithConcurrency(seasons, 3, async (searchSeasonNumber) => {
-    try {
-      return {
-        searchSeasonNumber,
-        releases: await client.getSeasonReleases(seriesId, searchSeasonNumber),
-      };
-    } catch (error) {
-      failures.push(error);
-      return { searchSeasonNumber, releases: [] };
-    }
-  });
-  if (seasons.length > 0 && failures.length === seasons.length) {
-    throw failures[0];
-  }
-
-  const seen = new Set<string>();
-  const matches: Array<{ release: ServarrRelease; searchSeasonNumber: number; id: string }> = [];
-  for (const result of bySeason) {
-    for (const release of result.releases) {
-      if (!releaseMatchesSeason(release, requestedSeason)) {
-        continue;
-      }
-      const id = releaseId(release);
-      if (!id || seen.has(id)) {
-        continue;
-      }
-      seen.add(id);
-      matches.push({ release, searchSeasonNumber: result.searchSeasonNumber, id });
-    }
-  }
-  return matches;
-}
-
 async function grabShowRelease(
   config: AppConfig,
+  releaseCache: ReleaseCache,
   seriesId: number,
   input: ReturnType<typeof parseGrabReleaseInput>,
 ): Promise<GrabShowReleaseResponse> {
@@ -415,18 +457,29 @@ async function grabShowRelease(
     Math.max(config.requestTimeoutMs, RELEASE_SEARCH_TIMEOUT_MS),
   );
   let release: ServarrRelease | undefined;
-  let releases: ServarrRelease[];
-  try {
-    releases =
-      input.episodeNumber !== undefined
-        ? await getEpisodeReleases(client, seriesId, input.seasonNumber, input.episodeNumber)
-        : await client.getSeasonReleases(
-            seriesId,
-            input.searchSeasonNumber ?? input.seasonNumber,
-          );
-    release = findRelease(releases, input.releaseId);
-  } catch (error) {
-    throw releaseApiError(error, "Could not search Sonarr for releases");
+  if (input.episodeNumber === undefined) {
+    release = (
+      await releaseCache.findRelease(
+        { kind: "series", seriesId, seasonNumber: input.seasonNumber },
+        input.releaseId,
+      )
+    )?.release;
+  }
+
+  if (!release) {
+    let releases: ServarrRelease[];
+    try {
+      releases =
+        input.episodeNumber !== undefined
+          ? await getEpisodeReleases(client, seriesId, input.seasonNumber, input.episodeNumber)
+          : await client.getSeasonReleases(
+              seriesId,
+              input.searchSeasonNumber ?? input.seasonNumber,
+            );
+      release = findRelease(releases, input.releaseId);
+    } catch (error) {
+      throw releaseApiError(error, "Could not search Sonarr for releases");
+    }
   }
 
   if (!release) {
@@ -462,7 +515,7 @@ async function grabShowRelease(
   );
 
   try {
-    await client.grabRelease(payload);
+    await grabWithDuplicateRecovery(config, release, () => client.grabRelease(payload));
   } catch (error) {
     throw releaseApiError(error, "Sonarr could not grab that release", 409);
   }
@@ -567,7 +620,11 @@ function releaseApiError(error: unknown, fallback: string, status = 502): ApiErr
   return new ApiError(status, "sonarr_release_failed", errorMessage(error));
 }
 
-async function loadSonarrShow(config: AppConfig, seriesId: number): Promise<ShowDetailResponse> {
+async function loadSonarrShow(
+  config: AppConfig,
+  seriesId: number,
+  releaseCache: ReleaseCache,
+): Promise<ShowDetailResponse> {
   const service = config.services.sonarr;
   if (!service.apiKey) {
     return emptyShow("sonarr", "unconfigured", unconfiguredDetail("sonarr"));
@@ -584,10 +641,13 @@ async function loadSonarrShow(config: AppConfig, seriesId: number): Promise<Show
     return emptyShow("sonarr", stateForError(error), errorMessage(error));
   }
 
+  warmShowReleaseSearches(config, releaseCache, seriesId, serverSeries.seasons);
+
   const warnings: string[] = [];
-  const [episodesResult, queueResult] = await Promise.allSettled([
+  const [episodesResult, queueResult, torrentsResult] = await Promise.allSettled([
     client.getEpisodes(seriesId),
     client.getQueue(),
+    loadQbittorrentTorrents(config),
   ]);
   if (episodesResult.status === "rejected") {
     warnings.push(`Could not load Sonarr episodes: ${errorMessage(episodesResult.reason)}`);
@@ -595,16 +655,26 @@ async function loadSonarrShow(config: AppConfig, seriesId: number): Promise<Show
   if (queueResult.status === "rejected") {
     warnings.push(`Could not load the Sonarr queue: ${errorMessage(queueResult.reason)}`);
   }
+  if (torrentsResult.status === "rejected") {
+    warnings.push(`Could not load qBittorrent downloads: ${errorMessage(torrentsResult.reason)}`);
+  }
 
   const series = seriesSummaryFromSonarr(serverSeries);
   const detail = buildShowDetail({
     source: "sonarr",
     series,
     sonarrEpisodes: episodesResult.status === "fulfilled" ? episodesResult.value : [],
-    queueRecords: queueForSeries(
-      queueResult.status === "fulfilled" ? queueResult.value : [],
-      seriesId,
+    queueRecords: applyTorrentProgress(
+      queueForSeries(
+        queueResult.status === "fulfilled" ? queueResult.value : [],
+        seriesId,
+      ),
+      indexTorrents(
+        torrentsResult.status === "fulfilled" ? torrentsResult.value : [],
+      ),
     ),
+    qbittorrentTorrents:
+      torrentsResult.status === "fulfilled" ? torrentsResult.value : [],
   });
 
   return {
@@ -649,6 +719,18 @@ function seriesSummaryFromSonarr(series: ServarrSeriesResource): ShowSeriesSumma
     tmdbId: series.tmdbId,
     imdbId: series.imdbId,
   };
+}
+
+/** Optional: a missing key or unavailable qBittorrent just disables the fallback. */
+async function loadQbittorrentTorrents(config: AppConfig): Promise<QbittorrentTorrent[]> {
+  if (!config.qbittorrent.apiKey) {
+    return [];
+  }
+  const client = createQbittorrentClient(
+    config.qbittorrent,
+    Math.min(config.requestTimeoutMs, 2_000),
+  );
+  return client.getTorrents();
 }
 
 function queueForSeries(
@@ -732,16 +814,6 @@ function parseGrabReleaseInput(value: unknown): {
     throw new ApiError(400, "invalid_release_id", "releaseId is invalid");
   }
   return { seasonNumber, episodeNumber, searchSeasonNumber, releaseId: body.releaseId };
-}
-
-function parseReleaseScope(value: unknown): "season" | "all" {
-  if (value === undefined || value === "season") {
-    return "season";
-  }
-  if (value === "all") {
-    return "all";
-  }
-  throw new ApiError(400, "invalid_scope", "scope must be season or all");
 }
 
 function parseOptionalEpisodeNumber(value: unknown): number | undefined {

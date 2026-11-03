@@ -1,4 +1,5 @@
-import { existsSync } from "node:fs";
+import { accessSync, constants, existsSync, mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
 import cookie from "@fastify/cookie";
@@ -13,11 +14,13 @@ import {
 import type { AppConfig } from "./config.js";
 import { ApiError, UpstreamError } from "./errors.js";
 import { createLibraryScanWatcher } from "./library-scan.js";
+import { createReleaseCache } from "./release-cache.js";
 import { createReleaseEventStore } from "./release-events.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerActivityRoutes } from "./routes/activity.js";
 import { registerHealthRoutes } from "./routes/health.js";
 import { registerLibraryRoutes } from "./routes/library.js";
+import { registerMovieRoutes } from "./routes/movies.js";
 import { registerPlaybackRoutes } from "./routes/playback.js";
 import { registerRequestRoutes } from "./routes/requests.js";
 import { registerRequestedLibraryRoutes } from "./routes/requested.js";
@@ -39,6 +42,9 @@ export async function buildServer(
   const sessionStore = createMemorySessionStore({ ttlMs: config.sessionTtlMs });
   const loginThrottle = createLoginThrottle();
   const releaseEvents = createReleaseEventStore();
+  const releaseCache = createReleaseCache({
+    cacheDir: resolveReleaseCacheDir(config.serverDir),
+  });
   const libraryScan = createLibraryScanWatcher(config);
   libraryScan.start();
 
@@ -117,11 +123,12 @@ export async function buildServer(
   registerVpnRoutes(app, config);
   registerLibraryRoutes(app, config);
   registerPlaybackRoutes(app, config);
-  registerRequestedLibraryRoutes(app, config);
+  registerRequestedLibraryRoutes(app, config, releaseCache);
+  registerMovieRoutes(app, config, releaseCache);
   registerSearchRoutes(app, config);
-  registerRequestRoutes(app, config, releaseEvents);
+  registerRequestRoutes(app, config, releaseCache);
   registerActivityRoutes(app, config, releaseEvents);
-  registerShowRoutes(app, config);
+  registerShowRoutes(app, config, releaseCache);
   registerServiceRoutes(app, config);
 
   const hasFrontend = existsSync(path.join(config.frontendDist, "index.html"));
@@ -157,6 +164,29 @@ export async function buildServer(
   });
 
   return app;
+}
+
+/**
+ * `server/cache` belongs to the Jellyfin container and can be root-owned on an
+ * installed stack. Prefer it, but fall back to a directory the backend user can
+ * actually write so cached release searches survive restarts.
+ */
+function resolveReleaseCacheDir(serverDir: string): string {
+  const candidates = [
+    path.join(serverDir, "cache", "releases"),
+    path.join(serverDir, ".churn-cache", "releases"),
+    path.join(tmpdir(), "churn-releases"),
+  ];
+  for (const directory of candidates) {
+    try {
+      mkdirSync(directory, { recursive: true });
+      accessSync(directory, constants.W_OK);
+      return directory;
+    } catch {
+      // Try the next writable location.
+    }
+  }
+  return path.join(tmpdir(), "churn-releases");
 }
 
 function isCrossOriginRequest(request: {

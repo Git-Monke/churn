@@ -1,15 +1,13 @@
-import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   CircleAlertIcon,
   DownloadIcon,
-  LayersIcon,
   Loader2Icon,
   RefreshCwIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { fetchShowReleases, grabShowRelease } from "@/api/client";
+import { fetchEpisodeReleases, grabShowRelease } from "@/api/client";
 import type { ShowRelease } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,10 +16,11 @@ import { Card, CardContent } from "@/components/ui/card";
 interface ReleasePickerProps {
   seriesId: number;
   seasonNumber: number;
-  episodeNumber?: number;
+  episodeNumber: number;
   onGrabbed?: () => void;
 }
 
+/** Direct Sonarr episode search, kept for repairing a single missing episode. */
 export function ReleasePicker({
   seriesId,
   seasonNumber,
@@ -29,25 +28,10 @@ export function ReleasePicker({
   onGrabbed,
 }: ReleasePickerProps) {
   const queryClient = useQueryClient();
-  const [scope, setScope] = useState<"season" | "all">("season");
-
-  useEffect(() => {
-    setScope("season");
-  }, [seasonNumber, episodeNumber]);
 
   const releasesQuery = useQuery({
-    queryKey: [
-      "show-releases",
-      seriesId,
-      seasonNumber,
-      episodeNumber ?? null,
-      scope,
-    ],
-    queryFn: () =>
-      fetchShowReleases("sonarr", String(seriesId), seasonNumber, {
-        episodeNumber,
-        allSeasons: episodeNumber === undefined && scope === "all",
-      }),
+    queryKey: ["episode-releases", seriesId, seasonNumber, episodeNumber],
+    queryFn: () => fetchEpisodeReleases(seriesId, seasonNumber, episodeNumber),
     staleTime: 60_000,
     refetchOnWindowFocus: false,
   });
@@ -55,7 +39,7 @@ export function ReleasePicker({
   const grabMutation = useMutation({
     mutationFn: (release: ShowRelease) =>
       grabShowRelease("sonarr", String(seriesId), {
-        seasonNumber: release.searchSeasonNumber ?? seasonNumber,
+        seasonNumber,
         episodeNumber,
         releaseId: release.id,
       }),
@@ -63,7 +47,8 @@ export function ReleasePicker({
       toast.success(`Sent ${data.title} to Sonarr's download queue`);
       void queryClient.invalidateQueries({ queryKey: ["activity"] });
       void queryClient.invalidateQueries({ queryKey: ["show"] });
-      void queryClient.invalidateQueries({ queryKey: ["show-releases"] });
+      void queryClient.invalidateQueries({ queryKey: ["episode-releases"] });
+      void queryClient.invalidateQueries({ queryKey: ["season-releases"] });
       onGrabbed?.();
     },
     onError: (error) => {
@@ -71,10 +56,10 @@ export function ReleasePicker({
     },
   });
 
-  const releases = releasesQuery.data?.releases ?? [];
-  const hasAutomatic = releases.some((release) => release.approved);
+  const releases = (releasesQuery.data?.releases ?? []).filter(
+    (release) => release.canGrab,
+  );
   const grabbingId = grabMutation.isPending ? grabMutation.variables?.id : undefined;
-  const isEpisode = episodeNumber !== undefined;
 
   return (
     <Card className="gap-3 py-4">
@@ -84,40 +69,22 @@ export function ReleasePicker({
             Releases for {releaseTargetName(seasonNumber, episodeNumber)}
           </h3>
           <p className="text-sm text-muted-foreground">
-            {isEpisode
-              ? "Sonarr is searching this episode. Only releases that explicitly map to this episode are shown."
-              : scope === "all"
-                ? "Searching every Sonarr season for releases that cover this season. This can take longer."
-                : hasAutomatic
-                  ? "Sonarr found automatically eligible releases. Multi-season packs are listed too."
-                  : "Sonarr has no automatically eligible release. Pick a listed release to override and download it."}
+            Sonarr is searching this episode. Only releases that explicitly map to this episode
+            are shown.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-1">
-          {!isEpisode ? (
-            <Button
-              variant={scope === "all" ? "secondary" : "ghost"}
-              size="sm"
-              onClick={() => setScope(scope === "all" ? "season" : "all")}
-              disabled={releasesQuery.isFetching}
-            >
-              <LayersIcon data-icon="inline-start" />
-              {scope === "all" ? "This season" : "All seasons"}
-            </Button>
-          ) : null}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => void releasesQuery.refetch()}
-            disabled={releasesQuery.isFetching}
-          >
-            <RefreshCwIcon
-              data-icon="inline-start"
-              className={releasesQuery.isFetching ? "animate-spin" : undefined}
-            />
-            Search again
-          </Button>
-        </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => void releasesQuery.refetch()}
+          disabled={releasesQuery.isFetching}
+        >
+          <RefreshCwIcon
+            data-icon="inline-start"
+            className={releasesQuery.isFetching ? "animate-spin" : undefined}
+          />
+          Search again
+        </Button>
       </div>
 
       <CardContent className="flex flex-col gap-2 px-4">
@@ -139,38 +106,18 @@ export function ReleasePicker({
         ) : null}
 
         {!releasesQuery.isLoading && !releasesQuery.error && releases.length === 0 ? (
-          <div className="flex flex-col items-start gap-3 py-4">
-            <p className="text-sm text-muted-foreground">
-              {isEpisode
-                ? `Sonarr found no releases for ${releaseTargetName(seasonNumber, episodeNumber)}. Try again later or add another indexer.`
-                : scope === "all"
-                  ? `Sonarr found no releases across its seasons that cover ${releaseTargetName(seasonNumber)}. Try again later or add another indexer.`
-                  : `Sonarr found no season releases for ${releaseTargetName(seasonNumber)}. A multi-season pack may be filed under another season.`}
-            </p>
-            {!isEpisode ? (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setScope(scope === "all" ? "season" : "all")}
-              >
-                <LayersIcon data-icon="inline-start" />
-                {scope === "all" ? "Search this season" : "Search all seasons"}
-              </Button>
-            ) : null}
-          </div>
+          <p className="py-4 text-sm text-muted-foreground">
+            Sonarr found no releases for {releaseTargetName(seasonNumber, episodeNumber)}. Try
+            again later or add another indexer.
+          </p>
         ) : null}
 
         {releases.map((release) => (
-          <div
-            key={release.id}
-            className="flex flex-col gap-2 rounded-lg border p-3"
-          >
+          <div key={release.id} className="flex flex-col gap-2 rounded-lg border p-3">
             <div className="flex flex-wrap items-center gap-1.5">
-              {release.recommended ? <Badge>Recommended</Badge> : null}
               <Badge variant={release.approved ? "secondary" : "outline"}>
                 {release.approved ? "Automatic" : release.canGrab ? "Needs override" : "Unavailable"}
               </Badge>
-              {release.multiSeason ? <Badge variant="outline">Multi-season</Badge> : null}
               <span className="text-xs text-muted-foreground">
                 {release.episodeLabel ?? release.seasonLabel}
               </span>
@@ -185,24 +132,10 @@ export function ReleasePicker({
               {release.quality ? <span>{release.quality}</span> : null}
               {release.indexer ? <span>{release.indexer}</span> : null}
               {release.seeders !== undefined ? <span>{release.seeders} seeders</span> : null}
-              {release.mappedEpisodeCount > 0 ? (
-                <span>
-                  {release.mappedEpisodeCount}{" "}
-                  {release.mappedEpisodeCount === 1 ? "episode" : "episodes"} matched
-                </span>
-              ) : null}
             </div>
 
-            {release.recommended ? (
-              <p className="text-xs text-muted-foreground">
-                {recommendationHint(release)}
-              </p>
-            ) : null}
-
             {release.rejections.length > 0 ? (
-              <p className="text-xs text-muted-foreground">
-                {release.rejections.join(" · ")}
-              </p>
+              <p className="text-xs text-muted-foreground">{release.rejections.join(" · ")}</p>
             ) : null}
 
             <div className="flex justify-end">
@@ -227,24 +160,7 @@ export function ReleasePicker({
   );
 }
 
-function recommendationHint(release: ShowRelease): string {
-  switch (release.recommendation) {
-    case "tier_upgrade":
-      return "Picked over your preferred quality tier because this release has more seeders.";
-    case "below_threshold":
-      return "No release clears the seeder threshold; this is the least-bad option.";
-    case "best_effort":
-      return "No release matches the quality profile exactly; this is the best available.";
-    default:
-      return "Preferred quality with enough seeders.";
-  }
-}
-
-function releaseTargetName(seasonNumber: number, episodeNumber?: number): string {
-  const season = seasonNumber === 0 ? "Specials" : `Season ${seasonNumber}`;
-  if (episodeNumber === undefined) {
-    return season;
-  }
+function releaseTargetName(seasonNumber: number, episodeNumber: number): string {
   return `S${String(seasonNumber).padStart(2, "0")}E${String(episodeNumber).padStart(2, "0")}`;
 }
 

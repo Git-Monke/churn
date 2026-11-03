@@ -10,6 +10,7 @@ import { AuthProvider, useAuth } from "@/features/auth/AuthProvider";
 import { useHashRoute } from "@/hooks/use-hash-route";
 import { LibraryPage } from "@/pages/LibraryPage";
 import { LoginPage } from "@/pages/LoginPage";
+import { MoviePage } from "@/pages/MoviePage";
 import { PlayPage } from "@/pages/PlayPage";
 import { SearchPage } from "@/pages/SearchPage";
 import { ServicesPage } from "@/pages/ServicesPage";
@@ -90,6 +91,9 @@ function Dashboard() {
       {route.page === "library" ? <LibraryPage jellyfinUrl={jellyfinUrl} /> : null}
       {route.page === "show" ? (
         <ShowPage key={`${route.source}:${route.id}`} source={route.source} id={route.id} />
+      ) : null}
+      {route.page === "movie" ? (
+        <MoviePage key={`${route.source}:${route.id}`} source={route.source} id={route.id} />
       ) : null}
       {route.page === "search" ? <SearchPage /> : null}
       {route.page === "play" ? <PlayPage key={route.id} id={route.id} /> : null}

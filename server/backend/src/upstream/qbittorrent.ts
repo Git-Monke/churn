@@ -1,6 +1,6 @@
 import type { QbittorrentConfig } from "../config.js";
 import { UpstreamError } from "../errors.js";
-import { fetchJson } from "../http.js";
+import { fetchJson, fetchWithTimeout, upstreamResponseError } from "../http.js";
 
 /** The subset of qBittorrent's torrent list churn uses for progress overlays. */
 export interface QbittorrentTorrent {
@@ -32,10 +32,14 @@ export interface QbittorrentTorrent {
   completion_on?: number;
 }
 
-/**
- * Read-only qBittorrent client. It intentionally exposes only the torrent list
- * so the backend can never mutate downloads through this path.
- */
+/** qBittorrent accepts an optional `urn:btih:` prefix; compare bare hashes. */
+export function normalizeInfoHash(value: string | undefined): string {
+  return (value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/^urn:btih:/, "");
+}
+
 export function createQbittorrentClient(config: QbittorrentConfig, timeoutMs: number) {
   const authHeaders = (): Record<string, string> => {
     if (!config.apiKey) {
@@ -54,6 +58,31 @@ export function createQbittorrentClient(config: QbittorrentConfig, timeoutMs: nu
         timeoutMs,
         headers: authHeaders(),
       });
+    },
+
+    /** Remove a torrent from qBittorrent while leaving its downloaded files on disk. */
+    async removeTorrent(hash: string, deleteFiles = false): Promise<void> {
+      const body = new URLSearchParams({
+        hashes: normalizeInfoHash(hash),
+        deleteFiles: String(deleteFiles),
+      });
+      const response = await fetchWithTimeout(
+        "qbittorrent",
+        `${config.url}/api/v2/torrents/delete`,
+        {
+          method: "POST",
+          headers: {
+            ...authHeaders(),
+            "content-type": "application/x-www-form-urlencoded",
+          },
+          body: body.toString(),
+        },
+        timeoutMs,
+      );
+      if (!response.ok) {
+        throw await upstreamResponseError("qbittorrent", response);
+      }
+      await response.arrayBuffer().catch(() => undefined);
     },
   };
 }

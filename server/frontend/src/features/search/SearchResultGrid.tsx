@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { SearchIcon } from "lucide-react";
 
-import type { RequestMonitor, SearchResult } from "@/api/types";
+import type { SearchResult } from "@/api/types";
 import {
   Empty,
   EmptyDescription,
@@ -20,7 +20,6 @@ interface SearchResultGridProps {
   onRequest: (result: SearchResult) => void;
   requestingKey: string | null;
   requestDisabled: boolean;
-  seriesMonitor?: RequestMonitor;
 }
 
 export function SearchResultGrid({
@@ -28,7 +27,6 @@ export function SearchResultGrid({
   onRequest,
   requestingKey,
   requestDisabled,
-  seriesMonitor,
 }: SearchResultGridProps) {
   const [filter, setFilter] = useState<Filter>("all");
   const filtered = useMemo(
@@ -53,7 +51,6 @@ export function SearchResultGrid({
                 onRequest={onRequest}
                 requesting={requestingKey === result.key}
                 requestDisabled={requestDisabled}
-                seriesMonitor={seriesMonitor}
               />
             ))}
           </div>

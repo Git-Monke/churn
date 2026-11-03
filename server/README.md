@@ -72,7 +72,7 @@ preserves unknown keys, so hand-added settings survive a rerun.
 | `SONARR_API_KEY` | `server/config/sonarr/config.xml` | Optional override |
 | `RADARR_API_KEY` | `server/config/radarr/config.xml` | Optional override |
 | `QBITTORRENT_URL` | `http://127.0.0.1:8080` | qBittorrent WebUI used for live torrent progress |
-| `QBITTORRENT_API_KEY` | `torrent/config/qbittorrent/qBittorrent/qBittorrent.conf` | Optional override for the read-only progress key |
+| `QBITTORRENT_API_KEY` | `torrent/config/qbittorrent/qBittorrent/qBittorrent.conf` | Optional override for live progress, duplicate recovery and untracked-download detection |
 | `VPN_STATUS_URL` | `http://127.0.0.1:8098` | Loopback address of the torrent stack's `vpn-status` agent |
 | `VPN_STATUS_TIMEOUT_MS` | `25000` | Timeout for the agent's live test; checks include external requests |
 | `REQUEST_TIMEOUT_MS` | `5000` | Upstream request timeout for status probes and normal API calls |
@@ -87,9 +87,20 @@ The backend reads qBittorrent's stable `[WebUI]` API key from
 `torrent/config/qbittorrent/qBittorrent/qBittorrent.conf` (falling back to the
 legacy `WebUI\APIKey` entry). Set `QBITTORRENT_API_KEY` to override it, or
 `QBITTORRENT_URL` when qBittorrent is not reachable at
-`http://127.0.0.1:8080`. The key is used server-side only, against the read-only
-`/api/v2/torrents/info` endpoint; it is never sent to the browser. If the key or
-qBittorrent is unavailable, Library falls back to Sonarr/Radarr's queue values.
+`http://127.0.0.1:8080`. The key is used server-side only, for live progress,
+duplicate recovery and untracked-download detection; it is never sent to the
+browser. If the key or qBittorrent is unavailable, Library falls back to
+Sonarr/Radarr's queue values.
+
+If Sonarr or Radarr reports a qBittorrent connection failure even though the
+torrent is already present in qBittorrent, churn recognizes the misleading
+duplicate error, removes the duplicate without deleting its files, waits for
+qBittorrent to drop it, and retries the grab through the arr so the download
+becomes tracked. The show page also
+matches qBittorrent torrents that the arr never queued to their series and
+season/episode from the torrent name, so their live progress still appears
+instead of prompting for another release. Those downloads are marked as not
+tracked by Sonarr and are read-only in the show UI.
 
 ### VPN status
 
@@ -299,7 +310,10 @@ Movies stay at card level. Clicking a show opens
 `/api/library/shows/:source/:id`, which unions Jellyfin and Sonarr episodes by
 season/episode. Per-episode downloads and Sonarr season packs are overlaid on
 the episode list, and Jellyfin shows are matched to Sonarr through Jellyfin
-`ProviderIds.Tvdb`.
+`ProviderIds.Tvdb`. If qBittorrent has an active torrent that Sonarr never
+queued, its filename is matched to the show and covered episodes so progress
+still appears; a completed untracked torrent is flagged because Sonarr will not
+import it automatically.
 
 Jellyfin can keep a series item while failing to link its on-disk episodes, for
 instance after a restart or an interrupted import. When a Jellyfin show loads

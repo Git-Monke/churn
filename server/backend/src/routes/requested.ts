@@ -2,8 +2,10 @@ import type { FastifyInstance } from "fastify";
 
 import type { AppConfig, ServiceConfig } from "../config.js";
 import { movieMetadata, seriesMetadata } from "../activity.js";
+import { mapWithConcurrency } from "../concurrency.js";
 import { ApiError, isUpstreamNotFound } from "../errors.js";
 import { refreshJellyfinLibrary } from "../library-scan.js";
+import type { ReleaseCache } from "../release-cache.js";
 import type {
   CancelLibraryItemResponse,
   RequestedLibraryItem,
@@ -24,12 +26,28 @@ interface ServiceRequestedLibrary {
   status: RequestedLibraryServiceState;
 }
 
-export function registerRequestedLibraryRoutes(app: FastifyInstance, config: AppConfig): void {
+const RELEASE_SEARCH_TIMEOUT_MS = 30_000;
+
+export function registerRequestedLibraryRoutes(
+  app: FastifyInstance,
+  config: AppConfig,
+  releaseCache: ReleaseCache,
+): void {
   app.get("/api/library/requested", async (_request, reply) => {
     reply.header("cache-control", "no-store");
     const [sonarr, radarr] = await Promise.all([
-      loadRequestedLibrary("sonarr", config.services.sonarr, config.requestTimeoutMs),
-      loadRequestedLibrary("radarr", config.services.radarr, config.requestTimeoutMs),
+      loadRequestedLibrary(
+        "sonarr",
+        config.services.sonarr,
+        config.requestTimeoutMs,
+        releaseCache,
+      ),
+      loadRequestedLibrary(
+        "radarr",
+        config.services.radarr,
+        config.requestTimeoutMs,
+        releaseCache,
+      ),
     ]);
     const items = [...sonarr.items, ...radarr.items];
 
@@ -48,7 +66,7 @@ export function registerRequestedLibraryRoutes(app: FastifyInstance, config: App
       reply.header("cache-control", "no-store");
       const service = parseArrService(request.params.service);
       const id = parsePositiveId(request.params.id);
-      return cancelRequestedTitle(config, service, id);
+      return cancelRequestedTitle(config, service, id, releaseCache);
     },
   );
 }
@@ -57,6 +75,7 @@ async function cancelRequestedTitle(
   config: AppConfig,
   service: ArrServiceId,
   id: number,
+  releaseCache: ReleaseCache,
 ): Promise<CancelLibraryItemResponse> {
   const serviceConfig = config.services[service];
   if (!serviceConfig.apiKey) {
@@ -103,6 +122,12 @@ async function cancelRequestedTitle(
     throw error;
   }
 
+  if (service === "sonarr") {
+    await releaseCache.invalidateSeries(id);
+  } else {
+    await releaseCache.invalidateMovie(id);
+  }
+
   // Jellyfin scans best-effort; a failure must not make the cancel look failed.
   try {
     await refreshJellyfinLibrary(config);
@@ -141,6 +166,7 @@ async function loadRequestedLibrary(
   id: ArrServiceId,
   service: ServiceConfig,
   timeoutMs: number,
+  releaseCache: ReleaseCache,
 ): Promise<ServiceRequestedLibrary> {
   if (!service.apiKey) {
     return failedRequestedLibrary(id, "unconfigured", unconfiguredDetail(id));
@@ -150,6 +176,7 @@ async function loadRequestedLibrary(
   try {
     if (id === "sonarr") {
       const series = await client.listSeries();
+      prefetchSeriesReleases(service, timeoutMs, releaseCache, series);
       const items = series
         .map(requestedSeriesItem)
         .filter((item): item is RequestedLibraryItem => item !== null);
@@ -157,6 +184,7 @@ async function loadRequestedLibrary(
     }
 
     const movies = await client.listMovies();
+    prefetchMovieReleases(service, timeoutMs, releaseCache, movies);
     const items = movies
       .map(requestedMovieItem)
       .filter((item): item is RequestedLibraryItem => item !== null);
@@ -221,6 +249,83 @@ export function requestedMovieItem(movie: ServarrMovieResource): RequestedLibrar
     imdbId: metadata.imdbId,
     available: isMovieAvailable(movie),
   };
+}
+
+/**
+ * Additions made directly in Sonarr/Radarr do not pass through churn's request
+ * route, so reconcile missing release searches whenever the library is loaded.
+ * Fully available titles need no chooser options; the cache methods deduplicate
+ * searches and apply a cooldown to empty results.
+ */
+function prefetchSeriesReleases(
+  service: ServiceConfig,
+  requestTimeoutMs: number,
+  releaseCache: ReleaseCache,
+  series: ServarrSeriesResource[],
+): void {
+  const missing = series.filter(
+    (item) => item.id !== undefined && !isSeriesAvailable(item),
+  );
+  if (missing.length === 0) {
+    return;
+  }
+  const client = createArrClient(
+    "sonarr",
+    service,
+    Math.max(requestTimeoutMs, RELEASE_SEARCH_TIMEOUT_MS),
+  );
+  void mapWithConcurrency(missing, 2, async (item) => {
+    const seriesId = item.id as number;
+    const seasonNumbers = regularSeasons(item.seasons);
+    if (seasonNumbers.length === 0) {
+      try {
+        const full = await client.getSeries(seriesId);
+        await releaseCache.warmMissingSeries(seriesId, regularSeasons(full.seasons), (season) =>
+          client.getSeasonReleases(seriesId, season),
+        );
+      } catch {
+        // The show page will retry if the cache is still empty.
+      }
+      return;
+    }
+    await releaseCache.warmMissingSeries(seriesId, seasonNumbers, (season) =>
+      client.getSeasonReleases(seriesId, season),
+    );
+  }).catch(() => {
+    // Prefetch is best-effort; the requested library response is unaffected.
+  });
+}
+
+function prefetchMovieReleases(
+  service: ServiceConfig,
+  requestTimeoutMs: number,
+  releaseCache: ReleaseCache,
+  movies: ServarrMovieResource[],
+): void {
+  const missing = movies.filter(
+    (item) => item.id !== undefined && !isMovieAvailable(item),
+  );
+  if (missing.length === 0) {
+    return;
+  }
+  const client = createArrClient(
+    "radarr",
+    service,
+    Math.max(requestTimeoutMs, RELEASE_SEARCH_TIMEOUT_MS),
+  );
+  void mapWithConcurrency(missing, 2, (item) =>
+    releaseCache.warmMissingMovie(item.id as number, () =>
+      client.getMovieReleases(item.id as number),
+    ),
+  ).catch(() => {
+    // Prefetch is best-effort; the requested library response is unaffected.
+  });
+}
+
+function regularSeasons(seasons: ServarrSeriesResource["seasons"]): number[] {
+  return [...new Set((seasons ?? []).map((season) => season.seasonNumber))]
+    .filter((season) => Number.isInteger(season) && season > 0)
+    .sort((left, right) => left - right);
 }
 
 function failedRequestedLibrary(

@@ -1,13 +1,19 @@
+import { existsSync } from "node:fs";
+import path from "node:path";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AppConfig } from "../src/config.js";
 import { buildServer } from "../src/server.js";
 
+let testServerCounter = 0;
+
 function makeConfig(overrides: Partial<AppConfig["services"]> = {}): AppConfig {
+  const serverDir = `/tmp/churn-test-${process.pid}-${++testServerCounter}`;
   return {
     host: "127.0.0.1",
     port: 4000,
-    serverDir: "/tmp/churn-test",
+    serverDir,
     frontendDist: "/tmp/churn-test/frontend/dist",
     requestTimeoutMs: 500,
     searchTimeoutMs: 2_000,
@@ -121,6 +127,27 @@ async function buildAuthedServer(config: AppConfig): Promise<Awaited<ReturnType<
   }) as unknown as typeof app.inject;
 
   return app;
+}
+
+function flattenCachedReleases(body: {
+  groups?: Array<{ releases: Array<{ title: string }> }>;
+}): Array<Record<string, unknown>> {
+  return (body.groups ?? []).flatMap((group) => group.releases as Array<Record<string, unknown>>);
+}
+
+async function waitForCachedReleases(
+  app: Awaited<ReturnType<typeof buildServer>>,
+  url: string,
+): Promise<Record<string, any>> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const response = await app.inject({ method: "GET", url });
+    const body = response.json() as Record<string, any>;
+    if (body.state === "ready" || body.state === "error") {
+      return body;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error(`release cache did not become ready for ${url}`);
 }
 
 const appConfig = makeConfig();
@@ -606,7 +633,7 @@ describe("requested library", () => {
       }
       if (url.includes("radarr.test") && url.endsWith("/api/v3/movie")) {
         return jsonResponse([
-          { id: 7, title: "Example Movie", year: 2020, tmdbId: 5678 },
+          { id: 7, title: "Example Movie", year: 2020, tmdbId: 5678, hasFile: true },
         ]);
       }
       throw new Error(`unexpected URL ${url}`);
@@ -621,6 +648,57 @@ describe("requested library", () => {
     expect(body.services[1]).toMatchObject({ id: "radarr", state: "ok", count: 1 });
     expect(body.items).toHaveLength(1);
     expect(body.items[0]).toMatchObject({ key: "movie:5678", service: "radarr" });
+    await app.close();
+  });
+
+  it("prefetches release options for requested titles in the background", async () => {
+    const searched: string[] = [];
+    installFetch((url) => {
+      if (url.includes("sonarr.test") && url.endsWith("/api/v3/series")) {
+        return jsonResponse([
+          {
+            id: 43,
+            title: "Needed Show",
+            seasons: [
+              { seasonNumber: 0, monitored: false },
+              { seasonNumber: 1, monitored: false },
+              { seasonNumber: 2, monitored: false },
+            ],
+            statistics: { episodeFileCount: 0, totalEpisodeCount: 2 },
+          },
+        ]);
+      }
+      if (
+        url.includes("sonarr.test") &&
+        url.includes("/api/v3/release?seriesId=43&seasonNumber=")
+      ) {
+        const season = new URL(url).searchParams.get("seasonNumber");
+        searched.push(`season-${season}`);
+        return jsonResponse([]);
+      }
+      if (url.includes("radarr.test") && url.endsWith("/api/v3/movie")) {
+        return jsonResponse([{ id: 8, title: "Needed Movie", tmdbId: 5678 }]);
+      }
+      if (url.includes("radarr.test") && url.includes("/api/v3/release?movieId=8")) {
+        searched.push("movie");
+        return jsonResponse([]);
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildAuthedServer(appConfig);
+    const response = await app.inject({ method: "GET", url: "/api/library/requested" });
+    expect(response.statusCode).toBe(200);
+
+    for (
+      let attempt = 0;
+      attempt < 100 &&
+      !["movie", "season-1", "season-2"].every((item) => searched.includes(item));
+      attempt += 1
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(searched.sort()).toEqual(["movie", "season-1", "season-2"]);
     await app.close();
   });
 });
@@ -738,6 +816,51 @@ describe("cancel requested title", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]?.method).toBe("DELETE");
     expect(calls[0]?.url).toContain("deleteFiles=true");
+    await app.close();
+  });
+
+  it("removes cached release files when a series is deleted", async () => {
+    const config = makeConfig();
+    installFetch((url, init) => {
+      if (url.includes("sonarr.test") && url.includes("/api/v3/release?seriesId=42&seasonNumber=1")) {
+        return jsonResponse([
+          {
+            guid: "cache-me",
+            indexerId: 1,
+            indexer: "EZTV",
+            title: "Example.Show.S01.1080p",
+            size: 2_000,
+            quality: { quality: { id: 7, name: "WEBDL-1080p" } },
+            seasonNumber: 1,
+            approved: true,
+            rejected: false,
+            downloadAllowed: true,
+            rejections: [],
+            protocol: "torrent",
+            seeders: 80,
+          },
+        ]);
+      }
+      if (url.includes("sonarr.test") && url.includes("/api/v3/queue?")) {
+        return jsonResponse({ records: [] });
+      }
+      if (url.includes("sonarr.test") && url.includes("/api/v3/series/42")) {
+        return new Response(null, { status: 200 });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildAuthedServer(config);
+    await waitForCachedReleases(app, "/api/library/shows/sonarr/42/releases?season=1");
+    const cacheFile = path.join(config.serverDir, "cache", "releases", "series-42", "s1.json");
+    expect(existsSync(cacheFile)).toBe(true);
+
+    const response = await app.inject({
+      method: "DELETE",
+      url: "/api/library/requested/sonarr/42",
+    });
+    expect(response.statusCode).toBe(200);
+    expect(existsSync(cacheFile)).toBe(false);
     await app.close();
   });
 
@@ -912,8 +1035,6 @@ describe("request options", () => {
       defaults: {
         qualityProfileId: 6,
         rootFolderPath: "/data/media/tv",
-        monitor: "all",
-        searchOnAdd: true,
       },
     });
     expect(body.services.radarr.defaults.monitor).toBeUndefined();
@@ -1182,9 +1303,11 @@ describe("search images", () => {
 });
 
 describe("create requests", () => {
-  it("adds a movie with resolved defaults and falls back to Radarr search", async () => {
+  it("adds a movie unmonitored and warms the release cache without searching", async () => {
     let posted: Record<string, unknown> | undefined;
     let command: Record<string, unknown> | undefined;
+    let grabbed: Record<string, unknown> | undefined;
+    let releaseSearches = 0;
     installFetch((url, init) => {
       if (url.includes("/movie/lookup")) return jsonResponse([movieLookup]);
       if (url.endsWith("/api/v3/movie")) {
@@ -1194,7 +1317,14 @@ describe("create requests", () => {
         }
         return jsonResponse([]);
       }
-      if (url.includes("/api/v3/release?movieId=7")) return jsonResponse([]);
+      if (url.includes("/api/v3/release?movieId=7")) {
+        releaseSearches += 1;
+        return jsonResponse([]);
+      }
+      if (url.endsWith("/api/v3/release") && init?.method === "POST") {
+        grabbed = readBody(init);
+        return jsonResponse({ id: 1 });
+      }
       if (url.endsWith("/api/v3/command") && init?.method === "POST") {
         command = readBody(init);
         return jsonResponse({ id: 1 });
@@ -1213,55 +1343,51 @@ describe("create requests", () => {
     const body = response.json();
 
     expect(response.statusCode).toBe(200);
-    expect(body).toMatchObject({ status: "added", service: "radarr", title: "Dune", id: 7 });
+    expect(body).toMatchObject({
+      status: "added",
+      service: "radarr",
+      title: "Dune",
+      id: 7,
+      searching: true,
+    });
+    expect(body).not.toHaveProperty("downloads");
     expect(posted).toMatchObject({
       title: "Dune",
       tmdbId: 438631,
       qualityProfileId: 6,
       rootFolderPath: "/data/media/tv",
-      monitored: true,
+      monitored: false,
       minimumAvailability: "released",
       addOptions: { searchForMovie: false },
     });
     expect(posted).not.toHaveProperty("id");
-    expect(command).toMatchObject({ name: "MoviesSearch", movieIds: [7] });
+    expect(command).toBeUndefined();
+    expect(grabbed).toBeUndefined();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(releaseSearches).toBeGreaterThan(0);
+    expect(command).toBeUndefined();
+    expect(grabbed).toBeUndefined();
     await app.close();
   });
 
-  it("grabs the well-seeded 1080p release over a dead 720p one", async () => {
+  it("does not run a second indexer search when grabbing a cached movie release", async () => {
+    const movieRelease = {
+      guid: "dune-1080",
+      indexerId: 2,
+      indexer: "YTS",
+      title: "Dune.2021.1080p.BluRay.x264",
+      size: 2_000_000_000,
+      quality: { quality: { id: 7, name: "Bluray-1080p" } },
+      approved: false,
+      rejected: true,
+      downloadAllowed: false,
+      rejections: ["Quality Bluray-1080p is not wanted in profile"],
+      protocol: "torrent",
+      seeders: 84,
+    };
+    let releaseSearches = 0;
+    let updated: Record<string, unknown> | undefined;
     let grabbed: Record<string, unknown> | undefined;
-    const releases = [
-      {
-        guid: "seventh-seal-720",
-        indexerId: 1,
-        indexer: "YTS",
-        title: "The.Seventh.Seal.1957.720p.BluRay.x264",
-        size: 800_000_000,
-        quality: { quality: { id: 4, name: "Bluray-720p" } },
-        approved: true,
-        rejected: false,
-        downloadAllowed: true,
-        rejections: [],
-        protocol: "torrent",
-        seeders: 1,
-        leechers: 4,
-      },
-      {
-        guid: "seventh-seal-1080",
-        indexerId: 2,
-        indexer: "YTS",
-        title: "The.Seventh.Seal.1957.1080p.BluRay.x264",
-        size: 2_000_000_000,
-        quality: { quality: { id: 7, name: "Bluray-1080p" } },
-        approved: false,
-        rejected: true,
-        downloadAllowed: false,
-        rejections: ["Quality Bluray-1080p is not wanted in profile"],
-        protocol: "torrent",
-        seeders: 84,
-        leechers: 2,
-      },
-    ];
     installFetch((url, init) => {
       if (url.includes("/movie/lookup")) return jsonResponse([movieLookup]);
       if (url.endsWith("/api/v3/movie")) {
@@ -1270,7 +1396,17 @@ describe("create requests", () => {
         }
         return jsonResponse([]);
       }
-      if (url.includes("/api/v3/release?movieId=7")) return jsonResponse(releases);
+      if (url.endsWith("/api/v3/movie/7") && (!init?.method || init.method === "GET")) {
+        return jsonResponse({ ...movieLookup, id: 7, monitored: false });
+      }
+      if (url.endsWith("/api/v3/movie/7") && init?.method === "PUT") {
+        updated = readBody(init);
+        return jsonResponse(updated);
+      }
+      if (url.includes("/api/v3/release?movieId=7")) {
+        releaseSearches += 1;
+        return jsonResponse([movieRelease]);
+      }
       if (url.endsWith("/api/v3/release") && init?.method === "POST") {
         grabbed = readBody(init);
         return jsonResponse({ id: 1 });
@@ -1281,32 +1417,28 @@ describe("create requests", () => {
     });
 
     const app = await buildAuthedServer(makeConfig());
-    const response = await app.inject({
+    await app.inject({
       method: "POST",
       url: "/api/requests",
-      payload: {
-        kind: "movie",
-        tmdbId: 438631,
-        options: { minSeeders: 5 },
-      },
+      payload: { kind: "movie", tmdbId: 438631 },
     });
-    const body = response.json();
+    const list = await waitForCachedReleases(app, "/api/library/movies/7/releases");
+    const release = flattenCachedReleases(list)[0] as { id: string; title: string };
+    expect(release.title).toBe("Dune.2021.1080p.BluRay.x264");
+    const searchesBeforeGrab = releaseSearches;
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/library/movies/7/releases/grab",
+      payload: { releaseId: release.id },
+    });
 
     expect(response.statusCode).toBe(200);
-    expect(body).toMatchObject({
-      status: "added",
-      downloads: [
-        {
-          title: "The.Seventh.Seal.1957.1080p.BluRay.x264",
-          quality: "Bluray-1080p",
-          seeders: 84,
-          reason: "tier_upgrade",
-          override: true,
-        },
-      ],
-    });
+    expect(response.json()).toMatchObject({ status: "grabbed", title: release.title });
+    expect(releaseSearches).toBe(searchesBeforeGrab);
+    expect(updated).toMatchObject({ id: 7, monitored: true });
     expect(grabbed).toMatchObject({
-      guid: "seventh-seal-1080",
+      guid: "dune-1080",
       indexerId: 2,
       movieId: 7,
       shouldOverride: true,
@@ -1315,41 +1447,10 @@ describe("create requests", () => {
     await app.close();
   });
 
-  it("keeps Radarr's own search when smart picking is off", async () => {
+  it("adds a series unmonitored and warms every regular season in order", async () => {
     let posted: Record<string, unknown> | undefined;
-    installFetch((url, init) => {
-      if (url.includes("/movie/lookup")) return jsonResponse([movieLookup]);
-      if (url.endsWith("/api/v3/movie")) {
-        if (init?.method === "POST") {
-          posted = readBody(init);
-          return jsonResponse({ ...movieLookup, id: 7 });
-        }
-        return jsonResponse([]);
-      }
-      if (url.includes("/qualityprofile")) return jsonResponse(profiles);
-      if (url.includes("/rootfolder")) return jsonResponse(rootFolders);
-      throw new Error(`unexpected URL ${url}`);
-    });
-
-    const app = await buildAuthedServer(makeConfig());
-    const response = await app.inject({
-      method: "POST",
-      url: "/api/requests",
-      payload: {
-        kind: "movie",
-        tmdbId: 438631,
-        options: { smartPick: false },
-      },
-    });
-
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).not.toHaveProperty("downloads");
-    expect(posted).toMatchObject({ addOptions: { searchForMovie: true } });
-    await app.close();
-  });
-
-  it("adds a series with an overridden monitoring scope", async () => {
-    let posted: Record<string, unknown> | undefined;
+    let grabbed: Record<string, unknown> | undefined;
+    const searched: number[] = [];
     installFetch((url, init) => {
       if (url.includes("/series/lookup")) return jsonResponse([seriesLookup]);
       if (url.endsWith("/api/v3/series")) {
@@ -1358,6 +1459,15 @@ describe("create requests", () => {
           return jsonResponse({ ...seriesLookup, id: 11 });
         }
         return jsonResponse([]);
+      }
+      if (url.includes("/api/v3/release?seriesId=11&seasonNumber=")) {
+        const season = Number(new URL(url).searchParams.get("seasonNumber"));
+        searched.push(season);
+        return jsonResponse([]);
+      }
+      if (url.endsWith("/api/v3/release") && init?.method === "POST") {
+        grabbed = readBody(init);
+        return jsonResponse({ id: 1 });
       }
       if (url.includes("/qualityprofile")) return jsonResponse(profiles);
       if (url.includes("/rootfolder")) return jsonResponse(rootFolders);
@@ -1374,214 +1484,29 @@ describe("create requests", () => {
         options: {
           qualityProfileId: 4,
           rootFolderPath: "/data/media/tv",
-          monitor: "firstSeason",
-          searchOnAdd: false,
         },
       },
     });
 
     expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      status: "added",
+      service: "sonarr",
+      searching: true,
+    });
     expect(posted).toMatchObject({
       qualityProfileId: 4,
       rootFolderPath: "/data/media/tv",
+      monitored: false,
       seasons: [
         { seasonNumber: 0, monitored: false },
-        { seasonNumber: 1, monitored: true },
+        { seasonNumber: 1, monitored: false },
       ],
-      addOptions: { monitor: "firstSeason", searchForMissingEpisodes: false },
+      addOptions: { monitor: "none", searchForMissingEpisodes: false },
     });
-    await app.close();
-  });
-
-  it("grabs a well-seeded season pack when a series is requested", async () => {
-    let grabbed: Record<string, unknown> | undefined;
-    const packs = [
-      {
-        guid: "severance-s01-720",
-        indexerId: 1,
-        indexer: "EZTV",
-        title: "Severance.S01.720p.WEB-DL",
-        size: 8_000_000_000,
-        quality: { quality: { id: 4, name: "WEBDL-720p" } },
-        approved: true,
-        rejected: false,
-        downloadAllowed: true,
-        rejections: [],
-        protocol: "torrent",
-        seeders: 1,
-        leechers: 4,
-        fullSeason: true,
-        seasonNumber: 1,
-        seasonNumbers: [1],
-        mappedEpisodeInfo: [{ id: 101, seasonNumber: 1, episodeNumber: 1 }],
-      },
-      {
-        guid: "severance-s01-1080",
-        indexerId: 2,
-        indexer: "EZTV",
-        title: "Severance.S01.1080p.WEB-DL",
-        size: 24_000_000_000,
-        quality: { quality: { id: 7, name: "WEBDL-1080p" } },
-        approved: false,
-        rejected: true,
-        downloadAllowed: false,
-        rejections: ["Quality WEBDL-1080p is not wanted in profile"],
-        protocol: "torrent",
-        seeders: 90,
-        leechers: 2,
-        fullSeason: true,
-        seasonNumber: 1,
-        seasonNumbers: [1],
-        mappedEpisodeInfo: [{ id: 101, seasonNumber: 1, episodeNumber: 1 }],
-      },
-    ];
-    installFetch((url, init) => {
-      if (url.includes("/series/lookup")) return jsonResponse([seriesLookup]);
-      if (url.endsWith("/api/v3/series")) {
-        if (init?.method === "POST") {
-          return jsonResponse({ ...seriesLookup, id: 11 });
-        }
-        return jsonResponse([]);
-      }
-      if (url.includes("/api/v3/release?seriesId=11&seasonNumber=1")) {
-        return jsonResponse(packs);
-      }
-      if (url.endsWith("/api/v3/release") && init?.method === "POST") {
-        grabbed = readBody(init);
-        return jsonResponse({ id: 1 });
-      }
-      if (url.includes("/qualityprofile")) return jsonResponse(profiles);
-      if (url.includes("/rootfolder")) return jsonResponse(rootFolders);
-      throw new Error(`unexpected URL ${url}`);
-    });
-
-    const app = await buildAuthedServer(makeConfig());
-    const response = await app.inject({
-      method: "POST",
-      url: "/api/requests",
-      payload: { kind: "series", tvdbId: 371980 },
-    });
-    const body = response.json();
-
-    expect(response.statusCode).toBe(200);
-    expect(body).toMatchObject({
-      status: "added",
-      service: "sonarr",
-      downloads: [
-        {
-          title: "Severance.S01.1080p.WEB-DL",
-          seasonNumber: 1,
-          reason: "tier_upgrade",
-          override: true,
-        },
-      ],
-    });
-    expect(grabbed).toMatchObject({
-      guid: "severance-s01-1080",
-      indexerId: 2,
-      seriesId: 11,
-      shouldOverride: true,
-      episodeIds: [101],
-    });
-    await app.close();
-  });
-
-  it("monitors every season of a multi-season pack before grabbing it", async () => {
-    const multiSeasonSeries = {
-      ...seriesLookup,
-      seasons: [
-        { seasonNumber: 0, monitored: false },
-        { seasonNumber: 1, monitored: true },
-        { seasonNumber: 2, monitored: false },
-        { seasonNumber: 3, monitored: false },
-      ],
-    };
-    const pack = {
-      guid: "severance-s01-03",
-      indexerId: 3,
-      indexer: "EZTV",
-      title: "Severance.S01-03.1080p.WEB-DL",
-      size: 30_000_000_000,
-      quality: { quality: { id: 7, name: "WEBDL-1080p" } },
-      approved: true,
-      rejected: false,
-      downloadAllowed: true,
-      rejections: [],
-      protocol: "torrent",
-      seeders: 50,
-      leechers: 2,
-      fullSeason: true,
-      // Sonarr often reports only the first season for a multi-season pack.
-      seasonNumber: 1,
-      seasonNumbers: [1],
-      mappedEpisodeInfo: [
-        { id: 101, seasonNumber: 1, episodeNumber: 1 },
-        { id: 201, seasonNumber: 2, episodeNumber: 1 },
-        { id: 301, seasonNumber: 3, episodeNumber: 1 },
-      ],
-    };
-    let updated: Record<string, unknown> | undefined;
-    let grabbed: Record<string, unknown> | undefined;
-    const calls: string[] = [];
-    installFetch((url, init) => {
-      calls.push(`${init?.method ?? "GET"} ${url}`);
-      if (url.includes("/series/lookup")) return jsonResponse([multiSeasonSeries]);
-      if (url.endsWith("/api/v3/series")) {
-        if (init?.method === "POST") {
-          return jsonResponse({ ...multiSeasonSeries, id: 11 });
-        }
-        return jsonResponse([]);
-      }
-      if (url.endsWith("/api/v3/series/11") && (!init?.method || init.method === "GET")) {
-        return jsonResponse({ ...multiSeasonSeries, id: 11 });
-      }
-      if (url.endsWith("/api/v3/series/11") && init?.method === "PUT") {
-        updated = readBody(init);
-        return jsonResponse(updated);
-      }
-      if (url.includes("/api/v3/release?seriesId=11&seasonNumber=1")) {
-        return jsonResponse([pack]);
-      }
-      if (url.endsWith("/api/v3/release") && init?.method === "POST") {
-        grabbed = readBody(init);
-        return jsonResponse({ id: 1 });
-      }
-      if (url.includes("/qualityprofile")) return jsonResponse(profiles);
-      if (url.includes("/rootfolder")) return jsonResponse(rootFolders);
-      throw new Error(`unexpected URL ${url}`);
-    });
-
-    const app = await buildAuthedServer(makeConfig());
-    const response = await app.inject({
-      method: "POST",
-      url: "/api/requests",
-      payload: {
-        kind: "series",
-        tvdbId: 371980,
-        options: { monitor: "firstSeason" },
-      },
-    });
-    const body = response.json();
-
-    expect(response.statusCode).toBe(200);
-    expect(body).toMatchObject({
-      status: "added",
-      service: "sonarr",
-      downloads: [{ title: "Severance.S01-03.1080p.WEB-DL", seasonNumber: 1 }],
-    });
-    expect(updated).toMatchObject({
-      seasons: [
-        { seasonNumber: 0, monitored: false },
-        { seasonNumber: 1, monitored: true },
-        { seasonNumber: 2, monitored: true },
-        { seasonNumber: 3, monitored: true },
-      ],
-    });
-    expect(grabbed).toMatchObject({ seriesId: 11, guid: "severance-s01-03" });
-    const updateIndex = calls.findIndex((call) => call.startsWith("PUT "));
-    const grabIndex = calls.findIndex((call) => call.includes("/api/v3/release") && call.startsWith("POST "));
-    expect(updateIndex).toBeGreaterThanOrEqual(0);
-    expect(grabIndex).toBeGreaterThan(updateIndex);
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(searched).toEqual([1]);
+    expect(grabbed).toBeUndefined();
     await app.close();
   });
 
@@ -2017,6 +1942,83 @@ describe("show detail", () => {
     await app.close();
   });
 
+  it("shows a qBittorrent download Sonarr never queued", async () => {
+    const config = makeConfig();
+    config.qbittorrent.apiKey = "qbt-key";
+    installFetch((url) => {
+      if (url.includes("sonarr.test") && url.endsWith("/api/v3/series/42")) {
+        return jsonResponse({
+          id: 42,
+          title: "Example Show",
+          year: 2024,
+          tvdbId: 1234,
+          images: [],
+        });
+      }
+      if (url.includes("sonarr.test") && url.includes("/api/v3/episode?seriesId=42")) {
+        return jsonResponse([
+          {
+            id: 501,
+            seriesId: 42,
+            seasonNumber: 1,
+            episodeNumber: 1,
+            title: "First",
+            airDateUtc: "2024-01-01T00:00:00Z",
+            hasFile: false,
+          },
+          {
+            id: 502,
+            seriesId: 42,
+            seasonNumber: 1,
+            episodeNumber: 2,
+            title: "Second",
+            airDateUtc: "2024-01-02T00:00:00Z",
+            hasFile: false,
+          },
+        ]);
+      }
+      if (url.includes("sonarr.test") && url.includes("/api/v3/queue")) {
+        return jsonResponse({ records: [] });
+      }
+      if (url.endsWith("/api/v2/torrents/info")) {
+        return jsonResponse([
+          {
+            hash: "44dbb26758b4ed17be93003f86c03461afbe2d8c",
+            name: "Example.Show.S01.1080p.BluRay.x265-KONTRAST",
+            progress: 0.42,
+            state: "downloading",
+            size: 10_000,
+            eta: 120,
+          },
+        ]);
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildAuthedServer(config);
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/library/shows/sonarr/42",
+    });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(body.episodes).toHaveLength(2);
+    for (const episode of body.episodes) {
+      expect(episode.download).toMatchObject({
+        status: "downloading",
+        progress: 42,
+        downloadClient: "qBittorrent",
+        protocol: "torrent",
+        untracked: true,
+        quality: "1080p",
+        timeLeft: "00:02:00",
+      });
+    }
+    expect(body.seasons[0]).toMatchObject({ downloadingCount: 2 });
+    await app.close();
+  });
+
   it("builds a Sonarr-only show with season-pack downloads", async () => {
     installFetch((url) => {
       if (url.includes("sonarr.test") && url.endsWith("/api/v3/series/42")) {
@@ -2091,6 +2093,106 @@ describe("show detail", () => {
   });
 });
 
+describe("movie detail", () => {
+  it("matches a Jellyfin movie to Radarr by TMDB id", async () => {
+    installFetch((url) => {
+      if (url.includes("jellyfin.test") && url.includes("/Items/jellyfin-movie")) {
+        return jsonResponse({
+          Id: "jellyfin-movie",
+          Name: "Dune",
+          Type: "Movie",
+          ProductionYear: 2021,
+          CommunityRating: 8.1,
+          ProviderIds: { Tmdb: "438631" },
+          ImageTags: { Primary: "tag-1" },
+        });
+      }
+      if (url.includes("radarr.test") && url.endsWith("/api/v3/movie")) {
+        return jsonResponse([{ ...movieLookup, id: 7 }]);
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildAuthedServer(
+      makeConfig({
+        jellyfin: {
+          id: "jellyfin",
+          name: "Jellyfin",
+          url: "http://jellyfin.test:8096",
+          apiKey: "jellyfin-key",
+        },
+      }),
+    );
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/library/movies/jellyfin/jellyfin-movie",
+    });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(body).toMatchObject({
+      source: "jellyfin",
+      state: "ok",
+      jellyfinId: "jellyfin-movie",
+      radarrId: 7,
+      movie: {
+        title: "Dune",
+        year: 2021,
+        tmdbId: 438631,
+      },
+    });
+    expect(body.movie.imageUrl).toContain("/api/library/images/jellyfin-movie");
+    await app.close();
+  });
+
+  it("surfaces a failed movie search instead of retrying on every poll", async () => {
+    let releaseSearches = 0;
+    installFetch((url) => {
+      if (url.includes("radarr.test") && url.includes("/api/v3/release?movieId=7")) {
+        releaseSearches += 1;
+        return jsonResponse({ message: "indexer down" }, 500);
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildAuthedServer(makeConfig());
+    const failed = await waitForCachedReleases(app, "/api/library/movies/7/releases");
+    expect(failed.state).toBe("error");
+    expect(failed.detail).toContain("indexer down");
+    expect(releaseSearches).toBe(1);
+
+    await app.inject({ method: "GET", url: "/api/library/movies/7/releases" });
+    await app.inject({ method: "GET", url: "/api/library/movies/7/releases" });
+    expect(releaseSearches).toBe(1);
+    await app.close();
+  });
+
+  it("returns a Radarr-backed movie by id", async () => {
+    installFetch((url) => {
+      if (url.includes("radarr.test") && url.endsWith("/api/v3/movie/7")) {
+        return jsonResponse({ ...movieLookup, id: 7 });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildAuthedServer(makeConfig());
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/library/movies/radarr/7",
+    });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(body).toMatchObject({
+      source: "radarr",
+      state: "ok",
+      radarrId: 7,
+      movie: { title: "Dune", year: 2021, tmdbId: 438631 },
+    });
+    await app.close();
+  });
+});
+
 describe("show releases", () => {
   const seasonReleases = [
     {
@@ -2132,7 +2234,7 @@ describe("show releases", () => {
     },
   ];
 
-  it("lists season releases without exposing upstream ids or URLs", async () => {
+  it("lists cached season releases without exposing upstream ids or URLs", async () => {
     installFetch((url) => {
       if (url.includes("sonarr.test") && url.includes("/api/v3/release?seriesId=42&seasonNumber=1")) {
         return jsonResponse(seasonReleases);
@@ -2141,16 +2243,28 @@ describe("show releases", () => {
     });
 
     const app = await buildAuthedServer(makeConfig());
-    const response = await app.inject({
-      method: "GET",
-      url: "/api/library/shows/sonarr/42/releases?season=1",
-    });
-    const body = response.json();
+    const body = await waitForCachedReleases(
+      app,
+      "/api/library/shows/sonarr/42/releases?season=1",
+    );
+    const releases = flattenCachedReleases(body);
 
-    expect(response.statusCode).toBe(200);
-    expect(body).toMatchObject({ seriesId: 42, seasonNumber: 1 });
-    expect(body.releases).toHaveLength(2);
-    expect(body.releases[1]).toMatchObject({
+    expect(body).toMatchObject({
+      kind: "series-season",
+      service: "sonarr",
+      targetId: 42,
+      seasonNumber: 1,
+      state: "ready",
+    });
+    expect(releases).toHaveLength(2);
+    expect(body.groups.map((group: { label: string }) => group.label)).toEqual([
+      "1080p",
+      "Other",
+    ]);
+    const pack = releases.find(
+      (item) => item.title === "Example.Show.S01-03",
+    );
+    expect(pack).toMatchObject({
       title: "Example.Show.S01-03",
       multiSeason: true,
       seasonLabel: "Seasons 1\u20133",
@@ -2158,24 +2272,30 @@ describe("show releases", () => {
       recommended: false,
       mappedEpisodeCount: 2,
     });
-    expect(body.releases[0]).toMatchObject({
+    const single = releases.find(
+      (item) => item.title === "Example.Show.S01E01.1080p",
+    );
+    expect(single).toMatchObject({
       title: "Example.Show.S01E01.1080p",
       approved: true,
       canGrab: true,
-      recommended: true,
       sizeBytes: 2_000_000_000,
+      tier: 2,
+      tierLabel: "1080p",
     });
-    expect(body.releases[0].id).toMatch(/^[a-f0-9]{24}$/);
+    expect(single?.id).toMatch(/^[a-f0-9]{24}$/);
     expect(JSON.stringify(body)).not.toContain("magnet:");
-    expect(body.releases[0]).not.toHaveProperty("guid");
-    expect(body.releases[0]).not.toHaveProperty("indexerId");
+    expect(single).not.toHaveProperty("guid");
+    expect(single).not.toHaveProperty("indexerId");
     await app.close();
   });
 
-  it("grabs an overridden multi-season pack using mapped episode ids", async () => {
+  it("grabs an overridden multi-season pack using mapped episode ids without re-searching", async () => {
     let posted: Record<string, unknown> | undefined;
+    let releaseSearches = 0;
     installFetch((url, init) => {
       if (url.includes("sonarr.test") && url.includes("/api/v3/release?seriesId=42&seasonNumber=1")) {
+        releaseSearches += 1;
         return jsonResponse(seasonReleases);
       }
       if (url.includes("sonarr.test") && url.endsWith("/api/v3/release") && init?.method === "POST") {
@@ -2186,13 +2306,14 @@ describe("show releases", () => {
     });
 
     const app = await buildAuthedServer(makeConfig());
-    const list = await app.inject({
-      method: "GET",
-      url: "/api/library/shows/sonarr/42/releases?season=1",
-    });
-    const pack = list.json().releases.find(
-      (item: { title: string }) => item.title === "Example.Show.S01-03",
+    const list = await waitForCachedReleases(
+      app,
+      "/api/library/shows/sonarr/42/releases?season=1",
     );
+    const pack = flattenCachedReleases(list).find(
+      (item) => item.title === "Example.Show.S01-03",
+    ) as { id: string };
+    const searchesBeforeGrab = releaseSearches;
 
     const response = await app.inject({
       method: "POST",
@@ -2202,6 +2323,7 @@ describe("show releases", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({ status: "grabbed", title: "Example.Show.S01-03" });
+    expect(releaseSearches).toBe(searchesBeforeGrab);
     expect(posted).toMatchObject({
       guid: "magnet:?xt=urn:btih:pack",
       indexerId: 2,
@@ -2214,7 +2336,7 @@ describe("show releases", () => {
     await app.close();
   });
 
-  it("monitors every season before manually grabbing a multi-season pack", async () => {
+  it("monitors every season before manually grabbing a cached multi-season pack", async () => {
     const pack = {
       ...seasonReleases[1],
       fullSeason: true,
@@ -2252,13 +2374,13 @@ describe("show releases", () => {
     });
 
     const app = await buildAuthedServer(makeConfig());
-    const list = await app.inject({
-      method: "GET",
-      url: "/api/library/shows/sonarr/42/releases?season=1",
-    });
-    const release = list.json().releases.find(
-      (item: { title: string }) => item.title === "Example.Show.S01-03",
+    const list = await waitForCachedReleases(
+      app,
+      "/api/library/shows/sonarr/42/releases?season=1",
     );
+    const release = flattenCachedReleases(list).find(
+      (item) => item.title === "Example.Show.S01-03",
+    ) as { id: string };
     const response = await app.inject({
       method: "POST",
       url: "/api/library/shows/sonarr/42/releases/grab",
@@ -2327,19 +2449,9 @@ describe("show releases", () => {
     await app.close();
   });
 
-  it("searches every season and keeps packs that cover the requested season", async () => {
+  it("merges packs found under a sibling season into the requested season", async () => {
     const searched: number[] = [];
     installFetch((url) => {
-      if (url.includes("sonarr.test") && url.endsWith("/api/v3/series/42")) {
-        return jsonResponse({
-          id: 42,
-          title: "Example Show",
-          seasons: [
-            { seasonNumber: 1, monitored: true },
-            { seasonNumber: 2, monitored: true },
-          ],
-        });
-      }
       if (url.includes("sonarr.test") && url.includes("/api/v3/release?seriesId=42&seasonNumber=1")) {
         searched.push(1);
         return jsonResponse(seasonReleases);
@@ -2360,19 +2472,23 @@ describe("show releases", () => {
     });
 
     const app = await buildAuthedServer(makeConfig());
-    const response = await app.inject({
-      method: "GET",
-      url: "/api/library/shows/sonarr/42/releases?season=2&scope=all",
-    });
-    const body = response.json();
+    const first = await waitForCachedReleases(
+      app,
+      "/api/library/shows/sonarr/42/releases?season=1",
+    );
+    expect(first.releaseCount).toBe(2);
+    const body = await waitForCachedReleases(
+      app,
+      "/api/library/shows/sonarr/42/releases?season=2",
+    );
+    const releases = flattenCachedReleases(body);
 
-    expect(response.statusCode).toBe(200);
     expect(searched.sort()).toEqual([1, 2]);
-    expect(body.releases.map((release: { title: string }) => release.title)).toEqual([
+    expect(releases.map((release) => release.title)).toEqual([
       "Example.Show.S02.1080p",
       "Example.Show.S01-03",
     ]);
-    expect(body.releases[1]).toMatchObject({
+    expect(releases[1]).toMatchObject({
       title: "Example.Show.S01-03",
       searchSeasonNumber: 1,
       seasonLabel: "Seasons 1\u20133",
@@ -2426,59 +2542,28 @@ describe("show releases", () => {
     await app.close();
   });
 
-  it("uses the matching search season when grabbing an all-seasons result", async () => {
-    let posted: Record<string, unknown> | undefined;
-    installFetch((url, init) => {
-      if (url.includes("sonarr.test") && url.endsWith("/api/v3/series/42")) {
-        return jsonResponse({
-          id: 42,
-          seasons: [{ seasonNumber: 1, monitored: true }],
-        });
-      }
+  it("returns 404 for a stale release id after searching the cache's fallback", async () => {
+    installFetch((url) => {
       if (url.includes("sonarr.test") && url.includes("/api/v3/release?seriesId=42&seasonNumber=1")) {
-        return jsonResponse(seasonReleases);
-      }
-      if (url.includes("sonarr.test") && url.includes("/api/v3/release?seriesId=42&seasonNumber=2")) {
-        return jsonResponse([]);
-      }
-      if (url.includes("sonarr.test") && url.endsWith("/api/v3/release") && init?.method === "POST") {
-        posted = readBody(init);
-        return jsonResponse({ id: 1 });
+        return jsonResponse([seasonReleases[0]]);
       }
       throw new Error(`unexpected URL ${url}`);
     });
 
     const app = await buildAuthedServer(makeConfig());
-    const list = await app.inject({
-      method: "GET",
-      url: "/api/library/shows/sonarr/42/releases?season=2&scope=all",
-    });
-    const pack = list.json().releases.find(
-      (item: { title: string }) => item.title === "Example.Show.S01-03",
-    );
+    await waitForCachedReleases(app, "/api/library/shows/sonarr/42/releases?season=1");
 
-    const response = await app.inject({
+    const stale = await app.inject({
       method: "POST",
       url: "/api/library/shows/sonarr/42/releases/grab",
-      payload: {
-        seasonNumber: 2,
-        searchSeasonNumber: pack.searchSeasonNumber,
-        releaseId: pack.id,
-      },
+      payload: { seasonNumber: 1, releaseId: "0".repeat(24) },
     });
-
-    expect(response.statusCode).toBe(200);
-    expect(posted).toMatchObject({
-      guid: "magnet:?xt=urn:btih:pack",
-      indexerId: 2,
-      seriesId: 42,
-      shouldOverride: true,
-      episodeIds: [501, 502],
-    });
+    expect(stale.statusCode).toBe(404);
+    expect(stale.json().error.code).toBe("release_not_found");
     await app.close();
   });
 
-  it("rejects unmapped or stale releases", async () => {
+  it("hides a cached release Sonarr cannot map", async () => {
     installFetch((url) => {
       if (url.includes("sonarr.test") && url.includes("/api/v3/release?seriesId=42&seasonNumber=1")) {
         return jsonResponse([
@@ -2492,32 +2577,16 @@ describe("show releases", () => {
     });
 
     const app = await buildAuthedServer(makeConfig());
-    const list = await app.inject({
-      method: "GET",
-      url: "/api/library/shows/sonarr/42/releases?season=1",
-    });
-    const pack = list.json().releases[0];
+    const body = await waitForCachedReleases(
+      app,
+      "/api/library/shows/sonarr/42/releases?season=1",
+    );
 
-    const unmapped = await app.inject({
-      method: "POST",
-      url: "/api/library/shows/sonarr/42/releases/grab",
-      payload: { seasonNumber: 1, releaseId: pack.id },
-    });
-    expect(unmapped.statusCode).toBe(409);
-    expect(unmapped.json().error.code).toBe("release_unmapped");
-
-    const stale = await app.inject({
-      method: "POST",
-      url: "/api/library/shows/sonarr/42/releases/grab",
-      payload: { seasonNumber: 1, releaseId: "0".repeat(24) },
-    });
-    expect(stale.statusCode).toBe(404);
-    expect(stale.json().error.code).toBe("release_not_found");
+    expect(body.releaseCount).toBe(0);
+    expect(body.groups).toEqual([]);
     await app.close();
   });
-});
 
-describe("cancel episode download", () => {
   it("removes only the queue record for the requested episode", async () => {
     const calls: Array<{ url: string; method?: string }> = [];
     installFetch((url, init) => {

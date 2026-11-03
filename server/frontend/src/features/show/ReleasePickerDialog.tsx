@@ -24,7 +24,7 @@ export function ReleasePickerDialog({
   episodeNumber,
   showTitle,
 }: ReleasePickerDialogProps) {
-  if (seriesId === undefined || seasonNumber === undefined) {
+  if (seriesId === undefined || seasonNumber === undefined || episodeNumber === undefined) {
     return null;
   }
 
@@ -42,7 +42,7 @@ export function ReleasePickerDialog({
         <ReleasePicker
           seriesId={seriesId}
           seasonNumber={seasonNumber}
-          episodeNumber={episodeNumber}
+          episodeNumber={episodeNumber ?? 1}
           onGrabbed={() => onOpenChange(false)}
         />
       </DialogContent>

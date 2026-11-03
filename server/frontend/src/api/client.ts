@@ -7,9 +7,12 @@ import type {
   LoginResponse,
   CreateRequestInput,
   CreateRequestResponse,
+  CachedReleasesResponse,
+  GrabMovieReleaseInput,
   GrabShowReleaseInput,
   GrabShowReleaseResponse,
   LibraryResponse,
+  MovieDetailResponse,
   PlaybackItemResponse,
   PlaybackReport,
   RequestedLibraryResponse,
@@ -173,21 +176,70 @@ export function reportPlaybackStop(
   );
 }
 
-export function fetchShowReleases(
-  source: ShowSource,
-  id: string,
+export function fetchSeasonReleases(
+  seriesId: number,
   seasonNumber: number,
-  options: { episodeNumber?: number; allSeasons?: boolean } = {},
-): Promise<ShowReleasesResponse> {
+): Promise<CachedReleasesResponse> {
   const params = new URLSearchParams({ season: String(seasonNumber) });
-  if (options.episodeNumber !== undefined) {
-    params.set("episode", String(options.episodeNumber));
-  }
-  if (options.allSeasons) {
-    params.set("scope", "all");
-  }
+  return getJson<CachedReleasesResponse>(
+    `/api/library/shows/sonarr/${encodeURIComponent(String(seriesId))}/releases?${params.toString()}`,
+  );
+}
+
+export function refreshSeasonReleases(
+  seriesId: number,
+  seasonNumber: number,
+): Promise<CachedReleasesResponse> {
+  const params = new URLSearchParams({ season: String(seasonNumber) });
+  return postJson<CachedReleasesResponse>(
+    `/api/library/shows/sonarr/${encodeURIComponent(String(seriesId))}/releases/refresh?${params.toString()}`,
+    {},
+  );
+}
+
+export function fetchEpisodeReleases(
+  seriesId: number,
+  seasonNumber: number,
+  episodeNumber: number,
+): Promise<ShowReleasesResponse> {
+  const params = new URLSearchParams({
+    season: String(seasonNumber),
+    episode: String(episodeNumber),
+  });
   return getJson<ShowReleasesResponse>(
-    `/api/library/shows/${source}/${encodeURIComponent(id)}/releases?${params.toString()}`,
+    `/api/library/shows/sonarr/${encodeURIComponent(String(seriesId))}/releases?${params.toString()}`,
+  );
+}
+
+export function fetchMovie(
+  source: "jellyfin" | "radarr",
+  id: string,
+): Promise<MovieDetailResponse> {
+  return getJson<MovieDetailResponse>(
+    `/api/library/movies/${source}/${encodeURIComponent(id)}`,
+  );
+}
+
+export function fetchMovieReleases(movieId: number): Promise<CachedReleasesResponse> {
+  return getJson<CachedReleasesResponse>(
+    `/api/library/movies/${encodeURIComponent(String(movieId))}/releases`,
+  );
+}
+
+export function refreshMovieReleases(movieId: number): Promise<CachedReleasesResponse> {
+  return postJson<CachedReleasesResponse>(
+    `/api/library/movies/${encodeURIComponent(String(movieId))}/releases/refresh`,
+    {},
+  );
+}
+
+export function grabMovieRelease(
+  movieId: number,
+  input: GrabMovieReleaseInput,
+): Promise<GrabShowReleaseResponse> {
+  return postJson<GrabShowReleaseResponse>(
+    `/api/library/movies/${encodeURIComponent(String(movieId))}/releases/grab`,
+    input,
   );
 }
 

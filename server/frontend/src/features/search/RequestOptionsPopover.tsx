@@ -1,16 +1,10 @@
 import { CircleAlertIcon, Settings2Icon } from "lucide-react";
 
-import type {
-  ArrRequestOptions,
-  RequestMonitor,
-  RequestOptionsResponse,
-} from "@/api/types";
+import type { ArrRequestOptions, RequestOptionsResponse } from "@/api/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
   Field,
-  FieldContent,
-  FieldDescription,
   FieldGroup,
   FieldLabel,
   FieldLegend,
@@ -32,22 +26,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
-import { MONITOR_LABELS } from "@/features/search/search-labels";
-import {
-  pickSmallerQualityProfile,
-  type RequestDefaults,
-  type ServiceRequestDefaults,
+import type {
+  RequestDefaults,
+  ServiceRequestDefaults,
 } from "@/features/search/use-request-defaults";
-
-const MIN_SEEDERS_OPTIONS = [
-  { value: 0, label: "Any release" },
-  { value: 2, label: "At least 2" },
-  { value: 5, label: "At least 5 (recommended)" },
-  { value: 10, label: "At least 10" },
-  { value: 20, label: "At least 20" },
-  { value: 50, label: "At least 50" },
-];
 
 interface RequestOptionsPopoverProps {
   options?: RequestOptionsResponse;
@@ -76,7 +58,7 @@ export function RequestOptionsPopover({
         <PopoverHeader>
           <PopoverTitle>Request defaults</PopoverTitle>
           <PopoverDescription>
-            Used by the one-click Request button. Changes are saved in this browser.
+            Used when adding a title. Downloads only start after you choose a release.
           </PopoverDescription>
         </PopoverHeader>
 
@@ -119,7 +101,6 @@ function ServiceOptions({
   onChange: (patch: Partial<ServiceRequestDefaults>) => void;
 }) {
   const name = service.id === "sonarr" ? "Sonarr" : "Radarr";
-  const smallerProfile = pickSmallerQualityProfile(service.qualityProfiles);
 
   return (
     <FieldSet>
@@ -161,34 +142,6 @@ function ServiceOptions({
             </Select>
           </Field>
 
-          <Field orientation="horizontal">
-            <FieldContent>
-              <FieldLabel htmlFor={`${service.id}-prefer-smaller`}>
-                Prefer smaller files
-              </FieldLabel>
-              <FieldDescription>
-                Use a 720p-only profile first, then 720p/1080p. Turn off to use{" "}
-                {name}&apos;s own default.
-              </FieldDescription>
-            </FieldContent>
-            <Switch
-              id={`${service.id}-prefer-smaller`}
-              checked={defaults.preferSmaller}
-              onCheckedChange={(checked) =>
-                onChange({
-                  preferSmaller: checked,
-                  ...(checked
-                    ? smallerProfile
-                      ? { qualityProfileId: smallerProfile.id }
-                      : {}
-                    : service.defaults.qualityProfileId !== undefined
-                      ? { qualityProfileId: service.defaults.qualityProfileId }
-                      : {}),
-                })
-              }
-            />
-          </Field>
-
           <Field>
             <FieldLabel htmlFor={`${service.id}-root-folder`}>Root folder</FieldLabel>
             <Select
@@ -214,94 +167,6 @@ function ServiceOptions({
               </SelectContent>
             </Select>
           </Field>
-
-          {service.id === "sonarr" ? (
-            <Field>
-              <FieldLabel htmlFor="sonarr-monitor">Episodes to monitor</FieldLabel>
-              <Select
-                value={defaults.monitor ?? "all"}
-                onValueChange={(value) =>
-                  onChange({ monitor: value as RequestMonitor })
-                }
-              >
-                <SelectTrigger id="sonarr-monitor" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent position="popper">
-                  <SelectGroup>
-                    {(Object.keys(MONITOR_LABELS) as RequestMonitor[]).map((monitor) => (
-                      <SelectItem key={monitor} value={monitor}>
-                        {MONITOR_LABELS[monitor]}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </Field>
-          ) : null}
-
-          <Field orientation="horizontal">
-            <FieldContent>
-              <FieldLabel htmlFor={`${service.id}-search-on-add`}>Search on add</FieldLabel>
-              <FieldDescription>
-                Start looking for a download as soon as the title is requested.
-              </FieldDescription>
-            </FieldContent>
-            <Switch
-              id={`${service.id}-search-on-add`}
-              checked={defaults.searchOnAdd}
-              onCheckedChange={(checked) => onChange({ searchOnAdd: checked })}
-            />
-          </Field>
-
-          <Field orientation="horizontal">
-            <FieldContent>
-              <FieldLabel htmlFor={`${service.id}-smart-pick`}>
-                Seeders-aware pick
-              </FieldLabel>
-              <FieldDescription>
-                Grab the release with the best seeder count instead of {name}&apos;s
-                quality-profile picker. Climbs one quality tier when the preferred tier
-                has no healthy torrents.
-              </FieldDescription>
-            </FieldContent>
-            <Switch
-              id={`${service.id}-smart-pick`}
-              checked={defaults.smartPick}
-              disabled={!defaults.searchOnAdd}
-              onCheckedChange={(checked) => onChange({ smartPick: checked })}
-            />
-          </Field>
-
-          {defaults.searchOnAdd && defaults.smartPick ? (
-            <Field>
-              <FieldLabel htmlFor={`${service.id}-min-seeders`}>
-                Minimum seeders
-              </FieldLabel>
-              <Select
-                value={String(defaults.minSeeders)}
-                onValueChange={(value) =>
-                  onChange({ minSeeders: Number.parseInt(value, 10) })
-                }
-              >
-                <SelectTrigger id={`${service.id}-min-seeders`} className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent position="popper">
-                  <SelectGroup>
-                    {MIN_SEEDERS_OPTIONS.map((option) => (
-                      <SelectItem key={option.value} value={String(option.value)}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-              <FieldDescription>
-                Torrents below this are treated as dead. 0 accepts any release.
-              </FieldDescription>
-            </Field>
-          ) : null}
         </FieldGroup>
       )}
     </FieldSet>

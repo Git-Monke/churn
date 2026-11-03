@@ -10,8 +10,6 @@ import {
 } from "@/api/client";
 import type {
   CreateRequestInput,
-  RequestDownload,
-  RequestMonitor,
   SearchResponse,
   SearchResult,
   SearchServiceState,
@@ -34,7 +32,6 @@ import {
   SearchResultGrid,
   SearchResultGridSkeleton,
 } from "@/features/search/SearchResultGrid";
-import { ReleasePickerDialog } from "@/features/show/ReleasePickerDialog";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useRequestDefaults } from "@/features/search/use-request-defaults";
 
@@ -43,16 +40,8 @@ interface RequestMutationVariables {
   result: SearchResult;
 }
 
-interface PendingReleaseSelection {
-  seriesId: number;
-  seasonNumber: number;
-  title: string;
-}
-
 export function SearchSection() {
   const [query, setQuery] = useState("");
-  const [releaseSelection, setReleaseSelection] =
-    useState<PendingReleaseSelection | null>(null);
   const debounced = useDebouncedValue(query, 350);
   const term = debounced.trim();
   const searchEnabled = term.length >= 2;
@@ -77,25 +66,29 @@ export function SearchSection() {
     mutationFn: ({ input }: RequestMutationVariables) => createRequest(input),
     onSuccess: (data, variables) => {
       const key = requestKey(variables.input);
-      const releaseAction =
-        data.service === "sonarr" && data.id !== undefined
+      const viewAction =
+        data.id !== undefined
           ? {
-              label: "Choose release",
+              label: "View releases",
               onClick: () => {
-                window.location.hash = `#/library/show/sonarr/${data.id}`;
+                window.location.hash =
+                  data.service === "sonarr"
+                    ? `#/library/show/sonarr/${data.id}`
+                    : `#/library/movie/radarr/${data.id}`;
               },
             }
           : undefined;
-      const download = data.downloads?.[0];
       if (data.status === "added") {
         toast.success(`Requested ${formatTitle(data.title, data.year)}`, {
-          description: download ? downloadSummary(download) : undefined,
-          duration: data.service === "sonarr" ? 12_000 : undefined,
+          description:
+            "Added to the library. Searching for releases in the background.",
+          action: viewAction,
+          duration: 12_000,
         });
       } else {
         toast.info(`${formatTitle(data.title, data.year)} is already requested`, {
-          action: releaseAction,
-          duration: data.service === "sonarr" ? 12_000 : undefined,
+          action: viewAction,
+          duration: 12_000,
         });
       }
       if (key) {
@@ -114,25 +107,6 @@ export function SearchSection() {
       void queryClient.invalidateQueries({ queryKey: ["status"] });
       void queryClient.invalidateQueries({ queryKey: ["activity"] });
       void queryClient.invalidateQueries({ queryKey: ["requested-library"] });
-
-      if (
-        data.status === "added" &&
-        !download &&
-        data.service === "sonarr" &&
-        data.id !== undefined
-      ) {
-        const monitor = variables.input.options?.monitor ?? "all";
-        if (monitor !== "none" && monitor !== "future") {
-          const seasonNumber = releaseSeason(variables.result, monitor);
-          if (seasonNumber !== undefined) {
-            setReleaseSelection({
-              seriesId: data.id,
-              seasonNumber,
-              title: data.title,
-            });
-          }
-        }
-      }
     },
     onError: (error) => {
       toast.error(error.message);
@@ -170,12 +144,6 @@ export function SearchSection() {
       options: {
         qualityProfileId: serviceDefaults.qualityProfileId,
         rootFolderPath: serviceDefaults.rootFolderPath,
-        searchOnAdd: serviceDefaults.searchOnAdd,
-        smartPick: serviceDefaults.smartPick,
-        minSeeders: serviceDefaults.minSeeders,
-        ...(result.kind === "series"
-          ? { monitor: serviceDefaults.monitor ?? "all" }
-          : {}),
       },
     };
 
@@ -259,7 +227,6 @@ export function SearchSection() {
           onRequest={handleRequest}
           requestingKey={requestingKey}
           requestDisabled={optionsQuery.isLoading || requestMutation.isPending}
-          seriesMonitor={defaults.sonarr.monitor}
         />
       ) : null}
 
@@ -279,18 +246,6 @@ export function SearchSection() {
           </EmptyHeader>
         </Empty>
       ) : null}
-
-      <ReleasePickerDialog
-        open={releaseSelection !== null}
-        onOpenChange={(open) => {
-          if (!open) {
-            setReleaseSelection(null);
-          }
-        }}
-        seriesId={releaseSelection?.seriesId}
-        seasonNumber={releaseSelection?.seasonNumber}
-        showTitle={releaseSelection?.title}
-      />
     </section>
   );
 }
@@ -336,41 +291,4 @@ function requestKey(input: CreateRequestInput): string | null {
 
 function formatTitle(title: string, year?: number): string {
   return year ? `${title} (${year})` : title;
-}
-
-function downloadSummary(download: RequestDownload): string {
-  const details: string[] = [];
-  if (download.quality) {
-    details.push(download.quality);
-  }
-  if (download.seeders !== undefined) {
-    details.push(`${download.seeders} seeder${download.seeders === 1 ? "" : "s"}`);
-  }
-  const label =
-    download.reason === "tier_upgrade"
-      ? "Upgraded a quality tier for the best seeder count"
-      : download.override
-        ? "Grabbed with a quality override"
-        : "Grabbed the best-seeded release";
-  return details.length > 0 ? `${label} · ${details.join(" · ")}` : label;
-}
-
-function releaseSeason(
-  result: SearchResult,
-  monitor: RequestMonitor,
-): number | undefined {
-  const seasons = [
-    ...new Set(
-      (result.seasons ?? [])
-        .map((season) => season.seasonNumber)
-        .filter((season) => Number.isInteger(season) && season >= 0),
-    ),
-  ].sort((left, right) => left - right);
-
-  if (monitor === "firstSeason" && seasons.includes(1)) {
-    return 1;
-  }
-
-  const regular = seasons.filter((season) => season > 0);
-  return regular[0] ?? seasons[0] ?? 1;
 }

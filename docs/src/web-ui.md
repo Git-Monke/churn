@@ -167,43 +167,45 @@ backend-proxied poster. Titles already in the arr library are marked
 **Requested**. This uses Sonarr `tvdbId` and Radarr `tmdbId` matches, not the
 Jellyfin library.
 
-**Request options** persists quality profile, root folder, TV monitoring,
-search-on-add and a **Prefer smaller files** switch in `localStorage`. The
-switch is on by default and auto-picks a 720p-only profile first, then a
-combined 720p/1080p profile, then 1080p-only, avoiding 4K/Ultra-HD when anything
-smaller exists. Turn it off to use the arr default (`HD - 720p/1080p`, then
-`HD-1080p`, then `HD-720p`). The other defaults are the first accessible root
-folder, all seasons and search on add. The Request button uses these settings
-directly.
+**Request options** persists the quality profile and root folder in
+`localStorage`. Requesting a title only adds it unmonitored; it never starts a
+download. The backend warms a release cache in the background: a Radarr search
+for a movie, and one Sonarr search per regular season for a show. Season
+searches run from season 1 upward, so a multi-season pack found under one season
+is cached under every season it covers. Opening an existing show starts missing
+season searches in the background, including retries for seasons whose previous
+search found nothing; retries are rate-limited. Loading the requested-library
+view also starts prefetching for titles added directly in Sonarr or Radarr.
+A grab that fails because the exact torrent already exists in qBittorrent is
+recovered automatically during the POST request: churn removes the duplicate
+without deleting its files, waits for qBittorrent to confirm it is gone, and
+retries through the arr so the download becomes tracked.
 
-**Seeders-aware pick** (on by default) makes churn search releases itself and
-grab the one with the best seeder count, rather than trusting a quality
-profile that may point at a dead 720p torrent. When the preferred tier has no
-torrent above **Minimum seeders** (default 5), churn climbs exactly one quality
-tier, for example a 720p profile accepting a well-seeded 1080p release. That
-override is applied explicitly, and releases rejected for language or mapping
-reasons are never overridden just for seeders. Usenet releases always count as
-healthy. Movie requests grab the pick directly; show requests grab well-seeded
-season packs and fall back to Sonarr's per-season search. A multi-season pack
-such as `S01-03` monitors every season it covers before the grab, so Sonarr
-imports the whole pack instead of only the requested season. If picking fails,
-the arr's own search command runs instead, so requests keep working.
-Turn the switch off for the previous search-on-add behaviour.
+Clicking a movie opens its detail page; choosing a show season shows the cached
+release chooser. For a season with no downloaded episodes, the show page shows a
+searching notice while its background searches run, then opens the chooser
+automatically once usable options exist. Options are grouped into the quality tiers that actually have
+releases (`480p`, `720p`, `1080p`, `2160p`, `Other`). Within a tier, unavailable releases are
+hidden, the rest are ordered by seeders and then size, and each row shows
+quality, indexer, age, multi-season coverage and rejection reasons. The best
+seeded release is shown first, with **Show more options** to expand the tier. The list persists in
+`server/cache/releases` (or `server/.churn-cache/releases` when the container-owned `cache/` directory is not writable) across backend restarts. A tier whose best release has
+fewer than 50 seeders displays a stale-results warning and a **Search again**
+button.
 
-Because tracker seeder counts are often inflated, a smart grab is watched for
-about a minute. If fewer than the **Minimum seeders** are actually connected to
-qBittorrent and speed stays below 300 KB/s before 25% completion, churn
-removes and blocklists the stalled queue item and grabs the best-seeded
-alternative from the same search: at least 1.5× the reported seeders, no lower
-quality tier, and at most one tier above the profile. Only one re-pick is tried
-per request. The Library page shows a dismissible notice for each switch, and
-`/api/activity` includes the same events under `repicks`.
+Picking a release enables monitoring for the movie or the affected season(s)
+and starts the download. Out-of-profile tiers use an explicit override. Episode
+level picking remains available for repairing one missing episode. If
+qBittorrent has a download that Sonarr never queued, the show page matches its
+filename to the series and season/episode and shows live progress instead of
+prompting for another release.
 
 On `POST /api/requests` the backend re-fetches canonical metadata by id, checks
 for duplicates, validates the profile and root folder against the live arr APIs,
-then adds the title. Sonarr receives the selected monitoring scope; Radarr adds
-with `released` minimum availability. When one app is unavailable, search and
-request options still work for the other.
+then adds the title unmonitored with no search command. Movie adds use
+`released` minimum availability. The release cache is warmed after the response
+so the UI can show progress. When one app is unavailable, search and request
+options still work for the other.
 
 ## Library and activity
 
@@ -254,18 +256,18 @@ upcoming), and overlays per-episode downloads. Sonarr season packs mark every
 episode in the season. Jellyfin shows are matched to Sonarr through
 `ProviderIds.Tvdb`; download-only shows use the Sonarr source directly.
 
-Shows tracked in Sonarr also have a release picker per season, including
-Jellyfin-backed shows (the detail response carries the Sonarr series id). It
-searches the
-indexers again and lists **all** results — automatic, rejected, single-season
-and multi-season — with size, quality, indexer, seed count and rejection
-reasons. **All seasons** runs the same search across the show's other seasons
-and keeps multi-season packs that cover the selected season, which catches
-packs such as `S01-05` that Sonarr indexes under Season 1. When no release is
-automatic, the smallest mapped multi-season pack is recommended. Choosing a
-release sends it to Sonarr with an override, so a pack like `S01-03` can be used
-for season 1 when its size is acceptable; before the grab, every season the
-pack covers is marked monitored so Sonarr imports all of it. Upstream GUIDs and
+Shows tracked in Sonarr also have a cached release chooser per season, including
+Jellyfin-backed shows (the detail response carries the Sonarr series id). The
+backend warms one Sonarr search per regular season when the show is added, starts
+missing season searches when the show page opens, and searches a season on demand
+if it is opened before the cache is ready. Options
+are grouped into the quality tiers that have releases, sorted by seeders within
+each tier, and include size, quality, indexer, age, multi-season coverage and
+rejection reasons. A multi-season pack such as `S01-05` appears under every
+season it covers, even when Sonarr returns it only for the season-1 search.
+**Search again** refreshes just that season. Choosing a release sends it to
+Sonarr with an override when needed; before the grab, every season the pack
+covers is marked monitored so Sonarr imports all of it. Upstream GUIDs and
 magnet URLs stay on the backend. Sonarr and Radarr sync only normal TV/movie
 indexer categories, so adult XXX releases are excluded from this picker by
 default.
@@ -278,10 +280,10 @@ records from Sonarr and the download client, blocklists the release so Sonarr
 does not grab it again, and keeps files that already imported. Cancelling a
 season-pack download stops the whole pack; the confirmation says so.
 
-After requesting a series, churn opens the picker immediately for the first
-monitored season so release options appear without visiting the show page.
-Sonarr's automatic search continues in the background, and the overlay stays
-open with a retry action if no releases are returned.
+After requesting a series, the season searches warm in the background. The show
+page's chooser shows cached options as soon as they are available and offers a
+retry when a season has no results. Movies open a dedicated detail page with
+playback, when available, and the same cached quality-grouped chooser.
 
 ## Playback
 

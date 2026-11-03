@@ -281,6 +281,8 @@ export interface ShowDownload {
   protocol?: "torrent" | "usenet";
   quality?: string;
   seasonPack?: boolean;
+  /** Found directly in qBittorrent because Sonarr has no queue record for it. */
+  untracked?: boolean;
   statusMessages?: string[];
 }
 
@@ -342,6 +344,9 @@ export interface ShowRelease {
   indexer?: string;
   sizeBytes: number;
   quality?: string;
+  /** 0 = 480p/SD, 1 = 720p, 2 = 1080p, 3 = 2160p; 99 = unknown. */
+  tier?: number;
+  tierLabel?: string;
   seasonLabel: string;
   episodeLabel?: string;
   multiSeason: boolean;
@@ -365,6 +370,52 @@ export interface ShowReleasesResponse {
   episodeNumber?: number;
   checkedAt: string;
   releases: ShowRelease[];
+}
+
+export interface ReleaseGroup {
+  tier: number;
+  label: string;
+  maxSeeders?: number;
+  /** True when the best release in this group has fewer than 50 seeders. */
+  lowSeeders: boolean;
+  /** Seeders descending, then size ascending. */
+  releases: ShowRelease[];
+}
+
+export interface CachedReleasesResponse {
+  kind: "movie" | "series-season";
+  service: "radarr" | "sonarr";
+  targetId: number;
+  seasonNumber?: number;
+  state: "ready" | "searching" | "error";
+  refreshing: boolean;
+  detail?: string;
+  fetchedAt?: string;
+  releaseCount: number;
+  groups: ReleaseGroup[];
+}
+
+export interface MovieDetailResponse {
+  source: "jellyfin" | "radarr";
+  state: ArrServiceState;
+  detail?: string;
+  movie: {
+    title: string;
+    year?: number;
+    overview?: string;
+    network?: string;
+    rating?: number;
+    runtimeMinutes?: number;
+    imageUrl?: string;
+    tmdbId?: number;
+    imdbId?: string;
+  };
+  jellyfinId?: string;
+  radarrId?: number;
+}
+
+export interface GrabMovieReleaseInput {
+  releaseId: string;
 }
 
 export interface GrabShowReleaseInput {
@@ -393,10 +444,6 @@ export interface ArrRootFolder {
 export interface ArrRequestDefaults {
   qualityProfileId?: number;
   rootFolderPath?: string;
-  monitor?: RequestMonitor;
-  searchOnAdd: boolean;
-  smartPick?: boolean;
-  minSeeders?: number;
 }
 
 export interface ArrRequestOptions {
@@ -419,10 +466,6 @@ export interface RequestOptionsResponse {
 export interface RequestOptionsInput {
   qualityProfileId?: number;
   rootFolderPath?: string;
-  monitor?: RequestMonitor;
-  searchOnAdd?: boolean;
-  smartPick?: boolean;
-  minSeeders?: number;
 }
 
 export interface CreateRequestInput {
@@ -438,23 +481,13 @@ export type ReleasePickReason =
   | "below_threshold"
   | "best_effort";
 
-export interface RequestDownload {
-  title: string;
-  quality?: string;
-  seeders?: number;
-  sizeBytes?: number;
-  seasonNumber?: number;
-  reason: ReleasePickReason;
-  override: boolean;
-}
-
 export interface CreateRequestResponse {
   status: "added" | "already_exists";
   service: "sonarr" | "radarr";
   title: string;
   year?: number;
   id?: number;
-  downloads?: RequestDownload[];
+  searching?: boolean;
 }
 
 export type PlaybackState = "ok" | "unauthorized" | "unreachable";

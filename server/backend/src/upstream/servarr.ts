@@ -173,6 +173,10 @@ export interface ServarrRelease {
   ageHours?: number;
   publishDate?: string;
   infoUrl?: string;
+  infoHash?: string;
+  releaseHash?: string;
+  magnetUrl?: string;
+  downloadUrl?: string;
   fullSeason?: boolean;
   languages?: ServarrLanguage[];
 }
@@ -389,6 +393,18 @@ export function createArrClient(service: ArrServiceId, config: ServiceConfig, ti
         `${config.url}/api/v3/movie`,
         payload,
         { timeoutMs, headers: authHeaders() },
+      );
+    },
+
+    /** Update an existing movie, for example to enable monitoring before a grab. */
+    async updateMovie(
+      id: number,
+      payload: Record<string, unknown>,
+    ): Promise<ServarrMovieResource> {
+      return fetchJson<ServarrMovieResource>(
+        service,
+        `${config.url}/api/v3/movie/${id}`,
+        { timeoutMs, headers: authHeaders(), method: "PUT", body: payload },
       );
     },
 

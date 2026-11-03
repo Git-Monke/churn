@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronRightIcon, FilmIcon, LoaderCircleIcon, PlayIcon, Trash2Icon, TvIcon } from "lucide-react";
+import { ChevronRightIcon, FilmIcon, LoaderCircleIcon, Trash2Icon, TvIcon } from "lucide-react";
 
 import type { ActivityItem, LibraryItem, RequestedLibraryItem } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
@@ -43,7 +43,7 @@ function LibraryCard({ entry }: { entry: LibraryEntry }) {
   const title = entryTitle(entry) || "Untitled";
   const year = library?.year ?? requested?.year ?? activity?.year;
   const imageUrl = library?.imageUrl ?? requested?.imageUrl ?? activity?.imageUrl;
-  const href = type === "Series" ? showHref(entry) : playHref(entry);
+  const href = type === "Series" ? showHref(entry) : movieHref(entry);
 
   const card = (
     <Card
@@ -68,10 +68,10 @@ function LibraryCard({ entry }: { entry: LibraryEntry }) {
             )}
           </div>
         )}
-        {href && type === "Movie" ? (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-transparent transition-colors group-hover:bg-black/30">
-            <span className="flex size-12 items-center justify-center rounded-full bg-background/90 text-foreground opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
-              <PlayIcon className="size-5" />
+        {href ? (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-transparent transition-colors group-hover:bg-black/20">
+            <span className="flex size-10 items-center justify-center rounded-full bg-background/90 text-foreground opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
+              <ChevronRightIcon className="size-5" />
             </span>
           </div>
         ) : null}
@@ -113,11 +113,7 @@ function LibraryCard({ entry }: { entry: LibraryEntry }) {
             </h3>
           </div>
           {href ? (
-            type === "Movie" ? (
-              <PlayIcon className="mt-1 size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground" />
-            ) : (
-              <ChevronRightIcon className="mt-1 size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground" />
-            )
+            <ChevronRightIcon className="mt-1 size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground" />
           ) : null}
         </div>
 
@@ -200,9 +196,15 @@ function CancelButton({ target, title }: { target: CancelTarget; title: string }
   );
 }
 
-function playHref(entry: LibraryEntry): string | undefined {
+function movieHref(entry: LibraryEntry): string | undefined {
   if (entry.library?.type === "Movie") {
-    return `#/play/${encodeURIComponent(entry.library.id)}`;
+    return `#/library/movie/jellyfin/${encodeURIComponent(entry.library.id)}`;
+  }
+  if (entry.requested?.kind === "movie") {
+    return `#/library/movie/radarr/${entry.requested.arrId}`;
+  }
+  if (entry.activity?.movieId !== undefined) {
+    return `#/library/movie/radarr/${entry.activity.movieId}`;
   }
   return undefined;
 }

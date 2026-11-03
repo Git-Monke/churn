@@ -240,6 +240,9 @@ export interface ShowRelease {
   indexer?: string;
   sizeBytes: number;
   quality?: string;
+  /** 0 = 480p/SD, 1 = 720p, 2 = 1080p, 3 = 2160p; 99 = unknown. */
+  tier?: number;
+  tierLabel?: string;
   seasonLabel: string;
   episodeLabel?: string;
   multiSeason: boolean;
@@ -257,6 +260,58 @@ export interface ShowRelease {
   publishDate?: string;
   /** Season search that produced this release, used to look it up again on grab. */
   searchSeasonNumber?: number;
+}
+
+export interface ReleaseGroup {
+  /** 0 = 480p/SD, 1 = 720p, 2 = 1080p, 3 = 2160p; 99 = unknown. */
+  tier: number;
+  label: string;
+  maxSeeders?: number;
+  /** True when the best release in this group has fewer than 50 seeders. */
+  lowSeeders: boolean;
+  /** Seeders descending, then size ascending, then oldest first. */
+  releases: ShowRelease[];
+}
+
+export interface CachedReleasesResponse {
+  kind: "movie" | "series-season";
+  service: "radarr" | "sonarr";
+  targetId: number;
+  seasonNumber?: number;
+  state: "ready" | "searching" | "error";
+  refreshing: boolean;
+  detail?: string;
+  fetchedAt?: string;
+  releaseCount: number;
+  groups: ReleaseGroup[];
+}
+
+export interface MovieSeriesSummary {
+  title: string;
+  year?: number;
+  overview?: string;
+  posterUrl?: string;
+}
+
+export interface MovieDetailResponse {
+  source: "jellyfin" | "radarr";
+  state: ArrServiceState;
+  detail?: string;
+  movie: {
+    title: string;
+    year?: number;
+    overview?: string;
+    network?: string;
+    rating?: number;
+    runtimeMinutes?: number;
+    imageUrl?: string;
+    tmdbId?: number;
+    imdbId?: string;
+  };
+  /** Jellyfin item id, when the movie is available to play. */
+  jellyfinId?: string;
+  /** Radarr movie id, when the movie is tracked in Radarr. */
+  radarrId?: number;
 }
 
 export interface ShowReleasesResponse {
@@ -293,12 +348,6 @@ export interface ArrRootFolder {
 export interface ArrRequestDefaults {
   qualityProfileId?: number;
   rootFolderPath?: string;
-  monitor?: RequestMonitor;
-  searchOnAdd: boolean;
-  /** Churn picks the fastest well-seeded release instead of the arr. */
-  smartPick?: boolean;
-  /** Minimum seeders for a torrent to count as usable. */
-  minSeeders?: number;
 }
 
 export interface RequestDownload {
@@ -332,12 +381,6 @@ export interface RequestOptionsResponse {
 export interface RequestOptionsInput {
   qualityProfileId?: number;
   rootFolderPath?: string;
-  monitor?: RequestMonitor;
-  searchOnAdd?: boolean;
-  /** Let churn pick the fastest well-seeded release instead of the arr. */
-  smartPick?: boolean;
-  /** Minimum seeders for a torrent to count as usable. */
-  minSeeders?: number;
 }
 
 export interface CreateRequestInput {
@@ -353,8 +396,8 @@ export interface CreateRequestResponse {
   title: string;
   year?: number;
   id?: number;
-  /** Releases churn grabbed itself, when seeders-aware picking was enabled. */
-  downloads?: RequestDownload[];
+  /** True when churn started warming the release cache in the background. */
+  searching?: boolean;
 }
 
 export type ShowSource = "jellyfin" | "sonarr";
@@ -370,6 +413,8 @@ export interface ShowDownload {
   protocol?: "torrent" | "usenet";
   quality?: string;
   seasonPack?: boolean;
+  /** Found directly in qBittorrent because Sonarr has no queue record for it. */
+  untracked?: boolean;
   statusMessages?: string[];
 }
 

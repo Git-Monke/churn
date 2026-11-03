@@ -31,6 +31,30 @@ describe("qBittorrent client", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("removes a duplicate torrent without deleting its files", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      expect(String(input)).toBe("http://qbittorrent.test:8080/api/v2/torrents/delete");
+      expect(init?.method).toBe("POST");
+      expect(init?.headers).toMatchObject({
+        authorization: "Bearer qbt_test-key",
+        "content-type": "application/x-www-form-urlencoded",
+      });
+      expect(String(init?.body)).toBe("hashes=44dbb26758b4ed17be93003f86c03461afbe2d8c&deleteFiles=false");
+      return new Response(null, { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createQbittorrentClient(
+      { url: "http://qbittorrent.test:8080", apiKey: "qbt_test-key" },
+      500,
+    );
+
+    await expect(
+      client.removeTorrent("urn:btih:44DBB26758B4ED17BE93003F86C03461AFBE2D8C"),
+    ).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("fails as unauthorized without a key and does not call upstream", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);

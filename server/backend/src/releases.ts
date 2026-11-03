@@ -3,10 +3,11 @@ import { createHash } from "node:crypto";
 import {
   DEFAULT_MIN_SEEDERS,
   pickRelease,
+  releaseTier as resolutionTier,
   showReleaseCandidate,
   type ReleaseCandidate,
 } from "./release-pick.js";
-import type { ShowRelease } from "./types.js";
+import type { ReleaseGroup, ShowRelease } from "./types.js";
 import type { ServarrRelease, ServarrSeriesResource } from "./upstream/servarr.js";
 
 /** Stable, opaque id for a Sonarr release. */
@@ -116,7 +117,7 @@ export function toShowReleases(
 ): ShowRelease[] {
   const mapped: Array<{ release: ShowRelease; candidate: ReleaseCandidate<ServarrRelease> }> = [];
   for (const release of releases) {
-    const item = mapRelease(release);
+    const item = mapRelease(release, "series");
     if (!item) {
       continue;
     }
@@ -150,7 +151,10 @@ export function toShowReleases(
   return ordered;
 }
 
-function mapRelease(release: ServarrRelease): ShowRelease | null {
+function mapRelease(
+  release: ServarrRelease,
+  kind: "movie" | "series" = "series",
+): ShowRelease | null {
   const id = releaseId(release);
   if (!id) {
     return null;
@@ -163,18 +167,21 @@ function mapRelease(release: ServarrRelease): ShowRelease | null {
   const mappedEpisodeCount = (release.mappedEpisodeInfo ?? []).filter(
     (episode) => Number.isInteger(episode.id),
   ).length;
-  const canGrab = approved || mappedEpisodeCount > 0;
+  const canGrab =
+    kind === "movie" ? movieReleaseCanGrab(release) : approved || mappedEpisodeCount > 0;
   const protocol =
     release.protocol === "torrent" || release.protocol === "usenet"
       ? release.protocol
       : undefined;
 
+  const tier = resolutionTier(release);
   return {
     id,
     title: release.title?.trim() || "Unknown release",
     indexer: release.indexer,
     sizeBytes: release.size ?? 0,
     quality: release.quality?.quality?.name,
+    ...(tier !== undefined ? { tier, tierLabel: releaseTierLabel(tier) } : {}),
     seasonLabel: seasonLabel(seasonNumbers),
     episodeLabel: releaseEpisodeLabel(release, seasonNumbers, episodeNumbers),
     multiSeason:
@@ -359,4 +366,98 @@ function seasonLabel(seasons: number[]): string {
     return `Seasons ${seasons[0]}\u2013${seasons[seasons.length - 1]}`;
   }
   return `Seasons ${seasons.join(", ")}`;
+}
+
+
+/** Label for a resolution tier used by the cached release chooser. */
+export function releaseTierLabel(tier: number): string {
+  switch (tier) {
+    case 0:
+      return "480p";
+    case 1:
+      return "720p";
+    case 2:
+      return "1080p";
+    case 3:
+      return "2160p";
+    default:
+      return "Other";
+  }
+}
+
+/**
+ * Radarr can grab a rejected release with an override when the rejection is
+ * about quality, language, custom formats, etc. Releases it cannot match to the
+ * movie at all are not usable from the chooser.
+ */
+function movieReleaseCanGrab(release: ServarrRelease): boolean {
+  if (release.approved === true) {
+    return true;
+  }
+  const rejections = (release.rejections ?? []).join(" ");
+  return !/unknown movie|unable to match|could not be matched|not a movie|no matching movie|movie not found/i.test(
+    rejections,
+  );
+}
+
+/** Seeders descending, then size ascending, then oldest first. */
+export function compareReleaseOptions(left: ShowRelease, right: ShowRelease): number {
+  const seeders = (right.seeders ?? -1) - (left.seeders ?? -1);
+  if (seeders !== 0) {
+    return seeders;
+  }
+  const size = left.sizeBytes - right.sizeBytes;
+  if (size !== 0) {
+    return size;
+  }
+  return (left.ageHours ?? Number.POSITIVE_INFINITY) - (right.ageHours ?? Number.POSITIVE_INFINITY);
+}
+
+/**
+ * Group releases into the quality tiers the browser shows. Empty tiers are
+ * omitted, and groups are ordered from 480p to 2160p with unknown qualities
+ * last.
+ */
+export function toReleaseGroups(
+  releases: ServarrRelease[],
+  kind: "movie" | "series" = "series",
+): ReleaseGroup[] {
+  const mapped = releases
+    .map((release) => mapRelease(release, kind))
+    .filter((release): release is ShowRelease => release !== null);
+  return groupShowReleases(mapped);
+}
+
+export function groupShowReleases(releases: ShowRelease[]): ReleaseGroup[] {
+  const groups = new Map<number, ShowRelease[]>();
+  for (const release of releases) {
+    // Unavailable releases are noise in the chooser: they cannot be grabbed.
+    if (!release.canGrab) {
+      continue;
+    }
+    const tier = release.tier ?? 99;
+    const group = groups.get(tier);
+    if (group) {
+      group.push(release);
+    } else {
+      groups.set(tier, [release]);
+    }
+  }
+
+  return [...groups.entries()]
+    .sort((left, right) => left[0] - right[0])
+    .map(([tier, entries]) => {
+      const sorted = [...entries].sort(compareReleaseOptions);
+      const seeders = sorted
+        .map((release) => release.seeders)
+        .filter((value): value is number => value !== undefined);
+      const maxSeeders = seeders.length > 0 ? Math.max(...seeders) : undefined;
+      return {
+        tier,
+        label: releaseTierLabel(tier),
+        ...(maxSeeders !== undefined ? { maxSeeders } : {}),
+        lowSeeders: maxSeeders !== undefined && maxSeeders < 50,
+        releases: sorted,
+      };
+    });
 }

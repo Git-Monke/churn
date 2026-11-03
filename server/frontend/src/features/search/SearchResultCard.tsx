@@ -1,6 +1,6 @@
 import { CheckIcon, FilmIcon, Loader2Icon, PlusIcon, TvIcon } from "lucide-react";
 
-import type { RequestMonitor, SearchResult } from "@/api/types";
+import type { SearchResult } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -10,14 +10,12 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { seasonMonitorLabel } from "@/features/search/search-labels";
 
 interface SearchResultCardProps {
   result: SearchResult;
   onRequest: (result: SearchResult) => void;
   requesting: boolean;
   requestDisabled: boolean;
-  seriesMonitor?: RequestMonitor;
 }
 
 export function SearchResultCard({
@@ -25,7 +23,6 @@ export function SearchResultCard({
   onRequest,
   requesting,
   requestDisabled,
-  seriesMonitor,
 }: SearchResultCardProps) {
   const available = result.available === true;
   const requested = !available && result.inLibrary === true;
@@ -82,8 +79,7 @@ export function SearchResultCard({
         ) : null}
         {result.kind === "series" && result.seasons?.length ? (
           <p className="text-xs text-muted-foreground">
-            {result.seasons.length} {result.seasons.length === 1 ? "season" : "seasons"} ·{" "}
-            {seasonMonitorLabel(seriesMonitor)}
+            {result.seasons.length} {result.seasons.length === 1 ? "season" : "seasons"}
           </p>
         ) : null}
       </CardContent>

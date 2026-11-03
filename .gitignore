@@ -8,3 +8,4 @@ node_modules/
 dist/
 .vite/
 *.tsbuildinfo
+.churn-cache/

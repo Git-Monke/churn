@@ -137,42 +137,37 @@ npm run build
 npm start          # Fastify serves the SPA at http://127.0.0.1:4000
 ```
 
-Search across Radarr and Sonarr from the dashboard and request a movie or show
-with one click. Requests use saved defaults for quality profile, root folder
-and TV monitoring, and start a download search immediately. The Request options
-popover has a **Prefer smaller files** switch (on by default) that picks a
-720p-only profile first, then 720p/1080p, so new downloads arrive faster.
+Search across Radarr and Sonarr from the dashboard and request a movie or show.
+Requests only add the title to the library: they do **not** start a download or
+run an automatic search. Churn adds the title unmonitored, then warms a release
+cache in the background: one Radarr search for a movie, and one Sonarr season
+search per regular season (specials excluded) for a show. Season searches run
+in order from season 1 upward, so a multi-season pack such as `S01-05` found by
+an early search is cached under every season it covers. Opening an existing show
+also starts any missing season searches in the background, including seasons
+whose previous search found nothing; those retries are rate-limited. Opening the
+requested-library view reconciles titles added directly in Sonarr or Radarr, so
+their movie options or every regular season are prefetched too.
 
-Size is not the only speed factor: a 720p release with one seeder can take
-longer than a 1080p release with eighty. The popover also has a **Seeders-aware
-pick** switch (on by default) and a **Minimum seeders** threshold (5 by
-default). With it on, churn searches the indexers itself, grabs the release
-with the best seeder count at the chosen quality tier, and climbs exactly one
-tier (720p → 1080p, never straight to 4K) when the chosen tier has no healthy
-torrents. A tier upgrade that the quality profile would reject is grabbed with
-an explicit override. Usenet releases always count as healthy because they have
-no seeders. If nothing can be grabbed, churn falls back to the arr's own search
-command (`MoviesSearch`, `SeasonSearch` or `SeriesSearch`), so requests still
-work when an indexer is slow or offline.
+Clicking a movie opens its detail page. Clicking a show opens the existing show
+page; while its season searches run the page shows a searching notice, and the
+cached release chooser opens automatically when a season has usable options and
+no downloaded episodes. Choosing a season also shows the chooser. The chooser groups
+options by quality tier (`480p`, `720p`, `1080p`, `2160p`, and `Other`) and only
+shows tiers with at least one release. Within a tier, only releases the arr can actually grab are shown, sorted by
+seeders (highest first), then file size, with quality, indexer, age and
+multi-season coverage. Only the best-seeded release is shown initially; a
+**Show more options** button expands the rest. Results persist in `server/cache/releases` (or `server/.churn-cache/releases` when the container-owned `cache/` directory is not writable), so they are
+still there after a backend restart. When the best option in a tier has fewer
+than 50 seeders, the chooser shows a “may be stale” warning and a refresh button
+instead of hiding the options.
 
-Movie requests auto-grab the picked release. Show requests prefer well-seeded
-season packs for every monitored season and fall back to Sonarr's per-season
-search for seasons without one. A multi-season pack such as `S01-03` monitors
-every season it covers before the grab, so Sonarr imports the whole pack instead
-of only the requested season. The show release list also marks the
-seeders-aware pick as **Recommended**, including the reason (preferred tier,
-tier upgrade, or no release clearing the threshold), so you can override it
-before or after the automatic pick.
-
-The picker's seeders come from the indexer, and trackers routinely overstate
-them. After every smart grab, churn watches qBittorrent for about a minute. If
-fewer than the minimum seeders are **actually connected** and the speed stays
-under 300 KB/s before 25% completion, it blocklists the stalled release and
-grabs the best-seeded alternative from the same search — never a lower quality
-tier and never more than one tier above the profile. That is the case where a
-"20 seeder" 720p release is really serving 3 peers at 100 KB/s while a 1080p
-release has 80 reported seeders. Re-picks are capped at one per request, and
-the Library page shows a dismissible notice explaining each switch.
+Choosing a release grabs it and enables monitoring for the movie or the
+affected season(s). A multi-season pack monitors every season it covers so
+Sonarr imports the whole pack. Picking a tier outside the title's quality
+profile uses an explicit override, and the release row shows the override and
+rejection reasons first. The old automatic seeders-aware pick and swarm re-pick
+are retired from the request path.
 
 The Library page merges titles already in Jellyfin with active Sonarr/Radarr
 downloads. Movies show progress and ETA on their card. Each arr-backed card has
