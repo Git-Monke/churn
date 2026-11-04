@@ -49,6 +49,25 @@ jobs:
     needs: binaries
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
+      # The churn binary pins <repo>:<CARGO_PKG_VERSION>. Never publish a
+      # release whose matching image is missing or not anonymously pullable,
+      # otherwise a fresh install cannot start the dashboard.
+      - name: Verify the dashboard image is published and public
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
+          image="ghcr.io/git-monke/churn-dashboard:$version"
+          for _ in $(seq 1 60); do
+            if docker manifest inspect "$image" >/dev/null 2>&1; then
+              echo "found $image"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::$image is missing or not public; publish the image first"
+          exit 1
+
       - uses: actions/download-artifact@v4
         with:
           path: dist

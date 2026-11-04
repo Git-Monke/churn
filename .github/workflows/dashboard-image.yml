@@ -1,0 +1,125 @@
+name: dashboard image
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+    paths:
+      - "server/**"
+      - ".github/workflows/dashboard-image.yml"
+  pull_request:
+    paths:
+      - "server/**"
+      - ".github/workflows/dashboard-image.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Backend tests and typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install
+        working-directory: server
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: server
+        run: npm run typecheck
+
+      - name: Test
+        working-directory: server
+        run: npm test
+
+  image:
+    name: Build and publish image
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # GHCR requires a lowercase path; github.repository_owner preserves case.
+      - name: Normalize image name
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/churn-dashboard" >> "$GITHUB_ENV"
+
+      # Keep the image tag equal to the churn binary's version. The installer
+      # pins <repo>:<CARGO_PKG_VERSION>, so a mismatch would make an install
+      # pull a tag that was never published.
+      - name: Check release tag matches the Cargo version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match Cargo version v$version"
+            exit 1
+          fi
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        if: github.event_name == 'push'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix=sha-,format=short
+            type=match,pattern=v(.*),group=1
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=raw,value=ci-smoke,enable=${{ github.event_name != 'push' }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: server
+          platforms: ${{ github.event_name == 'push' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+          push: ${{ github.event_name == 'push' }}
+          load: ${{ github.event_name != 'push' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # PRs only: run the loaded image with the same hardening the compose
+      # service uses and prove it serves the API and the built SPA.
+      - name: Smoke test
+        if: github.event_name != 'push'
+        run: |
+          trap 'docker rm -f churn-dashboard-smoke >/dev/null 2>&1 || true' EXIT
+          docker run -d --name churn-dashboard-smoke \
+            --network host \
+            -e PORT=4100 \
+            --read-only --tmpfs /tmp \
+            --init --cap-drop ALL \
+            --security-opt no-new-privileges \
+            "$IMAGE:ci-smoke"
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:4100/api/health >/dev/null 2>&1; then
+              break
+            fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:4100/api/health
+          curl -fsS http://127.0.0.1:4100/ | grep -q 'id="root"'
+          echo "smoke test passed"
