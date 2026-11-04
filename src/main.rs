@@ -126,6 +126,7 @@ fn choose_stacks(args: &Args) -> io::Result<Vec<Stack>> {
 fn ask_questions(
     questions: &[Question],
     assume_yes: bool,
+    existing_ports: &HashMap<Port, u16>,
 ) -> std::io::Result<HashMap<Question, String>> {
     // Values from *any* stack's existing .env: a torrent-only rerun should reuse
     // the media path the server installer already chose on this machine.
@@ -141,6 +142,14 @@ fn ask_questions(
             }
             defaults.entry(question).or_insert(value);
         }
+    }
+    // An older .env may predate configurable ports. The running containers
+    // still know which host ports this installation already owns, so reuse
+    // those instead of treating our own listeners as port conflicts.
+    for (port, number) in existing_ports {
+        defaults
+            .entry(Question::Port(*port))
+            .or_insert_with(|| number.to_string());
     }
     let stored = |question: &Question| defaults.get(question).map(String::as_str);
 
@@ -308,7 +317,46 @@ fn show_plan(chosen: &[Stack], questions: &[Question], answers: &Answers) -> io:
     note("About to install", lines.trim_end().to_string())
 }
 
-fn preflight(chosen: &[Stack]) -> io::Result<()> {
+/// Inspect existing Compose projects for published ports. Only stacks with
+/// generated state are queried, so a fresh install stays offline and quiet.
+fn existing_ports(chosen: &[Stack]) -> HashMap<Port, u16> {
+    let mut found = HashMap::new();
+    for stack in chosen {
+        if !stack.env_path().is_file() || !stack.dir().join("docker-compose.yml").is_file() {
+            continue;
+        }
+        let services = match system::compose_ps(&stack.dir()) {
+            Ok(services) => services,
+            Err(err) => {
+                let _ = log::warning(format!(
+                    "could not inspect the existing {} stack: {err}",
+                    stack.key()
+                ));
+                continue;
+            }
+        };
+        for port in Port::ALL.into_iter().filter(|port| port.stack() == *stack) {
+            if let Some(published) = port.published_in(&services) {
+                found.insert(port, published);
+            }
+        }
+
+        // The dashboard uses host networking, so Compose reports no published
+        // port for it. Its container environment still has the effective PORT.
+        if *stack == Stack::Server && !found.contains_key(&Port::Dashboard) {
+            let port = Port::Dashboard;
+            if let Ok(Some(value)) =
+                system::compose_service_env(&stack.dir(), port.compose_service(), "PORT")
+                && let Ok(number) = ports::validate_port(value.trim())
+            {
+                found.insert(port, number);
+            }
+        }
+    }
+    found
+}
+
+fn preflight(chosen: &[Stack]) -> io::Result<HashMap<Port, u16>> {
     let findings: Vec<String> = chosen.iter().flat_map(|stack| stack.preflight()).collect();
     for finding in &findings {
         log::warning(finding)?;
@@ -316,7 +364,23 @@ fn preflight(chosen: &[Stack]) -> io::Result<()> {
     if findings.is_empty() {
         log::success("host prerequisites look fine")?;
     }
-    Ok(())
+
+    let existing = existing_ports(chosen);
+    if !existing.is_empty() {
+        let ports = Port::ALL
+            .into_iter()
+            .filter_map(|port| {
+                existing
+                    .get(&port)
+                    .map(|number| format!("{} {number}", port.service_name()))
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        log::success(format!(
+            "found an existing installation; reusing its published ports: {ports}"
+        ))?;
+    }
+    Ok(existing)
 }
 
 /// Stop unless we have root, since the installer writes root-owned files and
@@ -771,9 +835,9 @@ fn run(args: Args) -> io::Result<bool> {
     }
 
     let chosen = choose_stacks(&args)?;
-    preflight(&chosen)?;
+    let existing_ports = preflight(&chosen)?;
     let questions = stack::collect_questions(&chosen);
-    let answers = ask_questions(&questions, args.yes)?;
+    let answers = ask_questions(&questions, args.yes, &existing_ports)?;
     ensure_data_dir(&answers)?;
     show_plan(&chosen, &questions, &answers)?;
 

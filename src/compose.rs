@@ -65,6 +65,37 @@ impl Event {
     }
 }
 
+/// One service row from `docker compose ps --format json`.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+pub struct PsService {
+    #[serde(default, rename = "Service")]
+    pub service: String,
+    #[serde(default, rename = "Publishers")]
+    pub publishers: Vec<PsPublisher>,
+}
+
+/// One published host port on a service row.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+pub struct PsPublisher {
+    #[serde(default, rename = "URL")]
+    pub url: String,
+    #[serde(default, rename = "TargetPort")]
+    pub target_port: u16,
+    #[serde(default, rename = "PublishedPort")]
+    pub published_port: u16,
+    #[serde(default, rename = "Protocol")]
+    pub protocol: String,
+}
+
+/// Parse `docker compose ps --format json`; an empty project prints nothing.
+pub fn parse_ps(output: &str) -> serde_json::Result<Vec<PsService>> {
+    let output = output.trim();
+    if output.is_empty() {
+        return Ok(Vec::new());
+    }
+    serde_json::from_str(output)
+}
+
 /// Format a raw Compose tail line for an error message.
 pub fn describe(line: &str) -> String {
     Event::parse(line)
@@ -108,5 +139,25 @@ mod tests {
     #[test]
     fn raw_lines_survive_error_descriptions() {
         assert_eq!(describe("  plain docker warning\n"), "plain docker warning");
+    }
+
+    #[test]
+    fn compose_ps_publishers_are_parsed() {
+        let services = parse_ps(
+            r#"[{"Service":"gluetun","Publishers":[
+                {"URL":"0.0.0.0","TargetPort":8080,"PublishedPort":8081,"Protocol":"tcp"},
+                {"URL":"127.0.0.1","TargetPort":8098,"PublishedPort":8098,"Protocol":"tcp"}
+            ]}]"#,
+        )
+        .unwrap();
+
+        assert_eq!(services[0].service, "gluetun");
+        assert_eq!(services[0].publishers[1].published_port, 8098);
+        assert_eq!(services[0].publishers[1].url, "127.0.0.1");
+    }
+
+    #[test]
+    fn empty_compose_ps_output_is_an_empty_list() {
+        assert!(parse_ps("  \n").unwrap().is_empty());
     }
 }

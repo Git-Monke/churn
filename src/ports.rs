@@ -67,6 +67,51 @@ impl Port {
         }
     }
 
+    /// Compose service that publishes this port. Prowlarr, qBittorrent and
+    /// the VPN status agent all share gluetun's network namespace, so gluetun
+    /// is the service Docker reports their published ports on.
+    pub fn compose_service(self) -> &'static str {
+        match self {
+            Port::Jellyfin => "jellyfin",
+            Port::Sonarr => "sonarr",
+            Port::Radarr => "radarr",
+            Port::Dashboard => "dashboard",
+            Port::Qbittorrent | Port::Prowlarr | Port::VpnStatus => "gluetun",
+        }
+    }
+
+    /// Container-side port for fixed mappings. The dashboard and VPN status
+    /// agent listen on the same port they publish, so their target is dynamic.
+    pub fn target_port(self) -> Option<u16> {
+        match self {
+            Port::Dashboard | Port::VpnStatus => None,
+            _ => Some(self.default_port()),
+        }
+    }
+
+    /// Host port already published by an existing churn container, if any.
+    pub fn published_in(self, services: &[crate::compose::PsService]) -> Option<u16> {
+        services
+            .iter()
+            .filter(|service| service.service == self.compose_service())
+            .flat_map(|service| &service.publishers)
+            .find(|publisher| {
+                publisher.published_port != 0
+                    && (publisher.protocol.is_empty()
+                        || publisher.protocol.eq_ignore_ascii_case("tcp"))
+                    && match self {
+                        Port::Dashboard => true,
+                        Port::VpnStatus => {
+                            publisher.url.starts_with("127.")
+                                || publisher.url == "::1"
+                                || publisher.url.starts_with("[::1]")
+                        }
+                        _ => Some(publisher.target_port) == self.target_port(),
+                    }
+            })
+            .map(|publisher| publisher.published_port)
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Port::Jellyfin => "Host port for the Jellyfin web UI",
@@ -158,5 +203,51 @@ mod tests {
     fn nearest_free_wraps_below_only_after_scanning_up() {
         let found = nearest_free_with(8080, &[8080], |port| port == 8079);
         assert_eq!(found, 8079);
+    }
+
+    #[test]
+    fn existing_published_ports_are_matched_by_service_and_target() {
+        use crate::compose::{PsPublisher, PsService};
+
+        let services = vec![
+            PsService {
+                service: "gluetun".to_string(),
+                publishers: vec![
+                    PsPublisher {
+                        url: "0.0.0.0".to_string(),
+                        target_port: 8080,
+                        published_port: 8081,
+                        protocol: "tcp".to_string(),
+                    },
+                    PsPublisher {
+                        url: "0.0.0.0".to_string(),
+                        target_port: 9696,
+                        published_port: 9697,
+                        protocol: "tcp".to_string(),
+                    },
+                    PsPublisher {
+                        url: "127.0.0.1".to_string(),
+                        target_port: 8098,
+                        published_port: 8098,
+                        protocol: "tcp".to_string(),
+                    },
+                ],
+            },
+            PsService {
+                service: "jellyfin".to_string(),
+                publishers: vec![PsPublisher {
+                    url: "0.0.0.0".to_string(),
+                    target_port: 8096,
+                    published_port: 8096,
+                    protocol: "tcp".to_string(),
+                }],
+            },
+        ];
+
+        assert_eq!(Port::Qbittorrent.published_in(&services), Some(8081));
+        assert_eq!(Port::Prowlarr.published_in(&services), Some(9697));
+        assert_eq!(Port::VpnStatus.published_in(&services), Some(8098));
+        assert_eq!(Port::Jellyfin.published_in(&services), Some(8096));
+        assert_eq!(Port::Sonarr.published_in(&services), None);
     }
 }

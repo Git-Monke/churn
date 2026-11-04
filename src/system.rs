@@ -161,6 +161,81 @@ pub fn compose_up(dir: &Path, on_event: &mut dyn FnMut(&str)) -> io::Result<()> 
     compose_run(dir, "up", &["up", "-d"], on_event)
 }
 
+/// Published host ports for an existing Compose project in `dir`.
+///
+/// `--all` includes stopped containers so a reinstall can still reuse the ports
+/// it configured before. Compose scopes the result to this project, so it does
+/// not confuse another stack's containers with ours.
+pub fn compose_ps(dir: &Path) -> io::Result<Vec<compose::PsService>> {
+    let output = Command::new("docker")
+        .args([
+            "compose", "--ansi", "never", "ps", "--all", "--format", "json",
+        ])
+        .current_dir(dir)
+        .output()?;
+    if !output.status.success() {
+        return Err(io::Error::other(format!(
+            "docker compose ps failed in {}: {}",
+            dir.display(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    compose::parse_ps(&String::from_utf8_lossy(&output.stdout))
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
+}
+
+/// Read one environment variable from an existing Compose service container.
+///
+/// Host-networked services such as the dashboard have no published-port entry
+/// in `docker compose ps`, so inspect their effective container environment
+/// instead. Stopped containers still have their last configured environment.
+pub fn compose_service_env(dir: &Path, service: &str, key: &str) -> io::Result<Option<String>> {
+    let output = Command::new("docker")
+        .args(["compose", "--ansi", "never", "ps", "--all", "-q", service])
+        .current_dir(dir)
+        .output()?;
+    if !output.status.success() {
+        return Err(io::Error::other(format!(
+            "docker compose ps failed in {}: {}",
+            dir.display(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    let Some(id) = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(str::to_string)
+    else {
+        return Ok(None);
+    };
+
+    let output = Command::new("docker")
+        .args(["inspect", "--format", "{{json .Config.Env}}", &id])
+        .output()?;
+    if !output.status.success() {
+        return Err(io::Error::other(format!(
+            "docker inspect failed for {id}: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    let values: Vec<String> = serde_json::from_slice(&output.stdout).map_err(|err| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("could not parse the environment of {id}: {err}"),
+        )
+    })?;
+    Ok(find_env(&values, key).map(str::to_string))
+}
+
+fn find_env<'a>(values: &'a [String], key: &str) -> Option<&'a str> {
+    values
+        .iter()
+        .filter_map(|entry| entry.split_once('='))
+        .find(|(name, _)| *name == key)
+        .map(|(_, value)| value)
+}
+
 /// Verify the effective Compose configuration keeps the torrent stack inside
 /// Gluetun's network namespace and behind its kill switch.
 pub fn verify_torrent_isolation(dir: &Path) -> io::Result<()> {
@@ -627,6 +702,17 @@ mod tests {
 
         assert!(output.status.success());
         assert_eq!(lines, ["alpha", "beta"]);
+    }
+
+    #[test]
+    fn environment_lookup_scans_past_the_first_entry() {
+        let values = vec![
+            "PATH=/usr/bin".to_string(),
+            "PORT=4100".to_string(),
+            "NODE_ENV=production".to_string(),
+        ];
+        assert_eq!(find_env(&values, "PORT"), Some("4100"));
+        assert_eq!(find_env(&values, "MISSING"), None);
     }
 
     #[test]

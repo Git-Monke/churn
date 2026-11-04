@@ -73,6 +73,12 @@ sudo ./target/release/churn --stacks server,torrent   # skip the menu
 sudo ./target/release/churn --dry-run                # collect answers, write nothing
 ```
 
+On a rerun, churn inspects the existing Compose project before asking for ports.
+If its containers are still running or stopped, churn reuses their published
+host ports instead of treating its own Jellyfin on 8096 as a conflict and moving
+the service to a new port. Older `.env` files that predate configurable ports
+are filled in from the containers themselves.
+
 ## Service URLs
 
 `churn show` prints the exact URL for every installed service, using the host
