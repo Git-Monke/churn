@@ -3,6 +3,7 @@ use std::io::Write;
 
 use churn::envfile;
 use churn::mullvad;
+use churn::ports::{self, Port};
 use churn::question::{self, Question, Section};
 use churn::stack::{self, Answers, Stack};
 use zip::ZipWriter;
@@ -25,9 +26,18 @@ fn data_dir_is_asked_once_when_both_stacks_selected() {
 }
 
 #[test]
-fn server_alone_only_asks_for_storage() {
+fn server_alone_asks_for_storage_and_host_ports() {
     let questions = stack::collect_questions(&[Stack::Server]);
-    assert_eq!(questions, vec![Question::DataDir]);
+    assert_eq!(
+        questions,
+        vec![
+            Question::DataDir,
+            Question::Port(Port::Jellyfin),
+            Question::Port(Port::Sonarr),
+            Question::Port(Port::Radarr),
+            Question::Port(Port::Dashboard),
+        ]
+    );
 }
 
 #[test]
@@ -59,11 +69,11 @@ fn wireguard_key_must_decode_to_32_bytes() {
 
 #[test]
 fn qbittorrent_port_must_be_unprivileged() {
-    assert!(question::validate_port("8080").is_ok());
-    assert!(question::validate_port("1024").is_ok());
-    assert!(question::validate_port("80").is_err());
-    assert!(question::validate_port("70000").is_err());
-    assert!(question::validate_port("http").is_err());
+    assert!(ports::validate_port("8080").is_ok());
+    assert!(ports::validate_port("1024").is_ok());
+    assert!(ports::validate_port("80").is_err());
+    assert!(ports::validate_port("70000").is_err());
+    assert!(ports::validate_port("http").is_err());
 }
 
 #[test]

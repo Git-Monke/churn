@@ -2,12 +2,14 @@
 
 use std::fs::{self, OpenOptions};
 use std::io;
-use std::net::{Ipv4Addr, TcpListener};
+use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use cliclack::{input, log};
+
+use crate::ports::{self, Port};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, PartialOrd, Ord)]
 pub enum Section {
@@ -23,7 +25,7 @@ impl Section {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Question {
     DataDir,
-    QbittorrentPort,
+    Port(Port),
     WireguardArchive,
     WireguardConfig,
     WireguardPrivateKey,
@@ -32,9 +34,15 @@ pub enum Question {
 
 impl Question {
     /// Every variant, used to prefill answers from a previous `.env`.
-    pub const ALL: [Question; 6] = [
+    pub const ALL: [Question; 12] = [
         Question::DataDir,
-        Question::QbittorrentPort,
+        Question::Port(Port::Jellyfin),
+        Question::Port(Port::Sonarr),
+        Question::Port(Port::Radarr),
+        Question::Port(Port::Dashboard),
+        Question::Port(Port::Qbittorrent),
+        Question::Port(Port::Prowlarr),
+        Question::Port(Port::VpnStatus),
         Question::WireguardArchive,
         Question::WireguardConfig,
         Question::WireguardPrivateKey,
@@ -54,7 +62,7 @@ impl Question {
             | Question::WireguardConfig
             | Question::WireguardPrivateKey
             | Question::WireguardAddresses => Section::Vpn,
-            Question::DataDir | Question::QbittorrentPort => Section::Storage,
+            Question::DataDir | Question::Port(_) => Section::Storage,
         }
     }
 
@@ -62,7 +70,7 @@ impl Question {
     pub fn env_key(self) -> &'static str {
         match self {
             Question::DataDir => "DATA_DIR",
-            Question::QbittorrentPort => "QBITTORRENT_PORT",
+            Question::Port(port) => port.env_key(),
             Question::WireguardArchive => "WIREGUARD_ARCHIVE",
             Question::WireguardConfig => "WIREGUARD_CONFIG",
             Question::WireguardPrivateKey => "WIREGUARD_PRIVATE_KEY",
@@ -73,7 +81,7 @@ impl Question {
     pub fn label(self) -> &'static str {
         match self {
             Question::DataDir => "Where should media and downloads live?",
-            Question::QbittorrentPort => "Host port for the qBittorrent web UI",
+            Question::Port(port) => port.label(),
             Question::WireguardArchive => "Path to the Mullvad WireGuard config zip",
             Question::WireguardConfig => "WireGuard config file",
             Question::WireguardPrivateKey => "WireGuard private key",
@@ -83,6 +91,42 @@ impl Question {
 
     pub fn is_secret(self) -> bool {
         matches!(self, Question::WireguardPrivateKey)
+    }
+
+    /// Port prompt used by the resolver. Rejects ports another churn service
+    /// has already claimed, and ports that are currently in use.
+    pub fn ask_port(self, port: Port, suggested: u16, reserved: &[u16]) -> io::Result<String> {
+        let mut default = suggested.to_string();
+        let placeholder = port.default_port().to_string();
+        loop {
+            let value: String = input(self.label())
+                .placeholder(&placeholder)
+                .default_input(&default)
+                .interact()?;
+            let candidate = match ports::validate_port(value.trim()) {
+                Ok(candidate) => candidate,
+                Err(message) => {
+                    log::error(message)?;
+                    default = value.trim().to_string();
+                    continue;
+                }
+            };
+            if reserved.contains(&candidate) {
+                log::error(format!(
+                    "Port {candidate} is already assigned to another churn service."
+                ))?;
+                default = candidate.to_string();
+                continue;
+            }
+            if !port.is_free(candidate) {
+                log::error(format!(
+                    "Port {candidate} is already in use on this machine."
+                ))?;
+                default = candidate.to_string();
+                continue;
+            }
+            return Ok(candidate.to_string());
+        }
     }
 
     /// Ask, offering `stored` (from a previous run) as the default.
@@ -112,24 +156,11 @@ impl Question {
                     }
                 }
             }
-            Question::QbittorrentPort => {
-                let mut default = stored
-                    .and_then(|value| validate_port(value).ok())
-                    .map(|port| port.to_string())
-                    .unwrap_or_else(|| suggested_port().to_string());
-                loop {
-                    let value: String = input(self.label())
-                        .placeholder("8080")
-                        .default_input(&default)
-                        .interact()?;
-                    match validate_port(value.trim()) {
-                        Ok(port) => return Ok(port.to_string()),
-                        Err(message) => {
-                            log::error(message)?;
-                            default = value.trim().to_string();
-                        }
-                    }
-                }
+            Question::Port(port) => {
+                let default = stored
+                    .and_then(|value| ports::validate_port(value).ok())
+                    .unwrap_or_else(|| port.default_port());
+                self.ask_port(port, default, &[])
             }
             Question::WireguardArchive => {
                 let mut default = stored.map(normalize_path).unwrap_or_default();
@@ -273,31 +304,6 @@ fn complete_paths(input: &str, include_files: bool) -> Vec<String> {
         .into_iter()
         .map(|(_, _, suggestion)| suggestion)
         .collect()
-}
-
-const QBITTORRENT_DEFAULT_PORT: u16 = 8080;
-/// Host ports churn publishes for its other services; skip them when looking
-/// for a free qBittorrent UI port.
-const CHURN_PUBLISHED_PORTS: [u16; 5] = [8096, 8989, 7878, 9696, 8098];
-
-pub fn validate_port(port: &str) -> Result<u16, String> {
-    let port: u16 = port
-        .parse()
-        .map_err(|_| "Enter a port number between 1024 and 65535.".to_string())?;
-    if !(1024..=65535).contains(&port) {
-        return Err("Use an unprivileged port between 1024 and 65535.".to_string());
-    }
-    Ok(port)
-}
-
-/// First free unprivileged port at or above qBittorrent's usual 8080, skipping
-/// the ports churn already uses. Keeps 8080 when nothing else has claimed it.
-fn suggested_port() -> u16 {
-    (QBITTORRENT_DEFAULT_PORT..=u16::MAX)
-        .find(|port| {
-            !CHURN_PUBLISHED_PORTS.contains(port) && TcpListener::bind(("0.0.0.0", *port)).is_ok()
-        })
-        .unwrap_or(QBITTORRENT_DEFAULT_PORT)
 }
 
 pub fn validate_data_dir(value: &str) -> Result<(), String> {

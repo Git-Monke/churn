@@ -40,8 +40,8 @@ survive a rerun.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `HOST` | `127.0.0.1` | Backend bind address |
-| `PORT` | `4000` | Backend port |
+| `HOST` | `0.0.0.0` in the compose container | Backend bind address |
+| `PORT` | `4000` | Backend port (`DASHBOARD_PORT` in compose) |
 | `JELLYFIN_URL` | `http://127.0.0.1:8096` | Jellyfin base URL used by the backend |
 | `JELLYFIN_PUBLIC_URL` | request host, LAN address as fallback | Browser-facing Jellyfin URL for video playback |
 | `JELLYFIN_API_KEY` | — | Written by churn after Jellyfin setup |

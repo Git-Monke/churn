@@ -25,8 +25,15 @@ pub fn verify_torrent_isolation(config: &Value) -> Result<(), Vec<String>> {
     };
 
     let mut problems = Vec::new();
+    let status_port = services
+        .get("vpn-status")
+        .and_then(|service| service.get("environment"))
+        .and_then(Value::as_object)
+        .and_then(|env| env_str(env, "VPN_STATUS_PORT"))
+        .and_then(|value| value.parse::<i64>().ok())
+        .unwrap_or(8098);
     check_gluetun(gluetun, &mut problems);
-    check_status_port(gluetun, &mut problems);
+    check_status_port(gluetun, status_port, &mut problems);
     check_vpn_gate(services, &mut problems);
     check_vpn_status(services, &mut problems);
 
@@ -231,12 +238,12 @@ fn check_vpn_status(services: &Map<String, Value>, problems: &mut Vec<String>) {
 
 /// The status agent returns security details. If Gluetun publishes it, the host
 /// side must be loopback so it is not exposed to the LAN.
-fn check_status_port(gluetun: &Value, problems: &mut Vec<String>) {
+fn check_status_port(gluetun: &Value, status_port: i64, problems: &mut Vec<String>) {
     let Some(ports) = gluetun.get("ports").and_then(Value::as_array) else {
         return;
     };
     for port in ports {
-        if port.get("target").and_then(Value::as_i64) != Some(8098) {
+        if port.get("target").and_then(Value::as_i64) != Some(status_port) {
             continue;
         }
         if port.get("host_ip").and_then(Value::as_str) != Some(LOOPBACK_HOST) {
@@ -569,6 +576,37 @@ mod tests {
         ]);
         let problems = verify_torrent_isolation(&config).unwrap_err();
         assert!(problems.iter().any(|p| p.contains("vpn-status port")));
+    }
+
+    #[test]
+    fn rejects_a_moved_status_port_published_on_the_host() {
+        let mut config = safe_config();
+        config["services"]["vpn-status"]["environment"] = serde_json::json!({
+            "VPN_STATUS_PORT": "18098"
+        });
+        config["services"]["gluetun"]["ports"] = serde_json::json!([{
+            "target": 18098,
+            "published": "18098",
+            "protocol": "tcp",
+            "host_ip": "0.0.0.0"
+        }]);
+        let problems = verify_torrent_isolation(&config).unwrap_err();
+        assert!(problems.iter().any(|p| p.contains("vpn-status port")));
+    }
+
+    #[test]
+    fn accepts_a_moved_status_port_bound_to_loopback() {
+        let mut config = safe_config();
+        config["services"]["vpn-status"]["environment"] = serde_json::json!({
+            "VPN_STATUS_PORT": "18098"
+        });
+        config["services"]["gluetun"]["ports"] = serde_json::json!([{
+            "target": 18098,
+            "published": "18098",
+            "protocol": "tcp",
+            "host_ip": "127.0.0.1"
+        }]);
+        assert_eq!(verify_torrent_isolation(&config), Ok(()));
     }
 
     #[test]

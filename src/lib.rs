@@ -6,6 +6,7 @@ pub mod envfile;
 pub mod jellyfin;
 pub mod live;
 pub mod mullvad;
+pub mod ports;
 pub mod question;
 pub mod security;
 pub mod stack;

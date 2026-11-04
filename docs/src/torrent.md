@@ -23,9 +23,11 @@ the internet. Web UI ports `8080` (qBittorrent) and `9696` (Prowlarr) are
 published on the gluetun container. Port `8098` is the dashboard's VPN status
 agent and is bound to the host loopback only.
 
-The qBittorrent host port is configurable as `QBITTORRENT_PORT` (default 8080).
-churn picks a free port during setup if 8080 is taken, and passes the same value
-to the dashboard. qBittorrent keeps listening on 8080 inside the VPN namespace.
+The published host ports are configurable as `QBITTORRENT_PORT` (default 8080),
+`PROWLARR_PORT` (default 9696), and `VPN_STATUS_PORT` (default 8098, loopback).
+churn suggests the nearest free port when a default is taken and passes the
+chosen values to the dashboard. Internally qBittorrent and Prowlarr keep their
+standard ports inside the VPN namespace.
 
 The qBittorrent WebUI is published on all host interfaces over plain HTTP and is
 protected by the API key seeded by `qbittorrent-init`. The churn backend reads
@@ -81,7 +83,7 @@ downloads are visible to Sonarr, Radarr, and Jellyfin without path translation.
 ```bash
 cd torrent
 docker compose up -d                         # start the stack
-docker logs vpn-check                        # inspect the last VPN check
+docker compose logs vpn-check                # inspect the last VPN check
 docker compose up --force-recreate vpn-check # rerun the VPN check
 docker compose up -d --no-deps --force-recreate vpn-status  # restart the check agent
 curl -s http://127.0.0.1:8098/status                         # run the live check directly

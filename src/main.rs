@@ -21,6 +21,7 @@ use churn::envfile;
 use churn::jellyfin::{self, Credentials, Jellyfin};
 use churn::live::LiveLog;
 use churn::mullvad;
+use churn::ports::{self, Port};
 use churn::question::{Question, Section};
 use churn::stack::{self, Answers, Stack};
 use churn::system;
@@ -115,24 +116,47 @@ fn choose_stacks(args: &Args) -> io::Result<Vec<Stack>> {
     Ok(stack::start_order(chose))
 }
 
-fn ask_questions(questions: &[Question]) -> std::io::Result<HashMap<Question, String>> {
+fn ask_questions(
+    questions: &[Question],
+    assume_yes: bool,
+) -> std::io::Result<HashMap<Question, String>> {
     // Values from *any* stack's existing .env: a torrent-only rerun should reuse
     // the media path the server installer already chose on this machine.
     let mut defaults: HashMap<Question, String> = HashMap::new();
     for stack in Stack::ALL {
         for (question, value) in stack.stored_answers() {
+            // Prefer the stack that owns a port; the other stack's copy can be
+            // stale after a partial install.
+            if let Question::Port(port) = question {
+                if port.stack() != stack {
+                    continue;
+                }
+            }
             defaults.entry(question).or_insert(value);
         }
     }
     let stored = |question: &Question| defaults.get(question).map(String::as_str);
 
     let mut answers = Answers::new();
+    let mut assigned_ports = Vec::new();
     let mut current = None;
     for question in questions {
         let section = question.section();
         if current != Some(section) {
             explain(section);
             current = Some(section);
+        }
+        if let Question::Port(port) = question {
+            let value = resolve_port(
+                *question,
+                *port,
+                stored(question),
+                &assigned_ports,
+                assume_yes,
+            )?;
+            assigned_ports.push(value);
+            answers.insert(*question, value.to_string());
+            continue;
         }
         if *question == Question::WireguardArchive {
             loop {
@@ -153,6 +177,58 @@ fn ask_questions(questions: &[Question]) -> std::io::Result<HashMap<Question, St
         answers.insert(*question, question.ask(stored(question))?);
     }
     Ok(answers)
+}
+
+/// Reuse a stored port, silently take a free default, or ask only when the
+/// default is taken or already assigned to another churn service.
+fn resolve_port(
+    question: Question,
+    port: Port,
+    stored: Option<&str>,
+    assigned: &[u16],
+    assume_yes: bool,
+) -> io::Result<u16> {
+    if let Some(value) = stored.and_then(|value| ports::validate_port(value).ok()) {
+        if !assigned.contains(&value) {
+            return Ok(value);
+        }
+        log::warning(format!(
+            "Port {value} is stored for more than one service; picking a new {} port.",
+            port.label().to_ascii_lowercase()
+        ))?;
+    }
+
+    let default = port.default_port();
+    if !assigned.contains(&default) && port.is_free(default) {
+        return Ok(default);
+    }
+
+    // Keep away from every other default, even if that service has not been
+    // processed yet and may itself move later.
+    let mut reserved = assigned.to_vec();
+    reserved.extend(
+        Port::ALL
+            .iter()
+            .filter(|other| **other != port)
+            .map(|other| other.default_port()),
+    );
+    let suggested = ports::nearest_free(default, &reserved, port);
+
+    if assume_yes {
+        log::warning(format!(
+            "Port {default} is unavailable; using {suggested} for the {}.",
+            port.label().to_ascii_lowercase()
+        ))?;
+        return Ok(suggested);
+    }
+
+    log::warning(format!(
+        "Port {default} is already in use; suggesting {suggested}."
+    ))?;
+    question
+        .ask_port(port, suggested, &reserved)?
+        .parse()
+        .map_err(|_| io::Error::other("internal error: invalid port answer"))
 }
 
 fn explain(section: Section) {
@@ -315,11 +391,15 @@ fn setup_jellyfin(dry_run: bool) -> io::Result<()> {
 
     let env_path = Stack::Server.env_path();
     let env = envfile::read(&env_path);
+    let jellyfin_port = env
+        .get("JELLYFIN_PORT")
+        .and_then(|value| ports::validate_port(value).ok())
+        .unwrap_or_else(|| Port::Jellyfin.default_port());
     let base_url = std::env::var("JELLYFIN_URL")
         .ok()
         .filter(|value| !value.trim().is_empty())
         .or_else(|| env.get("JELLYFIN_URL").cloned())
-        .unwrap_or_else(|| "http://127.0.0.1:8096".to_string());
+        .unwrap_or_else(|| format!("http://127.0.0.1:{jellyfin_port}"));
     let client = Jellyfin::new(base_url, Duration::from_secs(5));
 
     let progress = spinner();
@@ -662,7 +742,7 @@ fn run(args: Args) -> io::Result<bool> {
     let chosen = choose_stacks(&args)?;
     preflight(&chosen)?;
     let questions = stack::collect_questions(&chosen);
-    let answers = ask_questions(&questions)?;
+    let answers = ask_questions(&questions, args.yes)?;
     ensure_data_dir(&answers)?;
     show_plan(&chosen, &questions, &answers)?;
 
@@ -688,7 +768,7 @@ fn run(args: Args) -> io::Result<bool> {
     let mut steps = String::new();
     for stack in &chosen {
         steps.push_str(&format!("{}\n", stack.key()));
-        for step in stack.next_steps() {
+        for step in stack.next_steps(&answers) {
             steps.push_str(&format!("  {step}\n"));
         }
     }

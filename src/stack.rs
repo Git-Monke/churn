@@ -5,6 +5,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::envfile;
+use crate::ports::{self, Port};
 use crate::question::{Question, Section};
 use crate::security;
 
@@ -58,17 +59,33 @@ impl Stack {
 
     pub fn questions(self) -> &'static [Question] {
         match self {
-            Stack::Server => &[Question::DataDir],
+            Stack::Server => &[
+                Question::DataDir,
+                Question::Port(Port::Jellyfin),
+                Question::Port(Port::Sonarr),
+                Question::Port(Port::Radarr),
+                Question::Port(Port::Dashboard),
+            ],
             Stack::Torrent => &[
                 Question::WireguardArchive,
                 Question::DataDir,
-                Question::QbittorrentPort,
+                Question::Port(Port::Qbittorrent),
+                Question::Port(Port::Prowlarr),
+                Question::Port(Port::VpnStatus),
             ],
         }
     }
 
     pub fn dir(self) -> PathBuf {
         envfile::root().join(self.key())
+    }
+
+    /// The other stack, used when sharing generated values such as host ports.
+    pub fn other(self) -> Stack {
+        match self {
+            Stack::Server => Stack::Torrent,
+            Stack::Torrent => Stack::Server,
+        }
     }
 
     pub fn env_path(self) -> PathBuf {
@@ -87,18 +104,47 @@ impl Stack {
         }
     }
 
-    pub fn next_steps(self) -> &'static [&'static str] {
+    pub fn next_steps(self, answers: &Answers) -> Vec<String> {
         match self {
-            Stack::Server => &[
-                "open http://<vm-ip>:8096  # Jellyfin (use the admin account churn created)",
-                "open http://<vm-ip>:8989  # Sonarr",
-                "open http://<vm-ip>:7878  # Radarr",
+            Stack::Server => vec![
+                format!(
+                    "open http://<vm-ip>:{}  # churn dashboard",
+                    answer_port(answers, Port::Dashboard)
+                ),
+                format!(
+                    "open http://<vm-ip>:{}  # Jellyfin (use the admin account churn created)",
+                    answer_port(answers, Port::Jellyfin)
+                ),
+                format!(
+                    "open http://<vm-ip>:{}  # Sonarr",
+                    answer_port(answers, Port::Sonarr)
+                ),
+                format!(
+                    "open http://<vm-ip>:{}  # Radarr",
+                    answer_port(answers, Port::Radarr)
+                ),
             ],
-            Stack::Torrent => &[
-                "docker logs vpn-check    # confirms torrent egress is VPN-only",
-                "docker logs qbittorrent   # temporary admin password",
-                "open http://<vm-ip>:9696  # Prowlarr (qBittorrent is wired up for you)",
-            ],
+            Stack::Torrent => {
+                let compose = self.dir().join("docker-compose.yml");
+                vec![
+                    format!(
+                        "docker compose -f '{}' logs vpn-check    # confirms torrent egress is VPN-only",
+                        compose.display()
+                    ),
+                    format!(
+                        "docker compose -f '{}' logs qbittorrent   # temporary admin password",
+                        compose.display()
+                    ),
+                    format!(
+                        "open http://<vm-ip>:{}  # qBittorrent",
+                        answer_port(answers, Port::Qbittorrent)
+                    ),
+                    format!(
+                        "open http://<vm-ip>:{}  # Prowlarr (qBittorrent is wired up for you)",
+                        answer_port(answers, Port::Prowlarr)
+                    ),
+                ]
+            }
         }
     }
 
@@ -159,16 +205,24 @@ impl Stack {
             ("TZ", envfile::timezone()),
         ];
 
-        // The dashboard reaches qBittorrent on this host port, and gluetun
-        // publishes qBittorrent's internal 8080 there. Write the same value to
-        // both stacks so a non-default choice stays in sync.
-        let stored_env = envfile::read(&self.env_path());
-        let qbittorrent_port = answers
-            .get(&Question::QbittorrentPort)
-            .cloned()
-            .or_else(|| stored_env.get("QBITTORRENT_PORT").cloned())
-            .unwrap_or_else(|| "8080".to_string());
-        managed.push(("QBITTORRENT_PORT", qbittorrent_port));
+        // Write every host port to both stacks: the dashboard and prowlarr-init
+        // need ports owned by the other stack. Stored values survive reruns.
+        let mut stored_env = envfile::read(&self.other().env_path());
+        stored_env.extend(envfile::read(&self.env_path()));
+        for port in Port::ALL {
+            let value = answers
+                .get(&Question::Port(port))
+                .filter(|value| ports::validate_port(value).is_ok())
+                .cloned()
+                .or_else(|| {
+                    stored_env
+                        .get(port.env_key())
+                        .filter(|value| ports::validate_port(value).is_ok())
+                        .cloned()
+                })
+                .unwrap_or_else(|| port.default_port().to_string());
+            managed.push((port.env_key(), value));
+        }
 
         if self == Stack::Server {
             managed.push((DASHBOARD_IMAGE_ENV, dashboard_image()));
@@ -219,6 +273,13 @@ impl Stack {
 pub fn start_order(mut chosen: Vec<Stack>) -> Vec<Stack> {
     chosen.sort_by_key(|stack| Stack::ALL.iter().position(|known| known == stack));
     chosen
+}
+
+fn answer_port(answers: &Answers, port: Port) -> u16 {
+    answers
+        .get(&Question::Port(port))
+        .and_then(|value| ports::validate_port(value).ok())
+        .unwrap_or_else(|| port.default_port())
 }
 
 fn dashboard_image() -> String {

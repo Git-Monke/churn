@@ -6,8 +6,13 @@ Two roles, one machine each (or both on the same box):
 
 | stack     | what it runs                                  | ports |
 | --------- | --------------------------------------------- | ----- |
-| `server`  | Jellyfin + Sonarr + Radarr                    | 8096, 8989, 7878 |
-| `torrent` | qBittorrent + Prowlarr + FlareSolverr tunnelled through Mullvad WireGuard | 8080 (configurable), 9696, 8098 (localhost) |
+| `server`  | Jellyfin + Sonarr + Radarr + dashboard | 8096, 8989, 7878, 4000 (configurable) |
+| `torrent` | qBittorrent + Prowlarr + FlareSolverr tunnelled through Mullvad WireGuard | 8080, 9696, 8098 (localhost; configurable) |
+
+Every published host port defaults to its conventional value. A free default is
+used without asking; if it is already taken, churn suggests the nearest free
+port and asks which one to use. The chosen values live in each stack's `.env`,
+and reruns reuse them.
 
 ## Install
 
@@ -96,7 +101,7 @@ sudo ./target/release/churn --uninstall --yes        # no confirmation
 `docker compose up -d` in each selected stack directory.
 
 ```
-server/.env      DATA_DIR, PUID, PGID, TZ, JELLYFIN_API_KEY (after setup)
+server/.env      DATA_DIR, PUID, PGID, TZ, host ports, JELLYFIN_API_KEY (after setup)
 torrent/.env     the above + HOST_IP + Mullvad credentials (and the archive path)
 ```
 
@@ -218,13 +223,13 @@ The installer starts the stacks for you. To bring them up again later (for
 example after a reboot):
 
 ```bash
-cd server  && docker compose up -d    # then open http://<ip>:8096 (Jellyfin),
-                                     #   http://<ip>:8989 (Sonarr), http://<ip>:7878 (Radarr)
-cd torrent && docker compose up -d    # temporary password: docker logs qbittorrent
+cd server  && docker compose up -d    # then open the JELLYFIN_PORT, SONARR_PORT
+                                     #   and RADARR_PORT URLs from server/.env
+cd torrent && docker compose up -d    # temporary password: docker compose logs qbittorrent
 ```
 
 Both web UIs are published on the `gluetun` container (the other three share its
-network namespace), so Prowlarr is at `http://<ip>:9696`.
+network namespace), so Prowlarr is at the `PROWLARR_PORT` shown in the install summary.
 
 ## Prowlarr and qBittorrent
 
@@ -359,7 +364,7 @@ cd torrent && docker compose up --force-recreate vpn-check
 ```
 
 A passing run ends with `PASS: torrent egress is confined to the VPN`. Check
-`docker logs vpn-check` for the result of the last automatic startup check.
+`docker compose logs vpn-check` for the result of the last automatic startup check.
 
 Re-run the dashboard's VPN test by opening Services → VPN and pressing **Run
 test again**, or restart the agent:
