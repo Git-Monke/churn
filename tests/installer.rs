@@ -1,5 +1,6 @@
 use std::fs;
 use std::io::Write;
+use std::process::Command;
 
 use churn::envfile;
 use churn::mullvad;
@@ -65,6 +66,67 @@ fn wireguard_key_must_decode_to_32_bytes() {
     assert!(question::validate_wireguard_key(good).is_ok());
     // 16-byte value: the classic wrong thing to copy.
     assert!(question::validate_wireguard_key("MTIzNDU2Nzg5MDEyMzQ1Ng==").is_err());
+}
+
+#[test]
+fn qbittorrent_init_keeps_the_key_and_accepts_forwarded_ports() {
+    let dir = std::env::temp_dir().join(format!(
+        "churn-qbittorrent-init-test-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    let conf_dir = dir.join("qBittorrent");
+    fs::create_dir_all(&conf_dir).unwrap();
+    fs::write(
+        conf_dir.join("qBittorrent.conf"),
+        [
+            "[Preferences]",
+            "WebUI\\APIKey=legacy-key",
+            "",
+            "[WebUI]",
+            "Address=*",
+            "ServerDomains=*",
+            "HostHeaderValidation=true",
+        ]
+        .join("\n"),
+    )
+    .unwrap();
+
+    let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("torrent/scripts/qbittorrent-init.sh");
+    let status = Command::new("sh")
+        .arg(script)
+        .env("QBITTORRENT_CONFIG_ROOT", &dir)
+        .env("PUID", "1000")
+        .env("PGID", "1000")
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    let written = fs::read_to_string(conf_dir.join("qBittorrent.conf")).unwrap();
+    assert!(written.contains("[WebUI]\nAPIKey=legacy-key"));
+    assert!(written.contains("HostHeaderValidation=false"));
+    assert!(!written.contains("HostHeaderValidation=true"));
+    assert!(!written.contains("WebUI\\APIKey="));
+
+    let fresh = dir.join("fresh");
+    fs::create_dir_all(&fresh).unwrap();
+    let status = Command::new("sh")
+        .arg(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("torrent/scripts/qbittorrent-init.sh"),
+        )
+        .env("QBITTORRENT_CONFIG_ROOT", &fresh)
+        .env("PUID", "1000")
+        .env("PGID", "1000")
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let seeded = fs::read_to_string(fresh.join("qBittorrent/qBittorrent.conf")).unwrap();
+    assert!(seeded.contains("APIKey=qbt_"));
+    assert!(seeded.contains("HostHeaderValidation=false"));
+
+    fs::remove_dir_all(&dir).unwrap();
 }
 
 #[test]

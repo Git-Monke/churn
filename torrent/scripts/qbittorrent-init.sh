@@ -5,6 +5,11 @@
 # the container generates a fresh WebUI key when none exists. Seed (or patch)
 # the `[WebUI] APIKey` entry, which qBittorrent 5.x reads; older churn versions
 # wrote `WebUI\APIKey` under `[Preferences]`, which 5.x ignores, so migrate it.
+#
+# Also disable qBittorrent's Host header port check. It compares the request
+# port with qBittorrent's internal 8080, so publishing the WebUI on any other
+# host port makes every request fail with 401. The API key still authenticates
+# API calls, and the WebUI keeps its username/password.
 set -eu
 
 config_root=${QBITTORRENT_CONFIG_ROOT:-/config}
@@ -34,9 +39,10 @@ read_legacy_key() {
 write_webui_key() {
     key=$1
     awk -v key="$key" '
-        function add_key() {
+        function add_settings() {
             if (!added) {
                 print "APIKey=" key
+                print "HostHeaderValidation=false"
                 added = 1
             }
         }
@@ -44,21 +50,22 @@ write_webui_key() {
             if ($0 == "[WebUI]") {
                 print
                 in_webui = 1
-                add_key()
+                add_settings()
                 next
             }
             in_webui = 0
             print
             next
         }
-        in_webui && /^APIKey=/ { next }
-        /^WebUI\\APIKey=/ { next }
+        in_webui && /^(APIKey|HostHeaderValidation)=/ { next }
+        /^WebUI\\(APIKey|HostHeaderValidation)=/ { next }
         { print }
         END {
             if (!added) {
                 print ""
                 print "[WebUI]"
                 print "APIKey=" key
+                print "HostHeaderValidation=false"
             }
         }
     ' "$conf" >"$conf.tmp"
@@ -103,6 +110,7 @@ Downloads\TempPath=/data/incomplete/
 Address=*
 ServerDomains=*
 APIKey=$key
+HostHeaderValidation=false
 EOF
 fi
 

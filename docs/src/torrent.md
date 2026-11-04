@@ -31,8 +31,15 @@ agent and is bound to the host loopback only.
 The published host ports are configurable as `QBITTORRENT_PORT` (default 8080),
 `PROWLARR_PORT` (default 9696), and `VPN_STATUS_PORT` (default 8098, loopback).
 churn suggests the nearest free port when a default is taken and passes the
-chosen values to the dashboard. Internally qBittorrent and Prowlarr keep their
-standard ports inside the VPN namespace.
+chosen values to the dashboard and `prowlarr-init`. Internally qBittorrent and
+Prowlarr keep their standard ports inside the VPN namespace.
+
+Because the published qBittorrent port can differ from its internal 8080,
+`qbittorrent-init` sets `WebUI\HostHeaderValidation=false`. qBittorrent's
+default Host header check rejects requests whose port does not match its
+internal port, which would otherwise make the WebUI and API return 401 when
+the stack is published on a different host port. API requests still require
+the seeded API key.
 
 The qBittorrent WebUI is published on all host interfaces over plain HTTP and is
 protected by the API key seeded by `qbittorrent-init`. The churn backend reads
