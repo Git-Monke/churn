@@ -97,7 +97,7 @@ describe("Jellyfin authentication client", () => {
       }
       expect(url).toContain("/Users/user-1/Items?");
       expect(url).toContain("ParentId=view-1");
-      expect(url).not.toContain("Recursive=true");
+      expect(url).toContain("Recursive=true");
       return new Response(JSON.stringify({ Items: [] }), {
         status: 200,
         headers: { "content-type": "application/json" },

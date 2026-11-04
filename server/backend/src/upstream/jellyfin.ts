@@ -135,9 +135,12 @@ export interface JellyfinClientOptions {
 }
 
 const LIBRARY_QUERY = new URLSearchParams({
-  // Jellyfin returns the view folder itself (and no media) when Recursive=true
-  // is combined with ParentId on this endpoint. Library views list their media
-  // as direct children, so query one view non-recursively at a time.
+  // Recurse so movies Jellyfin nests under a folder item are still listed. That
+  // happens when a movie folder holds more than one video (a second release of
+  // the same movie, for example): Jellyfin turns the folder itself into a
+  // `Folder` item and puts the movies underneath it. A non-recursive query then
+  // only returns the folder, and churn's library/search would miss the movie.
+  Recursive: "true",
   IncludeItemTypes: "Movie,Series",
   SortBy: "SortName",
   SortOrder: "Ascending",
