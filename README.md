@@ -486,11 +486,18 @@ binary embeds it (`CARGO_PKG_VERSION`) and CI refuses to publish an image whose
 and tag cannot drift apart:
 
 ```bash
-scripts/release.sh 0.1.4
+scripts/release.sh                 # next patch, or repair the newest broken tag
+scripts/release.sh minor           # 0.1.5 -> 0.2.0
+scripts/release.sh 0.2.0           # exact version
+scripts/release.sh --dry-run       # show the plan without changing anything
 ```
 
-That updates `Cargo.toml` and `Cargo.lock`, commits `Release v0.1.4`, creates
-the tag and pushes both. The published assets are what `install.sh` and
+That updates `Cargo.toml` and `Cargo.lock`, commits `Release vX.Y.Z`, creates
+the annotated tag and pushes the branch and tag. If the newest tag is
+inconsistent with its tagged `Cargo.toml` (for example, `v0.1.5` was created
+while Cargo still said `0.1.4`), the default command repairs that tag instead
+of bumping past it. The working tree must be clean, so commit the release
+script itself before using it. The published assets are what `install.sh` and
 `churn update` download, and the image tag must match the same version. To
 check the files without releasing:
 
