@@ -190,6 +190,48 @@ pub fn verify_torrent_isolation(dir: &Path) -> io::Result<()> {
     })
 }
 
+/// Prove Docker gives containers on the torrent Compose network an IPv4
+/// default route. Gluetun cannot reach its VPN endpoint without one, and it
+/// otherwise starts and then goes unhealthy with only `default route not found`.
+///
+/// `compose run` creates the project network if needed and removes the probe
+/// container afterwards. It deliberately uses no service ports or dependencies.
+pub fn verify_compose_default_route(dir: &Path, service: &str) -> io::Result<()> {
+    let output = Command::new("docker")
+        .args([
+            "compose",
+            "--ansi",
+            "never",
+            "run",
+            "--rm",
+            "--no-deps",
+            "--entrypoint",
+            "/bin/sh",
+            service,
+            "-c",
+            r#"awk '$2 == "00000000" {found=1} END {exit !found}' /proc/net/route"#,
+        ])
+        .current_dir(dir)
+        .output()?;
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let detail = String::from_utf8_lossy(&output.stderr);
+    let detail = detail.trim();
+    let mut message = String::from(
+        "Docker gave the torrent network no IPv4 default route, so gluetun cannot reach its VPN endpoint.\n\
+         This is a host Docker networking problem, not a churn configuration problem.\n\
+         Check /etc/docker/daemon.json for a disabled bridge or custom routing, then\n\
+         remove any stale torrent network and restart Docker before re-running churn.",
+    );
+    if !detail.is_empty() {
+        message.push_str("\n\nProbe output:\n");
+        message.push_str(detail);
+    }
+    Err(io::Error::other(message))
+}
+
 /// Recreate one service so it picks up values written after `compose up`
 /// (for the dashboard, the Jellyfin API key in `server/.env`).
 pub fn compose_recreate_service(

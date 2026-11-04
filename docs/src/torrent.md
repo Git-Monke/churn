@@ -17,6 +17,11 @@ traffic are not allowed to start.
 | `qbittorrent-init` | Seeds a stable qBittorrent API key | No network |
 | `prowlarr-init` | Wires qBittorrent, indexers, FlareSolverr, Sonarr, and Radarr | Shares gluetun |
 
+Before starting the stack, churn starts a throwaway probe container on the
+Compose network and verifies it has an IPv4 default route. A gluetun log line
+`default route not found` means Docker's bridge or the existing Compose network
+is broken, not that the Mullvad credentials are wrong.
+
 Only `gluetun` joins a Docker network. The other network-capable containers use
 `network_mode: "service:gluetun"` and therefore have no independent route to
 the internet. Web UI ports `8080` (qBittorrent) and `9696` (Prowlarr) are

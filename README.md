@@ -366,6 +366,12 @@ cd torrent && docker compose up --force-recreate vpn-check
 A passing run ends with `PASS: torrent egress is confined to the VPN`. Check
 `docker compose logs vpn-check` for the result of the last automatic startup check.
 
+Before starting the torrent stack, churn starts a throwaway container on the
+Compose network and verifies it has an IPv4 default route. If gluetun reports
+`default route not found`, Docker's bridge or the existing Compose network is
+broken; check `/etc/docker/daemon.json`, remove the stale network, and restart
+Docker before rerunning churn.
+
 Re-run the dashboard's VPN test by opening Services → VPN and pressing **Run
 test again**, or restart the agent:
 

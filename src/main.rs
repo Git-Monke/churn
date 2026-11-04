@@ -628,6 +628,14 @@ fn start_stacks(chosen: &[Stack], dry_run: bool) -> io::Result<()> {
                 return Err(err);
             }
             progress.stop("torrent VPN isolation check passed");
+
+            let progress = spinner();
+            progress.start("checking Docker's torrent network route");
+            if let Err(err) = system::verify_compose_default_route(&stack.dir(), "gluetun") {
+                progress.stop("Docker's torrent network has no default route");
+                return Err(err);
+            }
+            progress.stop("Docker's torrent network has a default route");
         }
 
         let mut live = LiveLog::start(header);
