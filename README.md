@@ -9,9 +9,22 @@ Two roles, one machine each (or both on the same box):
 | `server`  | Jellyfin + Sonarr + Radarr                    | 8096, 8989, 7878 |
 | `torrent` | qBittorrent + Prowlarr + FlareSolverr tunnelled through Mullvad WireGuard | 8080, 9696, 8098 (localhost) |
 
-## Usage
+## Install
 
-Run the installer as root:
+On a fresh Linux machine (root required):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Git-Monke/churn/main/install.sh | sudo sh
+sudo churn
+```
+
+`install.sh` downloads the latest static release binary. churn then installs
+Docker if it is missing, writes the stack files, pulls the prebuilt dashboard
+image, and configures the services.
+
+## Usage from a source checkout
+
+To build and run the installer from a checkout:
 
 ```bash
 cargo build --release
