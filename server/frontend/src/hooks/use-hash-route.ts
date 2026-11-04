@@ -9,7 +9,8 @@ export type AppRoute =
   | { page: "show"; source: ShowSource; id: string }
   | { page: "movie"; source: MovieSource; id: string }
   | { page: "play"; id: string }
-  | { page: "search" };
+  | { page: "search" }
+  | { page: "people" };
 
 export function useHashRoute(): AppRoute {
   const [route, setRoute] = useState<AppRoute>(() => parseHash(window.location.hash));
@@ -38,6 +39,9 @@ export function parseHash(hash: string): AppRoute {
   }
   if (parts.length === 1 && parts[0] === "search") {
     return { page: "search" };
+  }
+  if (parts.length === 1 && parts[0] === "people") {
+    return { page: "people" };
   }
   if (parts.length === 2 && parts[0] === "play" && parts[1]) {
     return { page: "play", id: decodeURIComponent(parts[1]) };

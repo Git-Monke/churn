@@ -141,10 +141,12 @@ requesting and tracking new media. It has three pages — Services, Library and
 Search. It is a BFF: it reads the service APIs, stores no database, and the
 browser only talks to the backend. It binds to `127.0.0.1` by default.
 
-The dashboard now requires a Jellyfin login. Churn validates the account with
-Jellyfin, keeps the resulting user token in an in-memory session, and sends only
-an HttpOnly session cookie to the browser. Restarting the backend signs everyone
-out. Every logged-in Jellyfin user gets full access to the dashboard, including
+The dashboard now requires a Jellyfin login. Churn supports household profiles:
+an admin adds a person, which creates a Jellyfin user for them, and hands over a
+one-time PIN that the person replaces with their own password. Sessions use a
+unique Jellyfin device per login, last 12 hours of inactivity, and are persisted
+to a state volume, so simultaneous users and dashboard restarts no longer sign
+everyone out. Every logged-in Jellyfin user gets full access to the dashboard, including
 Sonarr/Radarr requests and cancel/delete actions; Jellyfin's own library
 restrictions still apply because
 library calls use the user's token. See `server/README.md` for session settings

@@ -9,3 +9,4 @@ dist/
 .vite/
 *.tsbuildinfo
 .churn-cache/
+.churn-state/

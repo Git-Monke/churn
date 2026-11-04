@@ -11,11 +11,14 @@ import {
   fetchSession,
   login as loginRequest,
   logout as logoutRequest,
+  profileLogin as profileLoginRequest,
 } from "@/api/client";
 import type {
   AuthSessionResponse,
   LoginInput,
   LoginResponse,
+  ProfileLoginInput,
+  ProfileLoginResponse,
 } from "@/api/types";
 
 interface AuthContextValue {
@@ -23,6 +26,7 @@ interface AuthContextValue {
   isLoading: boolean;
   isPending: boolean;
   login: (input: LoginInput) => Promise<LoginResponse>;
+  profileLogin: (input: ProfileLoginInput) => Promise<ProfileLoginResponse>;
   logout: () => Promise<void>;
 }
 
@@ -39,15 +43,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     staleTime: 60_000,
   });
 
-  const loginMutation = useMutation({
-    mutationFn: loginRequest,
-    onSuccess: (data) => {
+  const applySession = useCallback(
+    (data: LoginResponse) => {
       queryClient.getQueryCache().clear();
       queryClient.setQueryData<AuthSessionResponse>(SESSION_QUERY_KEY, {
         authenticated: true,
         user: data.user,
+        kind: data.kind,
+        profileId: data.profileId,
         expiresAt: data.expiresAt,
       });
+    },
+    [queryClient],
+  );
+
+  const loginMutation = useMutation({
+    mutationFn: loginRequest,
+    onSuccess: applySession,
+  });
+
+  const profileLoginMutation = useMutation({
+    mutationFn: profileLoginRequest,
+    onSuccess: (data) => {
+      if (data.authenticated && data.user && data.kind && data.expiresAt) {
+        applySession({
+          authenticated: true,
+          user: data.user,
+          kind: data.kind,
+          profileId: data.profileId,
+          expiresAt: data.expiresAt,
+        });
+      }
     },
   });
 
@@ -76,6 +102,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     (input: LoginInput) => loginMutation.mutateAsync(input),
     [loginMutation],
   );
+  const profileLogin = useCallback(
+    (input: ProfileLoginInput) => profileLoginMutation.mutateAsync(input),
+    [profileLoginMutation],
+  );
   const logout = useCallback(async () => {
     try {
       await logoutMutation.mutateAsync();
@@ -89,8 +119,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       value={{
         session: sessionQuery.data,
         isLoading: sessionQuery.isLoading,
-        isPending: loginMutation.isPending || logoutMutation.isPending,
+        isPending:
+          loginMutation.isPending ||
+          profileLoginMutation.isPending ||
+          logoutMutation.isPending,
         login,
+        profileLogin,
         logout,
       }}
     >

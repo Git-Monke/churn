@@ -190,7 +190,9 @@ async function loadJellyfinAvailability(
   auth: AuthContext,
 ): Promise<JellyfinAvailability | undefined> {
   const service = config.services.jellyfin;
-  const client = createJellyfinClient(service, config.requestTimeoutMs, auth.accessToken);
+  const client = createJellyfinClient(service, config.requestTimeoutMs, auth.accessToken, {
+      deviceId: auth.deviceId,
+    });
   try {
     const items = (await client.listLibrary(auth.user.id))
       .map(mapJellyfinItem)

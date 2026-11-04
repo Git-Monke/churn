@@ -58,6 +58,8 @@ export interface AppConfig {
   releaseTimeoutMs: number;
   sessionTtlMs: number;
   cookieSecure: CookieSecureSetting;
+  /** Writable directory for persisted profiles and sessions. */
+  stateDir: string;
   /**
    * Jellyfin URL handed to the browser for video streams. An explicit
    * `JELLYFIN_PUBLIC_URL` always wins; otherwise the request host is used (see
@@ -242,6 +244,7 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
     releaseTimeoutMs: parseReleaseTimeout(values.RELEASE_TIMEOUT_MS),
     sessionTtlMs: parseSessionTtl(values.CHURN_SESSION_TTL_MS),
     cookieSecure: parseCookieSecure(values.CHURN_COOKIE_SECURE),
+    stateDir: resolveStateDir(values.CHURN_STATE_DIR, serverDir),
     jellyfinPublicUrl: resolveJellyfinPublicUrl(
       explicitPublicUrl,
       services.jellyfin.url,
@@ -491,6 +494,11 @@ function parseSessionTtl(value: string | undefined): number {
     throw new Error(`invalid CHURN_SESSION_TTL_MS: ${value}`);
   }
   return Math.min(Math.max(ttl, MIN_SESSION_TTL_MS), MAX_SESSION_TTL_MS);
+}
+
+function resolveStateDir(value: string | undefined, serverDir: string): string {
+  const override = nonEmpty(value);
+  return override ? path.resolve(override) : path.join(serverDir, ".churn-state");
 }
 
 function parseCookieSecure(value: string | undefined): CookieSecureSetting {

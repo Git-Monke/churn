@@ -1,3 +1,7 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
 import type { FastifyRequest } from "fastify";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -33,6 +37,7 @@ function makeConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     releaseTimeoutMs: 500,
     searchTimeoutMs: 2_000,
     sessionTtlMs: 12 * 60 * 60 * 1000,
+    stateDir: mkdtempSync(path.join(tmpdir(), "churn-auth-")),
     cookieSecure: "auto",
     jellyfinPublicUrl: "http://jellyfin.test:8096",
     jellyfinPublicUrlExplicit: true,
@@ -178,6 +183,84 @@ describe("memory session store", () => {
     store.close();
   });
 
+  it("gives every session a unique Jellyfin device id", () => {
+    const store = createMemorySessionStore({ ttlMs: 60_000, sweepIntervalMs: 0 });
+    const first = store.create(user, "one");
+    const second = store.create(user, "two");
+    expect(first.record.deviceId).toBeTruthy();
+    expect(first.record.deviceId).not.toBe("churn-web");
+    expect(first.record.deviceId).not.toBe(second.record.deviceId);
+    store.close();
+  });
+
+  it("persists profiles and sessions and reloads them", async () => {
+    const stateDir = mkdtempSync(path.join(tmpdir(), "churn-state-"));
+    let now = 1_000;
+    const store = createMemorySessionStore({
+      ttlMs: 60_000,
+      now: () => now,
+      stateDir,
+      sweepIntervalMs: 0,
+    });
+    const profile = store.createProfile({
+      name: "Jamie",
+      jellyfinUserId: "jellyfin-1",
+      initialPin: "123456",
+    });
+    const created = store.create(
+      { id: "jellyfin-1", name: "Jamie", isAdmin: false },
+      "token-1",
+      { kind: "profile", profileId: profile.id },
+    );
+
+    await store.flush();
+    store.close();
+
+    const reopened = createMemorySessionStore({
+      ttlMs: 60_000,
+      now: () => now + 1_000,
+      stateDir,
+      sweepIntervalMs: 0,
+    });
+    expect(reopened.getProfile(profile.id)).toMatchObject({
+      name: "Jamie",
+      jellyfinUserId: "jellyfin-1",
+      initialPin: "123456",
+    });
+    const session = reopened.get(created.cookieValue);
+    expect(session).toMatchObject({
+      accessToken: "token-1",
+      deviceId: created.record.deviceId,
+      kind: "profile",
+      profileId: profile.id,
+    });
+    reopened.close();
+    now += 1_000;
+  });
+
+  it("prunes expired sessions when loading state", async () => {
+    const stateDir = mkdtempSync(path.join(tmpdir(), "churn-state-"));
+    const now = 1_000;
+    const first = createMemorySessionStore({
+      ttlMs: 60_000,
+      now: () => now,
+      stateDir,
+      sweepIntervalMs: 0,
+    });
+    const created = first.create(user, "token");
+    await first.flush();
+    first.close();
+
+    const reopened = createMemorySessionStore({
+      ttlMs: 60_000,
+      now: () => now + 60_001,
+      stateDir,
+      sweepIntervalMs: 0,
+    });
+    expect(reopened.get(created.cookieValue)).toBeUndefined();
+    reopened.close();
+  });
+
   it("destroys one session or every session for a user", () => {
     const store = createMemorySessionStore({ ttlMs: 60_000, sweepIntervalMs: 0 });
     const first = store.create(user, "one");
@@ -288,6 +371,27 @@ describe("auth routes", () => {
       authenticated: true,
       user: { id: "test-user", name: "tester", isAdmin: true },
     });
+    await app.close();
+  });
+
+  it("authenticates each login with a unique Jellyfin device id", async () => {
+    const deviceIds: string[] = [];
+    installRawFetch((url, init) => {
+      if (url.endsWith("/Users/AuthenticateByName")) {
+        const headers = init?.headers as Record<string, string>;
+        deviceIds.push(headers["X-Emby-Device-Id"] ?? "");
+        return jsonResponse(testAuthResult);
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+    const app = await buildServer(makeConfig());
+
+    await login(app);
+    await login(app);
+    expect(deviceIds).toHaveLength(2);
+    expect(deviceIds[0]).toBeTruthy();
+    expect(deviceIds[0]).not.toBe("churn-web");
+    expect(deviceIds[0]).not.toBe(deviceIds[1]);
     await app.close();
   });
 
@@ -456,6 +560,304 @@ describe("auth routes", () => {
     });
     expect(response.statusCode).toBe(200);
     expect(seenTokens).toEqual(["test-user-token"]);
+    await app.close();
+  });
+});
+
+describe("household profiles", () => {
+  interface HouseholdState {
+    pin: string;
+    password?: string;
+    profileId?: string;
+    jellyfinUserId: string;
+  }
+
+  function installHouseholdFetch(state: HouseholdState) {
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url.endsWith("/Users/AuthenticateByName") && method === "POST") {
+        const body = JSON.parse(String(init?.body)) as {
+          Username: string;
+          Pw: string;
+        };
+        if (body.Username === "admin") {
+          return jsonResponse(testAuthResult);
+        }
+        if (body.Username === "Jacob") {
+          const expected = state.password ?? state.pin;
+          if (body.Pw === expected) {
+            return jsonResponse({
+              AccessToken: `token-${body.Pw === state.pin ? "pin" : "password"}`,
+              User: {
+                Id: state.jellyfinUserId,
+                Name: "Jacob",
+                Policy: { IsAdministrator: false },
+              },
+            });
+          }
+        }
+        return jsonResponse({}, 401);
+      }
+      if (url.endsWith("/Users/New") && method === "POST") {
+        const body = JSON.parse(String(init?.body)) as {
+          Name: string;
+          Password: string;
+        };
+        expect(body.Name).toBe("Jacob");
+        state.pin = body.Password;
+        return jsonResponse(
+          {
+            Id: state.jellyfinUserId,
+            Name: body.Name,
+            Policy: { IsAdministrator: false },
+          },
+          200,
+        );
+      }
+      if (url.endsWith(`/Users/${state.jellyfinUserId}/Password`) && method === "POST") {
+        const body = JSON.parse(String(init?.body)) as {
+          CurrentPw?: string;
+          NewPw: string;
+        };
+        if (body.CurrentPw !== undefined) {
+          expect(body.CurrentPw).toBe(state.pin);
+        }
+        state.password = body.NewPw;
+        return new Response(null, { status: 204 });
+      }
+      if (url.endsWith(`/Users/${state.jellyfinUserId}`) && method === "DELETE") {
+        return new Response(null, { status: 204 });
+      }
+      if (url.endsWith("/Sessions/Logout")) {
+        return new Response(null, { status: 204 });
+      }
+      throw new Error(`unexpected request ${method} ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  async function createJacob(app: Awaited<ReturnType<typeof buildServer>>, cookie: string) {
+    const response = await invoker(app, cookie, {
+      method: "POST",
+      url: "/api/profiles",
+      payload: { name: "Jacob" },
+    });
+    expect(response.statusCode).toBe(201);
+    return response.json() as {
+      profile: { id: string; name: string; initialPin: string | null };
+      pin: string;
+    };
+  }
+
+  function invoker(
+    app: Awaited<ReturnType<typeof buildServer>>,
+    cookie: string,
+    options: Record<string, unknown>,
+  ) {
+    return injectWithCookie(app, cookie, options);
+  }
+
+  it("adds a person with a PIN and hides the PIN from the public list", async () => {
+    const state: HouseholdState = { pin: "", jellyfinUserId: "jf-jacob" };
+    installHouseholdFetch(state);
+    const app = await buildServer(makeConfig());
+    const { cookie } = await login(app);
+
+    const created = await createJacob(app, cookie as string);
+    state.profileId = created.profile.id;
+    expect(created.pin).toMatch(/^\d{6}$/);
+    expect(created.profile.initialPin).toBe(created.pin);
+
+    const managed = await invoker(app, cookie as string, {
+      method: "GET",
+      url: "/api/profiles",
+    });
+    expect(managed.json()).toMatchObject([
+      { name: "Jacob", initialPin: created.pin, passwordSet: false },
+    ]);
+
+    const publicList = await app.inject({ method: "GET", url: "/api/auth/profiles" });
+    expect(publicList.statusCode).toBe(200);
+    expect(publicList.json()).toEqual([
+      { id: created.profile.id, name: "Jacob", passwordSet: false },
+    ]);
+    await app.close();
+  });
+
+  it("requires an admin session for profile management", async () => {
+    installRawFetch((url) => {
+      if (url.endsWith("/Users/AuthenticateByName")) {
+        return jsonResponse({
+          AccessToken: "guest-token",
+          User: {
+            Id: "guest-id",
+            Name: "guest",
+            Policy: { IsAdministrator: false },
+          },
+        });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+    const app = await buildServer(makeConfig());
+    const { cookie } = await login(app, { username: "guest", password: "secret" });
+
+    const list = await invoker(app, cookie as string, {
+      method: "GET",
+      url: "/api/profiles",
+    });
+    expect(list.statusCode).toBe(403);
+    expect(list.json().error.code).toBe("forbidden");
+    await app.close();
+  });
+
+  it("requires the PIN first, then a new password, on a person's first login", async () => {
+    const state: HouseholdState = { pin: "", jellyfinUserId: "jf-jacob" };
+    installHouseholdFetch(state);
+    const app = await buildServer(makeConfig());
+    const { cookie: adminCookie } = await login(app);
+    const created = await createJacob(app, adminCookie as string);
+    state.profileId = created.profile.id;
+
+    const probe = await app.inject({
+      method: "POST",
+      url: "/api/auth/profile-login",
+      payload: { profileId: created.profile.id, password: created.pin },
+    });
+    expect(probe.statusCode).toBe(200);
+    expect(probe.json()).toMatchObject({
+      passwordSetupRequired: true,
+      profile: { id: created.profile.id, passwordSet: false },
+    });
+
+    const completed = await app.inject({
+      method: "POST",
+      url: "/api/auth/profile-login",
+      payload: {
+        profileId: created.profile.id,
+        password: created.pin,
+        newPassword: "a-strong-password",
+      },
+    });
+    expect(completed.statusCode).toBe(200);
+    const body = completed.json();
+    expect(body).toMatchObject({
+      authenticated: true,
+      kind: "profile",
+      profileId: created.profile.id,
+      user: { name: "Jacob", isAdmin: false },
+    });
+
+    const setCookie = completed.headers["set-cookie"];
+    const profileCookie = (Array.isArray(setCookie) ? setCookie[0] : setCookie)?.split(";")[0];
+    const session = await invoker(app, profileCookie as string, {
+      method: "GET",
+      url: "/api/auth/session",
+    });
+    expect(session.json()).toMatchObject({
+      authenticated: true,
+      kind: "profile",
+      profileId: created.profile.id,
+    });
+
+    const managed = await invoker(app, adminCookie as string, {
+      method: "GET",
+      url: "/api/profiles",
+    });
+    expect(managed.json()).toMatchObject([
+      { name: "Jacob", initialPin: null, passwordSet: true },
+    ]);
+
+    const later = await app.inject({
+      method: "POST",
+      url: "/api/auth/profile-login",
+      payload: { profileId: created.profile.id, password: "a-strong-password" },
+    });
+    expect(later.statusCode).toBe(200);
+    expect(later.json()).toMatchObject({ kind: "profile", authenticated: true });
+    await app.close();
+  });
+
+  it("resets a PIN and signs out that person's sessions", async () => {
+    const state: HouseholdState = { pin: "", jellyfinUserId: "jf-jacob" };
+    installHouseholdFetch(state);
+    const app = await buildServer(makeConfig());
+    const { cookie: adminCookie } = await login(app);
+    const created = await createJacob(app, adminCookie as string);
+    state.profileId = created.profile.id;
+
+    const completed = await app.inject({
+      method: "POST",
+      url: "/api/auth/profile-login",
+      payload: {
+        profileId: created.profile.id,
+        password: created.pin,
+        newPassword: "a-strong-password",
+      },
+    });
+    const profileCookie = (
+      (completed.headers["set-cookie"] as string[] | string | undefined) instanceof Array
+        ? (completed.headers["set-cookie"] as string[])[0]
+        : (completed.headers["set-cookie"] as string)
+    )?.split(";")[0];
+
+    const reset = await invoker(app, adminCookie as string, {
+      method: "POST",
+      url: `/api/profiles/${created.profile.id}/pin`,
+    });
+    expect(reset.statusCode).toBe(200);
+    const newPin = reset.json().pin as string;
+    expect(newPin).toMatch(/^\d{6}$/);
+    expect(newPin).not.toBe(created.pin);
+
+    const after = await invoker(app, profileCookie as string, {
+      method: "GET",
+      url: "/api/status",
+    });
+    expect(after.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it("deletes the Jellyfin user and the profile", async () => {
+    const state: HouseholdState = { pin: "", jellyfinUserId: "jf-jacob" };
+    installHouseholdFetch(state);
+    const app = await buildServer(makeConfig());
+    const { cookie: adminCookie } = await login(app);
+    const created = await createJacob(app, adminCookie as string);
+    state.profileId = created.profile.id;
+
+    const deleted = await invoker(app, adminCookie as string, {
+      method: "DELETE",
+      url: `/api/profiles/${created.profile.id}`,
+    });
+    expect(deleted.statusCode).toBe(204);
+
+    const publicList = await app.inject({ method: "GET", url: "/api/auth/profiles" });
+    expect(publicList.json()).toEqual([]);
+
+    const missing = await invoker(app, adminCookie as string, {
+      method: "DELETE",
+      url: `/api/profiles/${created.profile.id}`,
+    });
+    expect(missing.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it("matches public routes by method as well as path", async () => {
+    const app = await buildServer(makeConfig());
+    const publicList = await app.inject({ method: "GET", url: "/api/auth/profiles" });
+    expect(publicList.statusCode).toBe(200);
+
+    const privateCreate = await app.inject({
+      method: "POST",
+      url: "/api/auth/profiles",
+      payload: { name: "Jacob" },
+    });
+    expect(privateCreate.statusCode).toBe(401);
+
+    const privateSession = await app.inject({ method: "POST", url: "/api/auth/session" });
+    expect(privateSession.statusCode).toBe(401);
     await app.close();
   });
 });

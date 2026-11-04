@@ -81,6 +81,7 @@ preserves unknown keys, so hand-added settings survive a rerun.
 | `SEARCH_TIMEOUT_MS` | `20000` | Timeout for media search and request-option lookups; Sonarr can be slow on large libraries |
 | `RELEASE_TIMEOUT_MS` | `120000` | Timeout for Sonarr/Radarr release lookups such as Parseq parsing; direct season, episode and movie grabs go through qBittorrent |
 | `CHURN_SESSION_TTL_MS` | `43200000` (12 hours) | Server-side idle session TTL; clamped to 5 minutes–30 days |
+| `CHURN_STATE_DIR` | `server/.churn-state` (`/app/state` in the container) | Writable directory for profiles and persisted sessions |
 | `CHURN_COOKIE_SECURE` | `auto` | `auto`, `true` or `false`; controls the session cookie's `Secure` flag |
 | `CHURN_SERVER_DIR` | resolved from the backend module | Override the `server/` root |
 
@@ -158,32 +159,50 @@ put it in `server/.env`, then restart the backend.
 
 ## Authentication and sessions
 
-Every page except the login screen is behind a Jellyfin login. Churn validates
-the username and password with Jellyfin (`/Users/AuthenticateByName`), stores
-the returned user access token in a server-side session, and writes an opaque
-`churn_session` cookie. The cookie is `HttpOnly`, `SameSite=Lax`, path-scoped
-and set with `Secure` when Churn is served over HTTPS. Passwords and Jellyfin
-access tokens never reach the browser for normal API calls.
+Every page except the login screen is behind a Churn profile or Jellyfin login.
+The login screen lists the household's profiles; selecting one asks for that
+person's password, or for the one-time PIN an admin generated on their first
+sign-in. Churn validates the credential with Jellyfin
+(`/Users/AuthenticateByName`), stores the returned user access token in a
+server-side session, and writes an opaque `churn_session` cookie. The cookie is
+`HttpOnly`, `SameSite=Lax`, path-scoped and set with `Secure` when Churn is
+served over HTTPS. Passwords and Jellyfin access tokens never reach the browser
+for normal API calls.
 
-Sessions live in a TTL Map in the backend process, keyed by a SHA-256 hash of
-the cookie value. There is no database and no session file: restarting the
-backend signs everyone out. The default idle TTL is 12 hours; the cookie itself
-is kept for 7 days and is replaced on the next login. `POST /api/auth/logout`
-clears the cookie, destroys the session and makes a best-effort Jellyfin logout
-call.
+An admin can still sign in with a Jellyfin administrator account from the
+login screen. In **People**, the admin adds a person, which creates a real
+Jellyfin user, and receives a 6-digit PIN. The PIN stays visible next to that
+person until they sign in for the first time and choose their own password.
+Deleting a person deletes their Jellyfin user, including its watch history.
+Each person gets their own Jellyfin user, so episodes and movies keep separate
+watch progress.
+
+Sessions are a TTL Map keyed by a SHA-256 hash of the cookie value and are
+persisted to `CHURN_STATE_DIR/auth-state.json` (mode 0600), together with the
+profiles. The default idle TTL is 12 hours and slides on activity, so active
+sessions stay signed in; dashboard restarts and `churn` reruns do not sign
+people out. `churn uninstall` removes the `churn-state` volume with the rest of
+the stack. `POST /api/auth/logout` clears the cookie, destroys the session and
+makes a best-effort Jellyfin logout call.
+
+Each Churn session uses a unique Jellyfin device id. Jellyfin only revokes
+sessions for the same user and device, so two people (or the same person in two
+browsers) can be signed in at the same time without invalidating each other.
+Jellyfin's device list grows over time as sessions are created; its maintenance
+task prunes stale devices.
 
 All logged-in Jellyfin users get the full dashboard. That means any valid
 Jellyfin account can search, request media, grab releases, and cancel/delete
 titles, which changes global Sonarr/Radarr state. Jellyfin still enforces its own library access
 because library and show requests use the user's token, but Churn adds no
-admin-only gate of its own. Use separate Jellyfin accounts with non-admin
-permissions if you want to limit library visibility.
+admin-only gate of its own beyond profile management. Use separate Jellyfin
+accounts with non-admin permissions if you want to limit library visibility.
 
-Auth responses are `no-store`. Failed logins are throttled to 10 attempts per
-15 minutes per IP and username. Cross-origin state-changing requests are
-rejected in addition to `SameSite=Lax`. Playback uses the signed-in user's
-session token, so resume positions and watched state are per Jellyfin user; no
-static playback token is stored in `.env`.
+Auth responses are `no-store`. Failed logins and PIN attempts are throttled to
+10 attempts per 15 minutes per IP and username/profile. Cross-origin
+state-changing requests are rejected in addition to `SameSite=Lax`. Playback
+uses the signed-in user's session token, so resume positions and watched state
+are per Jellyfin user; no static playback token is stored in `.env`.
 
 ## API
 
@@ -191,6 +210,12 @@ static playback token is stored in `.env`.
 | --- | --- |
 | `GET /api/health` | Backend liveness (no session required) |
 | `POST /api/auth/login` | Validate Jellyfin credentials and set the session cookie |
+| `GET /api/auth/profiles` | Public profile picker list (names and setup state) |
+| `POST /api/auth/profile-login` | Sign in as a profile, or complete first-login PIN setup |
+| `GET /api/profiles` | Admin: list people and any PINs still pending |
+| `POST /api/profiles` | Admin: create a person and their Jellyfin user |
+| `POST /api/profiles/:id/pin` | Admin: reset a person's PIN and sign out their sessions |
+| `DELETE /api/profiles/:id` | Admin: delete a person and their Jellyfin user |
 | `POST /api/auth/logout` | Destroy the session and clear the cookie |
 | `GET /api/auth/session` | Current session state (200 even when signed out) |
 | `GET /api/status` | Jellyfin/Sonarr/Radarr health, version and latency |

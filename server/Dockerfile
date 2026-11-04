@@ -37,9 +37,10 @@ COPY --from=build /app/backend/package.json ./backend/package.json
 COPY --from=build /app/backend/dist ./backend/dist
 COPY --from=build /app/frontend/dist ./frontend/dist
 
-# A fresh named volume inherits this directory's ownership, so the non-root
-# `node` user can write the release/media cache.
-RUN mkdir -p /app/.churn-cache && chown node:node /app/.churn-cache
+# Fresh named volumes inherit these directories' ownership, so the non-root
+# `node` user can write the release/media cache and the auth state.
+RUN mkdir -p /app/.churn-cache /app/state \
+    && chown node:node /app/.churn-cache /app/state
 
 USER node
 

@@ -190,7 +190,9 @@ async function loadJellyfinShow(
     return emptyShow("jellyfin", "unconfigured", "Set JELLYFIN_API_KEY in server/.env");
   }
 
-  const client = createJellyfinClient(service, config.requestTimeoutMs, auth.accessToken);
+  const client = createJellyfinClient(service, config.requestTimeoutMs, auth.accessToken, {
+      deviceId: auth.deviceId,
+    });
   let item: JellyfinItem;
   let seasons: JellyfinItem[];
   let episodes: JellyfinItem[];

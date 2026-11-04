@@ -95,10 +95,15 @@ creates an API key named `churn`, and writes it to `server/.env` as
 needed; the password is not stored. Sonarr and Radarr API keys are read from
 `server/config/*/config.xml` unless overridden.
 
-The dashboard requires a Jellyfin login. Churn stores the returned user token in
-an in-memory session and sends only an HttpOnly session cookie to the browser;
-restarting the backend signs everyone out. Library calls and playback use the
-user's token, while the installer's API key stays server-side for status checks.
+The dashboard requires a Jellyfin login, either through a household profile or
+an administrator account. Each profile is backed by its own Jellyfin user, so
+watch progress is per person; an admin creates profiles and their one-time PINs
+from the People page. Churn stores the returned user token in a session that is
+persisted to the `churn-state` volume and slides on activity with a 12-hour idle
+TTL, so dashboard restarts and `churn` reruns do not sign people out. Each
+session has a unique Jellyfin device id, so simultaneous users do not revoke
+each other's tokens. Library calls and playback use the user's token, while the
+installer's API key stays server-side for status checks and user management.
 All logged-in Jellyfin users get the full dashboard, including Sonarr/Radarr
 requests.
 

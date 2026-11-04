@@ -286,6 +286,7 @@ describe("config loading", () => {
         SONARR_URL: "http://sonarr:8989",
         SONARR_API_KEY: "env-key",
         CHURN_SESSION_TTL_MS: "3600000",
+        CHURN_STATE_DIR: "/tmp/churn-custom-state",
         CHURN_COOKIE_SECURE: "true",
         PROWLARR_URL: "http://prowlarr:9696/",
         PROWLARR_API_KEY: "prowlarr-env-key",
@@ -308,6 +309,7 @@ describe("config loading", () => {
     expect(config.searchTimeoutMs).toBe(15_000);
     expect(config.releaseTimeoutMs).toBe(150_000);
     expect(config.sessionTtlMs).toBe(3_600_000);
+    expect(config.stateDir).toBe("/tmp/churn-custom-state");
     expect(config.cookieSecure).toBe(true);
     expect(config.prowlarr).toEqual({
       url: "http://prowlarr:9696",

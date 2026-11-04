@@ -84,6 +84,7 @@ services:
       - HOST=0.0.0.0
       - PORT=${DASHBOARD_PORT:-4000}
       - CHURN_SERVER_DIR=/app
+      - CHURN_STATE_DIR=/app/state
       - JELLYFIN_URL=http://127.0.0.1:${JELLYFIN_PORT:-8096}
       - SONARR_URL=http://127.0.0.1:${SONARR_PORT:-8989}
       - RADARR_URL=http://127.0.0.1:${RADARR_PORT:-7878}
@@ -96,9 +97,11 @@ services:
       - ../torrent/config/prowlarr:/torrent/config/prowlarr:ro
       - ../torrent/config/qbittorrent:/torrent/config/qbittorrent:ro
       - churn-cache:/app/.churn-cache
+      - churn-state:/app/state
     tmpfs:
       - /tmp
     restart: unless-stopped
 
 volumes:
   churn-cache:
+  churn-state:

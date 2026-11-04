@@ -31,7 +31,9 @@ export function registerLibraryRoutes(
     reply.header("cache-control", "no-store");
     const auth = requireAuth(request);
     const service = config.services.jellyfin;
-    const client = createJellyfinClient(service, config.requestTimeoutMs, auth.accessToken);
+    const client = createJellyfinClient(service, config.requestTimeoutMs, auth.accessToken, {
+      deviceId: auth.deviceId,
+    });
 
     let publicInfo;
     try {
@@ -150,7 +152,9 @@ export function registerLibraryRoutes(
         throw new ApiError(503, "jellyfin_unconfigured", "Set JELLYFIN_API_KEY in server/.env");
       }
 
-      const client = createJellyfinClient(service, config.requestTimeoutMs, auth.accessToken);
+      const client = createJellyfinClient(service, config.requestTimeoutMs, auth.accessToken, {
+      deviceId: auth.deviceId,
+    });
       try {
         const image = await client.getPrimaryImage(itemId, query);
         if (!image) {

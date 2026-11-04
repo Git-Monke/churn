@@ -23,6 +23,7 @@ import { registerHealthRoutes } from "./routes/health.js";
 import { registerLibraryRoutes } from "./routes/library.js";
 import { registerMovieRoutes } from "./routes/movies.js";
 import { registerPlaybackRoutes } from "./routes/playback.js";
+import { registerProfileRoutes } from "./routes/profiles.js";
 import { registerRequestRoutes } from "./routes/requests.js";
 import { registerRequestedLibraryRoutes } from "./routes/requested.js";
 import { registerSearchRoutes } from "./routes/search.js";
@@ -40,7 +41,12 @@ export async function buildServer(
   options: BuildServerOptions = {},
 ): Promise<FastifyInstance> {
   const app = Fastify({ logger: options.logger ?? false });
-  const sessionStore = createMemorySessionStore({ ttlMs: config.sessionTtlMs });
+  mkdirSync(config.stateDir, { recursive: true });
+  const sessionStore = createMemorySessionStore({
+    ttlMs: config.sessionTtlMs,
+    stateDir: config.stateDir,
+    onWarning: (message) => app.log.warn(message),
+  });
   const loginThrottle = createLoginThrottle();
   const releaseEvents = createReleaseEventStore();
   const cacheDir = resolveReleaseCacheDir(config.serverDir);
@@ -53,6 +59,7 @@ export async function buildServer(
 
   app.addHook("onClose", async () => {
     libraryScan.stop();
+    await sessionStore.flush();
     sessionStore.close();
   });
 
@@ -75,12 +82,27 @@ export async function buildServer(
 
   await app.register(cookie);
 
-  const publicApiPaths = new Set([
-    "/api/health",
-    "/api/auth/login",
-    "/api/auth/logout",
-    "/api/auth/session",
-  ]);
+  const isPublicApi = (method: string, pathname: string): boolean => {
+    if (method === "GET" && pathname === "/api/health") {
+      return true;
+    }
+    if (method === "POST" && pathname === "/api/auth/login") {
+      return true;
+    }
+    if (method === "POST" && pathname === "/api/auth/logout") {
+      return true;
+    }
+    if (method === "GET" && pathname === "/api/auth/session") {
+      return true;
+    }
+    if (method === "GET" && pathname === "/api/auth/profiles") {
+      return true;
+    }
+    if (method === "POST" && pathname === "/api/auth/profile-login") {
+      return true;
+    }
+    return false;
+  };
   app.decorateRequest("auth", null);
   app.addHook("onRequest", async (request, reply) => {
     const pathname = request.url.split("?")[0] ?? request.url;
@@ -100,7 +122,7 @@ export async function buildServer(
       });
     }
 
-    if (publicApiPaths.has(pathname)) {
+    if (isPublicApi(request.method, pathname)) {
       return;
     }
 
@@ -116,12 +138,16 @@ export async function buildServer(
       user: record.user,
       accessToken: record.accessToken,
       sessionId: cookieValue,
+      deviceId: record.deviceId,
+      kind: record.kind,
+      profileId: record.profileId,
       destroySession: () => sessionStore.destroy(cookieValue),
     };
   });
 
   registerHealthRoutes(app);
   registerAuthRoutes(app, config, { store: sessionStore, throttle: loginThrottle });
+  registerProfileRoutes(app, config, { store: sessionStore });
   registerStatusRoutes(app, config);
   registerVpnRoutes(app, config);
   registerLibraryRoutes(app, config, releaseSearch);

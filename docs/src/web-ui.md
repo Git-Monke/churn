@@ -57,6 +57,7 @@ survive a rerun.
 | `PROWLARR_URL` | `http://127.0.0.1:9696` | Prowlarr base URL for progressive release search |
 | `PROWLARR_API_KEY` | `torrent/config/prowlarr/config.xml` | Optional Prowlarr API-key override |
 | `CHURN_SESSION_TTL_MS` | `43200000` (12 hours) | Server-side idle session TTL; clamped to 5 minutes–30 days |
+| `CHURN_STATE_DIR` | `server/.churn-state` (`/app/state` in the container) | Persisted profiles and sessions |
 | `CHURN_COOKIE_SECURE` | `auto` | `auto`, `true` or `false` for the session cookie's `Secure` flag |
 | `CHURN_SERVER_DIR` | module-relative | Override `server/` root |
 
@@ -78,28 +79,44 @@ reuse a valid existing key.
 
 ## Authentication
 
-Churn uses Jellyfin as its account system. The login form posts a username and
-password to the backend, which calls Jellyfin's `/Users/AuthenticateByName` and
-stores the returned user access token in a server-side session. The browser gets
-only an opaque `churn_session` cookie: `HttpOnly`, `SameSite=Lax`, path-scoped,
-and `Secure` when served over HTTPS.
+Churn uses Jellyfin as its account system, with household profiles in front of
+it. The login screen lists the people an admin has added. Selecting a profile
+posts its password (or the one-time PIN on first use) to the backend, which
+calls Jellyfin's `/Users/AuthenticateByName` and stores the returned user access
+token in a server-side session. The browser gets only an opaque `churn_session`
+cookie: `HttpOnly`, `SameSite=Lax`, path-scoped, and `Secure` when served over
+HTTPS.
 
-Sessions are a TTL Map in backend memory, keyed by a SHA-256 hash of the cookie
-value. There is no database or session file. The default idle TTL is 12 hours;
-restarting the backend signs everyone out. Signing out clears the cookie,
-destroys the session and makes a best-effort Jellyfin logout call.
+An admin signs in with a Jellyfin administrator account and opens **People** to
+add a person. Churn creates a real Jellyfin user for that person and shows a
+6-digit PIN next to them until their first login. The person enters the PIN,
+then chooses their own password. Each person has a distinct Jellyfin user, so
+watch progress stays separate. Deleting a person deletes their Jellyfin user
+and history.
+
+Sessions are a TTL map keyed by a SHA-256 hash of the cookie value, persisted
+atomically to `CHURN_STATE_DIR/auth-state.json` (mode 0600) with the profiles.
+The default idle TTL is 12 hours and slides on activity; dashboard restarts and
+`churn` reruns keep people signed in. `churn uninstall` removes the
+`churn-state` volume. Signing out clears the cookie, destroys the session and
+makes a best-effort Jellyfin logout call.
+
+Each session has a unique Jellyfin device id, so multiple people (and multiple
+browsers for the same person) can be signed in at once without revoking each
+other's tokens.
 
 Library, show and image requests use the signed-in user's Jellyfin token, so
 Jellyfin still enforces that user's library access. The Jellyfin API key remains
-server-side for status checks. Every logged-in Jellyfin user gets the full
-dashboard, including search, requests, release grabs, and cancel/delete actions,
-which mutate global Sonarr/Radarr state. Churn does not add an admin-only gate;
-use Jellyfin user permissions to limit library visibility.
+server-side for status checks and user management. Every logged-in Jellyfin user
+gets the full dashboard, including search, requests, release grabs, and
+cancel/delete actions, which mutate global Sonarr/Radarr state. Only profile
+management is admin-only; use Jellyfin user permissions to limit library
+visibility.
 
-Failed logins are throttled to 10 attempts per 15 minutes per IP and username.
-Auth responses are `no-store`, and cross-origin mutating requests are rejected.
-Playback uses the signed-in user's Jellyfin session token rather than a static
-token in `.env`, so resume positions and watched state are per user.
+Failed logins and PIN attempts are throttled to 10 attempts per 15 minutes per
+IP and username/profile. Cross-origin mutating requests are rejected. Playback
+uses the signed-in user's Jellyfin session token rather than a static token in
+`.env`, so resume positions and watched state are per user.
 
 ## API
 
@@ -107,6 +124,12 @@ token in `.env`, so resume positions and watched state are per user.
 | --- | --- |
 | `GET /api/health` | Backend liveness (no session required) |
 | `POST /api/auth/login` | Validate Jellyfin credentials and set the session cookie |
+| `GET /api/auth/profiles` | Public profile picker list |
+| `POST /api/auth/profile-login` | Sign in as a profile or complete first-login setup |
+| `GET /api/profiles` | Admin: list people and pending PINs |
+| `POST /api/profiles` | Admin: create a person and Jellyfin user |
+| `POST /api/profiles/:id/pin` | Admin: reset a PIN and sign out that profile |
+| `DELETE /api/profiles/:id` | Admin: delete a person and Jellyfin user |
 | `POST /api/auth/logout` | Destroy the session and clear the cookie |
 | `GET /api/auth/session` | Current session state (200 when signed out) |
 | `GET /api/status` | Service health, version and latency |

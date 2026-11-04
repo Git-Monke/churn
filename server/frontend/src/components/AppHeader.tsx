@@ -19,10 +19,13 @@ const NAV_ITEMS = [
   { page: "search", label: "Search", href: "#/search" },
 ] as const;
 
+const ADMIN_NAV_ITEM = { page: "people", label: "People", href: "#/people" } as const;
+
 export function AppHeader({ route, checkedAt, refreshing, onRefresh }: AppHeaderProps) {
   const { session, logout, isPending } = useAuth();
   const activePage = route.page === "show" || route.page === "play" ? "library" : route.page;
   const user = session?.user;
+  const navItems = user?.isAdmin ? [...NAV_ITEMS, ADMIN_NAV_ITEM] : NAV_ITEMS;
 
   return (
     <header className="flex flex-col gap-4">
@@ -51,7 +54,7 @@ export function AppHeader({ route, checkedAt, refreshing, onRefresh }: AppHeader
             disabled={isPending}
           >
             <LogOutIcon data-icon="inline-start" />
-            Sign out
+            Switch person
           </Button>
           <Button variant="outline" onClick={onRefresh} disabled={refreshing}>
             <RefreshCwIcon data-icon="inline-start" className={refreshing ? "animate-spin" : undefined} />
@@ -61,7 +64,7 @@ export function AppHeader({ route, checkedAt, refreshing, onRefresh }: AppHeader
       </div>
 
       <nav aria-label="Primary" className="flex flex-wrap items-center gap-1 border-b pb-2">
-        {NAV_ITEMS.map((item) => {
+        {navItems.map((item) => {
           const active = activePage === item.page;
           return (
             <a

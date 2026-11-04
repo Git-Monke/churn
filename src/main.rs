@@ -740,7 +740,7 @@ fn uninstall(args: Args) -> io::Result<bool> {
         }
     }
     lines.push_str(
-        "\nDATA_DIR, media, downloads and images are left untouched.\nThe dashboard cache volume is removed.",
+        "\nDATA_DIR, media, downloads and images are left untouched.\nThe dashboard cache and auth-state volumes are removed.",
     );
     note("About to uninstall", lines.trim_end().to_string())?;
 

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
@@ -11,6 +11,7 @@ import { useHashRoute } from "@/hooks/use-hash-route";
 import { LibraryPage } from "@/pages/LibraryPage";
 import { LoginPage } from "@/pages/LoginPage";
 import { MoviePage } from "@/pages/MoviePage";
+import { PeoplePage } from "@/pages/PeoplePage";
 import { PlayPage } from "@/pages/PlayPage";
 import { SearchPage } from "@/pages/SearchPage";
 import { ServicesPage } from "@/pages/ServicesPage";
@@ -41,6 +42,14 @@ function AppShell() {
 
 function Dashboard() {
   const route = useHashRoute();
+  const { session } = useAuth();
+  const isAdmin = session?.user?.isAdmin === true;
+
+  useEffect(() => {
+    if (route.page === "people" && !isAdmin) {
+      window.location.hash = "#/services";
+    }
+  }, [route.page, isAdmin]);
   const queryClient = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
   const statusQuery = useQuery({
@@ -96,6 +105,7 @@ function Dashboard() {
         <MoviePage key={`${route.source}:${route.id}`} source={route.source} id={route.id} />
       ) : null}
       {route.page === "search" ? <SearchPage /> : null}
+      {route.page === "people" && isAdmin ? <PeoplePage /> : null}
       {route.page === "play" ? <PlayPage key={route.id} id={route.id} /> : null}
     </div>
   );

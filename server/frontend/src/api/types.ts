@@ -4,9 +4,13 @@ export interface AuthUser {
   isAdmin: boolean;
 }
 
+export type AuthSessionKind = "admin" | "profile" | "direct";
+
 export interface AuthSessionResponse {
   authenticated: boolean;
   user?: AuthUser;
+  kind?: AuthSessionKind;
+  profileId?: string;
   expiresAt?: string;
 }
 
@@ -18,7 +22,41 @@ export interface LoginInput {
 export interface LoginResponse {
   authenticated: true;
   user: AuthUser;
+  kind: AuthSessionKind;
+  profileId?: string;
   expiresAt: string;
+}
+
+export interface ProfileSummary {
+  id: string;
+  name: string;
+  passwordSet: boolean;
+}
+
+export interface ManagedProfile extends ProfileSummary {
+  initialPin: string | null;
+  createdAt: number;
+}
+
+export interface ProfileLoginInput {
+  profileId: string;
+  password: string;
+  newPassword?: string;
+}
+
+export interface ProfileLoginResponse {
+  authenticated?: true;
+  passwordSetupRequired?: true;
+  user?: AuthUser;
+  kind?: AuthSessionKind;
+  profileId?: string;
+  profile?: ProfileSummary;
+  expiresAt?: string;
+}
+
+export interface CreateProfileResponse {
+  profile: ManagedProfile;
+  pin: string;
 }
 
 export type ServiceId = "jellyfin" | "sonarr" | "radarr";

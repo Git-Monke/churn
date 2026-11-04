@@ -46,6 +46,9 @@ export function registerPlaybackRoutes(
         config.services.jellyfin,
         config.requestTimeoutMs,
         auth.accessToken,
+        {
+          deviceId: auth.deviceId,
+        },
       );
 
       let item;
@@ -104,6 +107,9 @@ export function registerPlaybackRoutes(
         config.services.jellyfin,
         config.requestTimeoutMs,
         auth.accessToken,
+        {
+          deviceId: auth.deviceId,
+        },
       );
 
       let mediaSourceId = parseOptionalSessionId(
@@ -159,6 +165,9 @@ export function registerPlaybackRoutes(
         config.services.jellyfin,
         config.requestTimeoutMs,
         auth.accessToken,
+        {
+          deviceId: auth.deviceId,
+        },
       );
 
       let mediaSourceId = parseOptionalSessionId(
@@ -227,6 +236,9 @@ async function reportPlayback(
     config.services.jellyfin,
     config.requestTimeoutMs,
     auth.accessToken,
+    {
+      deviceId: auth.deviceId,
+    },
   );
 
   try {

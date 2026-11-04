@@ -21,6 +21,7 @@ function config(): AppConfig {
     releaseTimeoutMs: 500,
     searchTimeoutMs: 2_000,
     sessionTtlMs: 60_000,
+    stateDir: "/tmp/churn-release-name-test/.churn-state",
     cookieSecure: "auto",
     jellyfinPublicUrl: "http://jellyfin.test:8096",
     jellyfinPublicUrlExplicit: true,

@@ -192,7 +192,9 @@ async function loadJellyfinMovie(
     };
   }
 
-  const client = createJellyfinClient(service, config.requestTimeoutMs, auth.accessToken);
+  const client = createJellyfinClient(service, config.requestTimeoutMs, auth.accessToken, {
+      deviceId: auth.deviceId,
+    });
   let item: JellyfinItem;
   try {
     item = await client.getItem(itemId);

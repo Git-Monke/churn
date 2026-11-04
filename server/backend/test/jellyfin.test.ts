@@ -189,3 +189,97 @@ describe("Jellyfin authentication client", () => {
     expect(calls[2]?.body).toMatchObject({ Failed: false });
   });
 });
+
+describe("Jellyfin device ids and user management", () => {
+  const config = {
+    id: "jellyfin" as const,
+    name: "Jellyfin",
+    url: "http://jellyfin.test:8096",
+    apiKey: "api-key",
+  };
+
+  it("uses the supplied device id for login and later calls", async () => {
+    const seen: Record<string, string>[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        seen.push(init?.headers as Record<string, string>);
+        const url = String(input);
+        if (url.endsWith("/Users/AuthenticateByName")) {
+          return new Response(
+            JSON.stringify({
+              AccessToken: "device-token",
+              User: { Id: "user-1", Name: "user" },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        expect(url).toBe("http://jellyfin.test:8096/Sessions/Logout");
+        return new Response(null, { status: 204 });
+      }),
+    );
+
+    const client = createJellyfinClient(config, 500, undefined, {
+      deviceId: "session-abc",
+      deviceName: "Churn Jacob",
+    });
+    await client.authenticate("Jacob", "123456");
+    await client.logout("device-token");
+
+    expect(seen[0]).toMatchObject({
+      Authorization:
+        'MediaBrowser Client="Churn", Device="Churn Jacob", DeviceId="session-abc", Version="0.1.0"',
+      "X-Emby-Device-Id": "session-abc",
+    });
+    expect(seen[1]).toMatchObject({ "X-Emby-Device-Id": "session-abc" });
+  });
+
+  it("creates a user, changes a password and deletes the user", async () => {
+    const requests: Array<{ url: string; method: string; body?: string }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        requests.push({
+          url: String(input),
+          method: init?.method ?? "GET",
+          body: init?.body === undefined ? undefined : String(init.body),
+        });
+        const url = String(input);
+        if (url.endsWith("/Users/New")) {
+          return new Response(
+            JSON.stringify({ Id: "jf-1", Name: "Jacob" }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        return new Response(null, { status: 204 });
+      }),
+    );
+
+    const client = createJellyfinClient(config, 500);
+    const created = await client.createUser("Jacob", "123456");
+    expect(created).toMatchObject({ Id: "jf-1", Name: "Jacob" });
+    await client.setUserPassword("jf-1", "new-password", { currentPassword: "123456" });
+    await client.deleteUser("jf-1");
+
+    expect(requests[0]).toMatchObject({
+      url: "http://jellyfin.test:8096/Users/New",
+      method: "POST",
+    });
+    expect(JSON.parse(requests[0]?.body ?? "{}")).toEqual({
+      Name: "Jacob",
+      Password: "123456",
+    });
+    expect(requests[1]).toMatchObject({
+      url: "http://jellyfin.test:8096/Users/jf-1/Password",
+      method: "POST",
+    });
+    expect(JSON.parse(requests[1]?.body ?? "{}")).toEqual({
+      CurrentPw: "123456",
+      NewPw: "new-password",
+    });
+    expect(requests[2]).toMatchObject({
+      url: "http://jellyfin.test:8096/Users/jf-1",
+      method: "DELETE",
+    });
+  });
+});

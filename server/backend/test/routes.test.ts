@@ -19,6 +19,7 @@ function makeConfig(overrides: Partial<AppConfig["services"]> = {}): AppConfig {
     releaseTimeoutMs: 500,
     searchTimeoutMs: 2_000,
     sessionTtlMs: 12 * 60 * 60 * 1000,
+    stateDir: path.join(serverDir, ".churn-state"),
     cookieSecure: "auto",
     jellyfinPublicUrl: "http://jellyfin.test:8096",
     jellyfinPublicUrlExplicit: true,
@@ -3863,8 +3864,10 @@ describe("playback", () => {
       if (url.includes("/Sessions/Playing")) {
         expect(init?.headers).toMatchObject({
           "X-Emby-Token": "test-user-token",
-          "X-Emby-Device-Id": "churn-web",
         });
+        const headers = init?.headers as Record<string, string>;
+        expect(headers["X-Emby-Device-Id"]).toBeTruthy();
+        expect(headers["X-Emby-Device-Id"]).not.toBe("churn-web");
         posted.push({ url, body: JSON.parse(String(init?.body)) });
         return new Response(null, { status: 204 });
       }

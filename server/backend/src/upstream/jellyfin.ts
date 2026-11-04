@@ -125,9 +125,14 @@ export interface JellyfinImage {
 
 const CLIENT_NAME = "Churn";
 const DEVICE_NAME = "Churn Web";
-const DEVICE_ID = "churn-web";
+const DEFAULT_DEVICE_ID = "churn-web";
 const CLIENT_VERSION = "0.1.0";
-const AUTHORIZATION_HEADER = `MediaBrowser Client="${CLIENT_NAME}", Device="${DEVICE_NAME}", DeviceId="${DEVICE_ID}", Version="${CLIENT_VERSION}"`;
+
+export interface JellyfinClientOptions {
+  /** Unique per Churn session so Jellyfin never revokes another login. */
+  deviceId?: string;
+  deviceName?: string;
+}
 
 const LIBRARY_QUERY = new URLSearchParams({
   // Jellyfin returns the view folder itself (and no media) when Recursive=true
@@ -146,11 +151,16 @@ export function createJellyfinClient(
   config: ServiceConfig,
   timeoutMs: number,
   token: string | undefined = config.apiKey,
+  options: JellyfinClientOptions = {},
 ) {
+  const deviceId = options.deviceId ?? DEFAULT_DEVICE_ID;
+  const deviceName = options.deviceName ?? DEVICE_NAME;
+  const authorizationHeader = `MediaBrowser Client="${CLIENT_NAME}", Device="${deviceName}", DeviceId="${deviceId}", Version="${CLIENT_VERSION}"`;
+
   const deviceHeaders = (): Record<string, string> => ({
     "X-Emby-Client": CLIENT_NAME,
-    "X-Emby-Device-Name": DEVICE_NAME,
-    "X-Emby-Device-Id": DEVICE_ID,
+    "X-Emby-Device-Name": deviceName,
+    "X-Emby-Device-Id": deviceId,
     "X-Emby-Client-Version": CLIENT_VERSION,
   });
 
@@ -184,7 +194,7 @@ export function createJellyfinClient(
         {
           timeoutMs,
           method: "POST",
-          headers: { Authorization: AUTHORIZATION_HEADER, ...deviceHeaders() },
+          headers: { Authorization: authorizationHeader, ...deviceHeaders() },
           body: { Username: username, Pw: password },
         },
       );
@@ -200,6 +210,54 @@ export function createJellyfinClient(
         },
         timeoutMs,
       );
+    },
+
+    /** Create a Jellyfin user. Requires an admin API key or token. */
+    async createUser(name: string, password: string): Promise<JellyfinUser> {
+      if (!token) {
+        throw new UpstreamError("jellyfin", "unauthorized", "Jellyfin API key is not configured");
+      }
+      return fetchJson<JellyfinUser>("jellyfin", `${config.url}/Users/New`, {
+        method: "POST",
+        body: { Name: name, Password: password },
+        headers: authHeaders(),
+        timeoutMs,
+      });
+    },
+
+    /**
+     * Change a user's password. With a user token, `currentPassword` proves the
+     * old credential. With an admin API key, omit it to reset the password.
+     */
+    async setUserPassword(
+      jellyfinUserId: string,
+      newPassword: string,
+      options: { currentPassword?: string } = {},
+    ): Promise<void> {
+      const body: Record<string, string> = { NewPw: newPassword };
+      if (options.currentPassword !== undefined) {
+        body.CurrentPw = options.currentPassword;
+      }
+      await postNoContent(
+        `${config.url}/Users/${encodeURIComponent(jellyfinUserId)}/Password`,
+        body,
+      );
+    },
+
+    /** Delete a Jellyfin user, revoking its tokens and watch state. */
+    async deleteUser(jellyfinUserId: string): Promise<void> {
+      if (!token) {
+        throw new UpstreamError("jellyfin", "unauthorized", "Jellyfin API key is not configured");
+      }
+      const response = await fetchWithTimeout(
+        "jellyfin",
+        `${config.url}/Users/${encodeURIComponent(jellyfinUserId)}`,
+        { method: "DELETE", headers: authHeaders() },
+        timeoutMs,
+      );
+      if (!response.ok) {
+        throw await upstreamResponseError("jellyfin", response);
+      }
     },
 
     async getPublicInfo(): Promise<JellyfinPublicInfo> {

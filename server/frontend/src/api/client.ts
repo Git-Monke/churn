@@ -5,8 +5,13 @@ import type {
   CancelLibraryItemResponse,
   CancelEpisodeDownloadResponse,
   CancelMovieDownloadResponse,
+  CreateProfileResponse,
   LoginInput,
   LoginResponse,
+  ManagedProfile,
+  ProfileLoginInput,
+  ProfileLoginResponse,
+  ProfileSummary,
   CreateRequestInput,
   CreateRequestResponse,
   CachedReleasesResponse,
@@ -87,6 +92,33 @@ export function login(input: LoginInput): Promise<LoginResponse> {
 
 export function logout(): Promise<null> {
   return postJson<null>("/api/auth/logout", {});
+}
+
+export function fetchProfiles(): Promise<ProfileSummary[]> {
+  return getJson<ProfileSummary[]>("/api/auth/profiles");
+}
+
+export function profileLogin(input: ProfileLoginInput): Promise<ProfileLoginResponse> {
+  return postJson<ProfileLoginResponse>("/api/auth/profile-login", input);
+}
+
+export function fetchManagedProfiles(): Promise<ManagedProfile[]> {
+  return getJson<ManagedProfile[]>("/api/profiles");
+}
+
+export function createProfile(name: string): Promise<CreateProfileResponse> {
+  return postJson<CreateProfileResponse>("/api/profiles", { name });
+}
+
+export function resetProfilePin(id: string): Promise<CreateProfileResponse> {
+  return postJson<CreateProfileResponse>(
+    `/api/profiles/${encodeURIComponent(id)}/pin`,
+    {},
+  );
+}
+
+export function deleteProfile(id: string): Promise<void> {
+  return deleteJson<void>(`/api/profiles/${encodeURIComponent(id)}`);
 }
 
 export function fetchStatus(): Promise<StatusResponse> {
