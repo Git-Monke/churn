@@ -28,6 +28,10 @@ function torrent(overrides: Partial<QbittorrentTorrent> = {}): QbittorrentTorren
     progress: 0.42,
     state: "downloading",
     size: 10_000,
+    amount_left: 5_800,
+    dlspeed: 1_200_000,
+    num_seeds: 12,
+    num_complete: 48,
     ...overrides,
   };
 }
@@ -56,6 +60,25 @@ describe("qBittorrent fallback for show downloads", () => {
       protocol: "torrent",
       downloadClient: "qBittorrent",
       untracked: true,
+      sizeBytes: 10_000,
+      sizeLeftBytes: 5_800,
+      downloadSpeedBytes: 1_200_000,
+      connectedSeeders: 12,
+      swarmSeeders: 48,
+    });
+  });
+
+  it("derives remaining bytes from progress when amount_left is absent", () => {
+    const episodes = [{ key: "s01e01", seasonNumber: 1, episodeNumber: 1 }];
+    const downloads = mapShowTorrentDownloads(
+      [torrent({ amount_left: undefined, progress: 0.25 })],
+      "Parks and Recreation",
+      episodes,
+    );
+
+    expect(downloads.get("s01e01")).toMatchObject({
+      sizeBytes: 10_000,
+      sizeLeftBytes: 7_500,
     });
   });
 

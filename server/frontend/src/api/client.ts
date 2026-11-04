@@ -15,12 +15,14 @@ import type {
   GrabShowReleaseResponse,
   LibraryResponse,
   MovieDetailResponse,
+  MovieDownloadResponse,
   PlaybackItemResponse,
   PlaybackReport,
   RequestedLibraryResponse,
   RequestOptionsResponse,
   SearchResponse,
   ShowDetailResponse,
+  ShowDownloadsResponse,
   ShowReleasesResponse,
   ShowSource,
   StatusResponse,
@@ -148,6 +150,24 @@ export function fetchShow(
   id: string,
 ): Promise<ShowDetailResponse> {
   return getJson<ShowDetailResponse>(`/api/library/shows/${source}/${encodeURIComponent(id)}`);
+}
+
+export function fetchMovieDownload(
+  source: "jellyfin" | "radarr",
+  id: string,
+): Promise<MovieDownloadResponse> {
+  return getJson<MovieDownloadResponse>(
+    `/api/library/movies/${source}/${encodeURIComponent(id)}/download`,
+  );
+}
+
+export function fetchShowDownloads(
+  source: ShowSource,
+  id: string,
+): Promise<ShowDownloadsResponse> {
+  return getJson<ShowDownloadsResponse>(
+    `/api/library/shows/${source}/${encodeURIComponent(id)}/downloads`,
+  );
 }
 
 export function fetchPlayback(itemId: string): Promise<PlaybackItemResponse> {

@@ -10,7 +10,7 @@ import {
   Trash2Icon,
 } from "lucide-react";
 
-import { fetchMovie } from "@/api/client";
+import { fetchMovie, fetchMovieDownload } from "@/api/client";
 import type { ActivityItem, MovieDetailResponse } from "@/api/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
+import { DownloadStats } from "@/features/download/DownloadStats";
 import { CancelMovieDownloadDialog } from "@/features/movie/CancelMovieDownloadDialog";
 import { ReleaseChooser } from "@/features/releases/ReleaseChooser";
 
@@ -37,11 +38,24 @@ export function MoviePage({
   const movieQuery = useQuery({
     queryKey: ["movie", source, id],
     queryFn: () => fetchMovie(source, id),
-    // A grab can take a moment to appear in qBittorrent; poll quickly while
-    // waiting so the release chooser is replaced by live progress.
-    refetchInterval: awaitingDownload ? 1_000 : 10_000,
+    refetchInterval: 10_000,
   });
-  const download = movieQuery.data?.download;
+  // The lean download endpoint only reads qBittorrent; the full detail route
+  // stays on its slower cadence. Poll twice per second while something is
+  // downloading or a grab is waiting to appear.
+  const downloadQuery = useQuery({
+    queryKey: ["movie", source, id, "download"],
+    queryFn: () => fetchMovieDownload(source, id),
+    refetchInterval: (query) => {
+      const live = query.state.data;
+      const downloading = live?.ready === true && live.download !== undefined;
+      return awaitingDownload || downloading ? 500 : 2_000;
+    },
+  });
+  const liveDownload = downloadQuery.data;
+  const download = liveDownload?.ready
+    ? liveDownload.download
+    : movieQuery.data?.download;
 
   useEffect(() => {
     if (download) {
@@ -243,10 +257,10 @@ function MovieDownloadCard({
           </Button>
         </div>
         <Progress value={download.progress} label="Movie download progress" />
-        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-          <span>{download.progress}% complete</span>
-          <span>{downloadEta(download)}</span>
+        <div className="text-xs text-muted-foreground">
+          {download.progress}% complete
         </div>
+        <DownloadStats download={download} />
         {download.statusMessages?.length ? (
           <p className="text-xs text-destructive">{download.statusMessages.join(" · ")}</p>
         ) : null}
@@ -266,41 +280,6 @@ function downloadLabel(download: ActivityItem): string {
     default:
       return "Queued";
   }
-}
-
-function downloadEta(download: ActivityItem): string {
-  if (download.timeLeft) {
-    return `ETA ${download.timeLeft}`;
-  }
-  if (download.estimatedCompletionTime) {
-    return `ETA ${formatEta(download.estimatedCompletionTime)}`;
-  }
-  if (download.sizeLeftBytes !== undefined) {
-    return `${formatBytes(download.sizeLeftBytes)} left`;
-  }
-  if (download.sizeBytes !== undefined) {
-    return formatBytes(download.sizeBytes);
-  }
-  return "";
-}
-
-function formatEta(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-  return new Intl.DateTimeFormat(undefined, {
-    weekday: "short",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(date);
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024 ** 3) {
-    return `${Math.round(bytes / 1024 ** 2)} MB`;
-  }
-  return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
 }
 
 function MoviePageSkeleton() {

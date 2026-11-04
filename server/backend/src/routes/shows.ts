@@ -7,6 +7,11 @@ import { ApiError, isUnauthorized, isUpstreamNotFound, UpstreamError } from "../
 import { refreshJellyfinLibrary } from "../library-scan.js";
 import { directGrabError, grabTorrentDirect } from "../direct-grab.js";
 import {
+  createLiveDownloadStore,
+  loadQbittorrentTorrents,
+  showLiveDownloads,
+} from "../live-downloads.js";
+import {
   markDownloadsImporting,
   recoverCompletedShowDownloads,
 } from "../download-import.js";
@@ -20,6 +25,7 @@ import type {
   CachedReleasesResponse,
   GrabShowReleaseResponse,
   ShowDetailResponse,
+  ShowDownloadsResponse,
   ShowSeriesSummary,
   ShowSource,
 } from "../types.js";
@@ -37,16 +43,54 @@ export function registerShowRoutes(
   config: AppConfig,
   releaseSearch: ReleaseSearchService,
 ): void {
+  const downloads = createLiveDownloadStore();
+
   app.get<{ Params: { source: string; id: string } }>(
     "/api/library/shows/:source/:id",
     async (request, reply) => {
       reply.header("cache-control", "no-store");
       const source = parseSource(request.params.source);
-      if (source === "jellyfin") {
-        const auth = requireAuth(request);
-        return loadJellyfinShow(config, parseJellyfinId(request.params.id), auth);
+      const detail =
+        source === "jellyfin"
+          ? await loadJellyfinShow(
+              config,
+              parseJellyfinId(request.params.id),
+              requireAuth(request),
+            )
+          : await loadSonarrShow(config, parseSonarrId(request.params.id));
+      if (detail.state === "ok") {
+        downloads.rememberShow(showCacheKey(source, request.params.id), {
+          title: detail.series.title,
+          episodes: detail.episodes.map((episode) => ({
+            key: episode.key,
+            seasonNumber: episode.seasonNumber,
+            episodeNumber: episode.episodeNumber,
+          })),
+        });
       }
-      return loadSonarrShow(config, parseSonarrId(request.params.id));
+      return detail;
+    },
+  );
+
+  app.get<{ Params: { source: string; id: string } }>(
+    "/api/library/shows/:source/:id/downloads",
+    async (request, reply) => {
+      reply.header("cache-control", "no-store");
+      const source = parseSource(request.params.source);
+      const identity = downloads.show(showCacheKey(source, request.params.id));
+      if (!identity) {
+        return {
+          checkedAt: new Date().toISOString(),
+          ready: false,
+          downloads: {},
+        } satisfies ShowDownloadsResponse;
+      }
+      const live = await showLiveDownloads(config, identity);
+      return {
+        checkedAt: new Date().toISOString(),
+        ready: true,
+        downloads: live,
+      } satisfies ShowDownloadsResponse;
     },
   );
 
@@ -617,18 +661,6 @@ function seriesSummaryFromSonarr(series: ServarrSeriesResource): ShowSeriesSumma
   };
 }
 
-/** Optional: a missing key or unavailable qBittorrent just disables the fallback. */
-async function loadQbittorrentTorrents(config: AppConfig): Promise<QbittorrentTorrent[]> {
-  if (!config.qbittorrent.apiKey) {
-    return [];
-  }
-  const client = createQbittorrentClient(
-    config.qbittorrent,
-    Math.min(config.requestTimeoutMs, 2_000),
-  );
-  return client.getTorrents();
-}
-
 function providerNumber(item: JellyfinItem, key: string): number | undefined {
   const value = providerString(item, key);
   if (value === undefined) {
@@ -650,6 +682,12 @@ function parseSource(value: string): ShowSource {
     throw new ApiError(400, "invalid_source", "Show source must be jellyfin or sonarr");
   }
   return value;
+}
+
+function showCacheKey(source: ShowSource, id: string): string {
+  return `${source}:${
+    source === "jellyfin" ? parseJellyfinId(id) : String(parseSonarrId(id))
+  }`;
 }
 
 function parseJellyfinId(value: string): string {

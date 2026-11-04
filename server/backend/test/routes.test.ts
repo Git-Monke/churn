@@ -2417,6 +2417,99 @@ describe("show detail", () => {
     await app.close();
   });
 
+  it("serves fast per-episode downloads once the show detail has cached identities", async () => {
+    const config = makeConfig();
+    config.qbittorrent.apiKey = "qbt-key";
+    installFetch((url) => {
+      if (url.includes("sonarr.test") && url.endsWith("/api/v3/series/42")) {
+        return jsonResponse({
+          id: 42,
+          title: "Example Show",
+          year: 2024,
+          tvdbId: 1234,
+          images: [],
+        });
+      }
+      if (url.includes("sonarr.test") && url.includes("/api/v3/episode?seriesId=42")) {
+        return jsonResponse([
+          {
+            id: 501,
+            seriesId: 42,
+            seasonNumber: 1,
+            episodeNumber: 1,
+            title: "First",
+            airDateUtc: "2024-01-01T00:00:00Z",
+            hasFile: false,
+          },
+          {
+            id: 502,
+            seriesId: 42,
+            seasonNumber: 1,
+            episodeNumber: 2,
+            title: "Second",
+            airDateUtc: "2024-01-02T00:00:00Z",
+            hasFile: false,
+          },
+        ]);
+      }
+      if (url.includes("sonarr.test") && url.includes("/api/v3/queue")) {
+        return jsonResponse({ records: [] });
+      }
+      if (url.endsWith("/api/v2/torrents/info")) {
+        return jsonResponse([
+          {
+            hash: "44dbb26758b4ed17be93003f86c03461afbe2d8c",
+            name: "Example.Show.S01.1080p.BluRay.x265-KONTRAST",
+            progress: 0.42,
+            state: "downloading",
+            size: 10_000,
+            amount_left: 5_800,
+            dlspeed: 1_200_000,
+            eta: 120,
+            num_seeds: 12,
+            num_complete: 48,
+          },
+        ]);
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildAuthedServer(config);
+    const cold = await app.inject({
+      method: "GET",
+      url: "/api/library/shows/sonarr/42/downloads",
+    });
+    expect(cold.json()).toMatchObject({ ready: false, downloads: {} });
+
+    const detail = await app.inject({
+      method: "GET",
+      url: "/api/library/shows/sonarr/42",
+    });
+    expect(detail.statusCode).toBe(200);
+
+    const live = await app.inject({
+      method: "GET",
+      url: "/api/library/shows/sonarr/42/downloads",
+    });
+    const body = live.json();
+
+    expect(live.statusCode).toBe(200);
+    expect(body.ready).toBe(true);
+    expect(body.downloads).toMatchObject({
+      s01e01: {
+        status: "downloading",
+        progress: 42,
+        sizeBytes: 10_000,
+        sizeLeftBytes: 5_800,
+        downloadSpeedBytes: 1_200_000,
+        connectedSeeders: 12,
+        swarmSeeders: 48,
+      },
+      s01e02: { progress: 42 },
+    });
+    await app.close();
+  });
+
   it("asks Sonarr to scan a completed qBittorrent download it lost", async () => {
     const config = makeConfig();
     config.qbittorrent.apiKey = "qbt-key";
@@ -2726,6 +2819,68 @@ describe("movie detail", () => {
       progress: 42,
       quality: "1080p",
       queueCount: 1,
+    });
+    await app.close();
+  });
+
+  it("serves a fast movie download once the detail route has cached its identity", async () => {
+    const config = makeConfig();
+    config.qbittorrent.apiKey = "qbittorrent-key";
+    installFetch((url) => {
+      if (url.includes("radarr.test") && url.endsWith("/api/v3/movie/7")) {
+        return jsonResponse({ ...movieLookup, id: 7 });
+      }
+      if (url === "http://qbittorrent.test:8080/api/v2/torrents/info") {
+        return jsonResponse([
+          {
+            hash: "dune-hash",
+            name: "Dune.2021.1080p.BluRay.x264",
+            category: "movies",
+            progress: 0.42,
+            size: 2_000_000_000,
+            amount_left: 1_160_000_000,
+            dlspeed: 8_000_000,
+            eta: 120,
+            num_seeds: 14,
+            num_complete: 220,
+            state: "downloading",
+          },
+        ]);
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildAuthedServer(config);
+    const coldResponse = await app.inject({
+      method: "GET",
+      url: "/api/library/movies/radarr/7/download",
+    });
+    expect(coldResponse.json()).toMatchObject({ ready: false });
+
+    const detail = await app.inject({
+      method: "GET",
+      url: "/api/library/movies/radarr/7",
+    });
+    expect(detail.statusCode).toBe(200);
+
+    const live = await app.inject({
+      method: "GET",
+      url: "/api/library/movies/radarr/7/download",
+    });
+    const body = live.json();
+
+    expect(live.statusCode).toBe(200);
+    expect(body).toMatchObject({
+      ready: true,
+      download: {
+        title: "Dune",
+        status: "downloading",
+        progress: 42,
+        sizeBytes: 2_000_000_000,
+        downloadSpeedBytes: 8_000_000,
+        connectedSeeders: 14,
+        swarmSeeders: 220,
+      },
     });
     await app.close();
   });

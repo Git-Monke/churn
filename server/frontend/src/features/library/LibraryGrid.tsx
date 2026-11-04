@@ -13,6 +13,7 @@ import {
 } from "@/features/library/CancelDownloadDialog";
 import type { LibraryEntry } from "@/features/library/library-entries";
 import { entryTitle } from "@/features/library/library-entries";
+import { formatBytes, formatEta, formatSpeed } from "@/lib/format";
 
 export function LibraryGrid({ entries }: { entries: LibraryEntry[] }) {
   return (
@@ -310,13 +311,6 @@ function downloadSource(activity: ActivityItem): string {
   return parts.filter((part): part is string => Boolean(part)).join(" · ") || "Downloading";
 }
 
-function formatSpeed(bytesPerSecond: number): string {
-  if (bytesPerSecond < 1024 ** 2) {
-    return `${Math.max(1, Math.round(bytesPerSecond / 1024))} KB/s`;
-  }
-  return `${(bytesPerSecond / 1024 ** 2).toFixed(1)} MB/s`;
-}
-
 function downloadEta(activity: ActivityItem): string {
   if (activity.timeLeft) {
     return `ETA ${activity.timeLeft}`;
@@ -346,25 +340,6 @@ function seasonHint(seasons: number[]): string {
   return contiguous
     ? `Seasons ${sorted[0]}–${sorted[sorted.length - 1]}`
     : `Seasons ${sorted.join(", ")}`;
-}
-
-function formatEta(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-  return new Intl.DateTimeFormat(undefined, {
-    weekday: "short",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(date);
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024 ** 3) {
-    return `${Math.round(bytes / 1024 ** 2)} MB`;
-  }
-  return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
 }
 
 function formatRuntime(minutes: number): string {

@@ -14,6 +14,10 @@ export interface ActivityAggregate {
   sizeLeftBytes?: number;
   /** Sum of live qBittorrent download speeds over unique downloads. */
   downloadSpeedBytes?: number;
+  /** Seeds currently connected to the torrents in this item. */
+  connectedSeeders?: number;
+  /** Seeds the trackers report for the swarm. */
+  swarmSeeders?: number;
   timeLeft?: string;
   estimatedCompletionTime?: string;
   downloadClients: string[];
@@ -242,6 +246,8 @@ export function buildActivityItem(options: BuildActivityItemOptions): ActivityIt
   assignIfDefined(item, "sizeBytes", aggregate.sizeBytes);
   assignIfDefined(item, "sizeLeftBytes", aggregate.sizeLeftBytes);
   assignIfDefined(item, "downloadSpeedBytes", aggregate.downloadSpeedBytes);
+  assignIfDefined(item, "connectedSeeders", aggregate.connectedSeeders);
+  assignIfDefined(item, "swarmSeeders", aggregate.swarmSeeders);
   assignIfDefined(item, "timeLeft", aggregate.timeLeft);
   assignIfDefined(item, "estimatedCompletionTime", aggregate.estimatedCompletionTime);
   assignIfDefined(item, "quality", aggregate.quality);

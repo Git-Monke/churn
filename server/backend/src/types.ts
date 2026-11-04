@@ -223,6 +223,10 @@ export interface ActivityItem {
   sizeLeftBytes?: number;
   /** Sum of live qBittorrent download speeds over unique downloads. */
   downloadSpeedBytes?: number;
+  /** Seeds currently connected to the torrents in this item. */
+  connectedSeeders?: number;
+  /** Seeds the trackers report for the swarm. */
+  swarmSeeders?: number;
   timeLeft?: string;
   estimatedCompletionTime?: string;
   downloadClients: string[];
@@ -355,6 +359,13 @@ export interface MovieDetailResponse {
   download?: ActivityItem;
 }
 
+export interface MovieDownloadResponse {
+  checkedAt: string;
+  /** False until the full movie detail route has populated the identity cache. */
+  ready: boolean;
+  download?: ActivityItem;
+}
+
 export interface CancelMovieDownloadResponse {
   status: "cancelled";
   service: "radarr";
@@ -459,6 +470,13 @@ export interface ShowDownload {
   timeLeft?: string;
   estimatedCompletionTime?: string;
   sizeBytes?: number;
+  sizeLeftBytes?: number;
+  /** Current qBittorrent download speed in bytes/second. */
+  downloadSpeedBytes?: number;
+  /** Seeds currently connected to the torrent. */
+  connectedSeeders?: number;
+  /** Seeds the tracker reports for the swarm. */
+  swarmSeeders?: number;
   downloadClient?: string;
   protocol?: "torrent" | "usenet";
   quality?: string;
@@ -519,4 +537,12 @@ export interface ShowDetailResponse {
   defaultSeason?: number;
   seasons: ShowSeason[];
   episodes: ShowEpisode[];
+}
+
+export interface ShowDownloadsResponse {
+  checkedAt: string;
+  /** False until the full show detail route has populated the identity cache. */
+  ready: boolean;
+  /** Keyed by ShowEpisode.key. */
+  downloads: Record<string, ShowDownload>;
 }

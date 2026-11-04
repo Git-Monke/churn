@@ -289,6 +289,8 @@ function buildActivityItem(bucket: ActivityBucket): ActivityItem {
   assign(item, "sizeBytes", aggregate.sizeBytes);
   assign(item, "sizeLeftBytes", aggregate.sizeLeftBytes);
   assign(item, "downloadSpeedBytes", aggregate.downloadSpeedBytes);
+  assign(item, "connectedSeeders", aggregate.connectedSeeders);
+  assign(item, "swarmSeeders", aggregate.swarmSeeders);
   assign(item, "timeLeft", aggregate.timeLeft);
   assign(item, "quality", aggregate.quality);
   assign(item, "statusMessages", aggregate.statusMessages);
@@ -303,6 +305,8 @@ function aggregateTorrents(torrents: QbittorrentTorrent[]): {
   sizeBytes?: number;
   sizeLeftBytes?: number;
   downloadSpeedBytes?: number;
+  connectedSeeders?: number;
+  swarmSeeders?: number;
   timeLeft?: string;
   quality?: string;
   statusMessages?: string[];
@@ -345,6 +349,13 @@ function aggregateTorrents(torrents: QbittorrentTorrent[]): {
     .filter((speed): speed is number => speed !== undefined);
   const downloadSpeed = speeds.reduce((sum, speed) => sum + speed, 0);
 
+  const connectedSeeders = sumReported(
+    torrents.map((torrent) => nonNegative(torrent.num_seeds)),
+  );
+  const swarmSeeders = sumReported(
+    torrents.map((torrent) => nonNegative(torrent.num_complete)),
+  );
+
   const etas = torrents
     .map((torrent) => nonNegative(torrent.eta))
     .filter(
@@ -366,6 +377,8 @@ function aggregateTorrents(torrents: QbittorrentTorrent[]): {
     progress,
     ...(totalSize > 0 ? { sizeBytes: totalSize, sizeLeftBytes: totalLeft } : {}),
     ...(downloadSpeed > 0 ? { downloadSpeedBytes: downloadSpeed } : {}),
+    ...(connectedSeeders !== undefined ? { connectedSeeders } : {}),
+    ...(swarmSeeders !== undefined ? { swarmSeeders } : {}),
     ...(eta !== undefined ? { timeLeft: formatDuration(eta) } : {}),
     ...(qualities[0] ? { quality: qualities[0] } : {}),
     ...(messages.length > 0 ? { statusMessages: messages } : {}),
@@ -440,6 +453,14 @@ function positive(value: unknown): number | undefined {
 
 function nonNegative(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+/** Sum peer counts that the client actually reported, preserving a real zero. */
+function sumReported(values: Array<number | undefined>): number | undefined {
+  const reported = values.filter((value): value is number => value !== undefined);
+  return reported.length === 0
+    ? undefined
+    : reported.reduce((sum, value) => sum + value, 0);
 }
 
 function fraction(value: unknown): number | undefined {

@@ -94,8 +94,31 @@ function torrentDownload(torrent: QbittorrentTorrent, name: string): ShowDownloa
     protocol: "torrent",
     untracked: true,
   };
-  if (torrent.size !== undefined && torrent.size > 0) {
-    download.sizeBytes = torrent.size;
+  const size = positive(torrent.size);
+  if (size !== undefined) {
+    download.sizeBytes = size;
+    const amountLeft = nonNegative(torrent.amount_left);
+    const remaining =
+      amountLeft !== undefined && amountLeft <= size
+        ? amountLeft
+        : progress !== undefined
+          ? Math.round(size * (1 - progress))
+          : undefined;
+    if (remaining !== undefined) {
+      download.sizeLeftBytes = remaining;
+    }
+  }
+  const speed = nonNegative(torrent.dlspeed);
+  if (speed !== undefined) {
+    download.downloadSpeedBytes = speed;
+  }
+  const connectedSeeders = nonNegative(torrent.num_seeds);
+  if (connectedSeeders !== undefined) {
+    download.connectedSeeders = connectedSeeders;
+  }
+  const swarmSeeders = nonNegative(torrent.num_complete);
+  if (swarmSeeders !== undefined) {
+    download.swarmSeeders = swarmSeeders;
   }
   const eta = nonNegative(torrent.eta);
   if (eta !== undefined && eta > 0 && eta < 8_640_000) {
@@ -167,6 +190,10 @@ function fraction(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1
     ? value
     : undefined;
+}
+
+function positive(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
 function nonNegative(value: unknown): number | undefined {

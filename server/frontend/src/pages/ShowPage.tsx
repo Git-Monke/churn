@@ -11,7 +11,7 @@ import {
   TriangleAlertIcon,
 } from "lucide-react";
 
-import { fetchSeasonReleases, fetchShow } from "@/api/client";
+import { fetchSeasonReleases, fetchShow, fetchShowDownloads } from "@/api/client";
 import type {
   ActivityStatus,
   CachedReleasesResponse,
@@ -40,6 +40,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { DownloadStats } from "@/features/download/DownloadStats";
 import { ReleaseChooser } from "@/features/releases/ReleaseChooser";
 import { ReleasePickerDialog } from "@/features/show/ReleasePickerDialog";
 import { CancelEpisodeDownloadDialog } from "@/features/show/CancelEpisodeDownloadDialog";
@@ -53,6 +54,21 @@ export function ShowPage({ source, id }: { source: ShowSource; id: string }) {
     // the episodes as soon as the scan finishes.
     refetchInterval: (query) => (query.state.data?.scanning ? 2_000 : 10_000),
   });
+  // The lean download endpoint only reads qBittorrent and a cached show/episode
+  // identity. Poll it twice per second while any episode is downloading.
+  const showDownloadQuery = useQuery({
+    queryKey: ["show", source, id, "downloads"],
+    queryFn: () => fetchShowDownloads(source, id),
+    refetchInterval: (query) => {
+      const live = query.state.data;
+      return live?.ready === true && Object.keys(live.downloads).length > 0
+        ? 500
+        : 2_000;
+    },
+  });
+  const liveDownloads = showDownloadQuery.data?.ready
+    ? showDownloadQuery.data.downloads
+    : undefined;
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
   const [releasesOpen, setReleasesOpen] = useState(false);
   const [releaseEpisode, setReleaseEpisode] = useState<ShowEpisode | null>(null);
@@ -80,10 +96,23 @@ export function ShowPage({ source, id }: { source: ShowSource; id: string }) {
     if (!showQuery.data || selectedSeason === null) {
       return [];
     }
-    return showQuery.data.episodes.filter(
+    const seasonEpisodes = showQuery.data.episodes.filter(
       (episode) => episode.seasonNumber === selectedSeason,
     );
-  }, [selectedSeason, showQuery.data]);
+    if (!liveDownloads) {
+      return seasonEpisodes;
+    }
+    return seasonEpisodes.map((episode) => {
+      const download = liveDownloads[episode.key];
+      const next: ShowEpisode = { ...episode };
+      if (download) {
+        next.download = download;
+      } else {
+        delete next.download;
+      }
+      return next;
+    });
+  }, [selectedSeason, showQuery.data, liveDownloads]);
 
   // Jellyfin-backed shows still expose their Sonarr series id, so release
   // searches and episode cancels work from the same page.
@@ -524,13 +553,11 @@ function EpisodeRow({
           {download ? (
             <div className="flex flex-col gap-1.5">
               <Progress value={download.progress} label={`${episode.title} download progress`} />
-              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-                <span>
-                  {download.seasonPack ? "Season pack · " : ""}
-                  {download.progress}% complete
-                </span>
-                <span>{downloadEta(download)}</span>
+              <div className="text-xs text-muted-foreground">
+                {download.seasonPack ? "Season pack · " : ""}
+                {download.progress}% complete
               </div>
+              <DownloadStats download={download} compact />
               {download.statusMessages?.length ? (
                 <p className="text-xs text-destructive">{download.statusMessages.join(" · ")}</p>
               ) : null}
@@ -646,38 +673,6 @@ function downloadClientLabel(download: ShowDownload): string {
     return `${download.downloadClient} · ${protocol}`;
   }
   return download.downloadClient ?? protocol ?? "Downloading";
-}
-
-function downloadEta(download: ShowDownload): string {
-  if (download.timeLeft) {
-    return `ETA ${download.timeLeft}`;
-  }
-  if (download.estimatedCompletionTime) {
-    return `ETA ${formatEta(download.estimatedCompletionTime)}`;
-  }
-  if (download.sizeBytes !== undefined) {
-    return formatBytes(download.sizeBytes);
-  }
-  return "";
-}
-
-function formatEta(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-  return new Intl.DateTimeFormat(undefined, {
-    weekday: "short",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(date);
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024 ** 3) {
-    return `${Math.round(bytes / 1024 ** 2)} MB`;
-  }
-  return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
 }
 
 function formatAirDate(value: string): string {

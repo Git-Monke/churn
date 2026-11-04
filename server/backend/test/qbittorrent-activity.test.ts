@@ -18,6 +18,8 @@ function torrent(overrides: Partial<QbittorrentTorrent> = {}): QbittorrentTorren
     dlspeed: 100,
     eta: 65,
     state: "downloading",
+    num_seeds: 5,
+    num_complete: 100,
     ...overrides,
   };
 }
@@ -46,6 +48,8 @@ describe("qBittorrent activity", () => {
           amount_left: 1_000,
           dlspeed: 200,
           eta: 30,
+          num_seeds: 3,
+          num_complete: 40,
         }),
       ],
       catalog,
@@ -64,6 +68,8 @@ describe("qBittorrent activity", () => {
       sizeBytes: 3_000,
       sizeLeftBytes: 1_600,
       downloadSpeedBytes: 300,
+      connectedSeeders: 8,
+      swarmSeeders: 140,
       timeLeft: "00:00:30",
       quality: "1080p",
       seasons: [1],
@@ -100,6 +106,26 @@ describe("qBittorrent activity", () => {
       catalog,
     );
     expect(items).toHaveLength(0);
+  });
+
+  it("omits unreported or negative seeder counts", () => {
+    const items = buildQbittorrentActivity(
+      [torrent({ num_seeds: -1, num_complete: -1 })],
+      catalog,
+    );
+
+    expect(items[0]?.connectedSeeders).toBeUndefined();
+    expect(items[0]?.swarmSeeders).toBeUndefined();
+  });
+
+  it("keeps a reported zero seeder count", () => {
+    const items = buildQbittorrentActivity(
+      [torrent({ num_seeds: 0, num_complete: 0 })],
+      catalog,
+    );
+
+    expect(items[0]?.connectedSeeders).toBe(0);
+    expect(items[0]?.swarmSeeders).toBe(0);
   });
 
   it("keeps unmatched downloads visible with a torrent key", () => {

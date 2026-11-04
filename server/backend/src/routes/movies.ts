@@ -6,9 +6,13 @@ import { requireAuth, type AuthContext } from "../auth.js";
 import { ApiError, isUnauthorized, isUpstreamNotFound, UpstreamError } from "../errors.js";
 import { directGrabError, grabTorrentDirect } from "../direct-grab.js";
 import {
+  createLiveDownloadStore,
+  movieLiveDownload,
+  type MovieDownloadIdentity,
+} from "../live-downloads.js";
+import {
   isActiveTorrent,
   matchMovieTorrents,
-  movieTorrentActivity,
 } from "../qbittorrent-activity.js";
 import type { ReleaseSearchService } from "../release-search.js";
 import { requestedMovieItem } from "../routes/requested.js";
@@ -16,6 +20,7 @@ import type {
   CancelMovieDownloadResponse,
   GrabShowReleaseResponse,
   MovieDetailResponse,
+  MovieDownloadResponse,
 } from "../types.js";
 import { createJellyfinClient, type JellyfinItem } from "../upstream/jellyfin.js";
 import { createQbittorrentClient } from "../upstream/qbittorrent.js";
@@ -31,15 +36,49 @@ export function registerMovieRoutes(
   config: AppConfig,
   releaseSearch: ReleaseSearchService,
 ): void {
+  const downloads = createLiveDownloadStore();
+
   app.get<{ Params: { source: string; id: string } }>(
     "/api/library/movies/:source/:id",
     async (request, reply) => {
       reply.header("cache-control", "no-store");
       const source = parseSource(request.params.source);
-      if (source === "jellyfin") {
-        return loadJellyfinMovie(config, parseJellyfinId(request.params.id), requireAuth(request));
+      const detail =
+        source === "jellyfin"
+          ? await loadJellyfinMovie(
+              config,
+              parseJellyfinId(request.params.id),
+              requireAuth(request),
+            )
+          : await loadRadarrMovie(config, parseMovieId(request.params.id));
+      if (detail.state === "ok") {
+        downloads.rememberMovie(movieCacheKey(source, request.params.id), {
+          title: detail.movie.title,
+          ...(detail.movie.year !== undefined ? { year: detail.movie.year } : {}),
+        });
       }
-      return loadRadarrMovie(config, parseMovieId(request.params.id));
+      return detail;
+    },
+  );
+
+  app.get<{ Params: { source: string; id: string } }>(
+    "/api/library/movies/:source/:id/download",
+    async (request, reply) => {
+      reply.header("cache-control", "no-store");
+      const source = parseSource(request.params.source);
+      const identity = downloads.movie(movieCacheKey(source, request.params.id));
+      if (!identity) {
+        return {
+          checkedAt: new Date().toISOString(),
+          ready: false,
+        } satisfies MovieDownloadResponse;
+      }
+      const download = await movieLiveDownload(config, identity);
+      return {
+        checkedAt: new Date().toISOString(),
+        ready: true,
+        ...(download ? { download } : {}),
+      } satisfies MovieDownloadResponse;
     },
   );
 
@@ -264,13 +303,16 @@ async function loadMovieDownload(
   if (!config.qbittorrent.apiKey) {
     return undefined;
   }
+  const title = movie.title?.trim();
+  if (!title) {
+    return undefined;
+  }
+  const identity: MovieDownloadIdentity = {
+    title,
+    ...(movie.year !== undefined ? { year: movie.year } : {}),
+  };
   try {
-    const client = createQbittorrentClient(
-      config.qbittorrent,
-      Math.min(config.requestTimeoutMs, 2_000),
-    );
-    const torrents = await client.getTorrents();
-    return movieTorrentActivity(torrents, movie);
+    return await movieLiveDownload(config, identity);
   } catch {
     return undefined;
   }
@@ -413,6 +455,12 @@ function parseSource(value: string): "jellyfin" | "radarr" {
     return value;
   }
   throw new ApiError(400, "invalid_source", "Movie source must be jellyfin or radarr");
+}
+
+function movieCacheKey(source: "jellyfin" | "radarr", id: string): string {
+  return `${source}:${
+    source === "jellyfin" ? parseJellyfinId(id) : String(parseMovieId(id))
+  }`;
 }
 
 function parseJellyfinId(value: string): string {

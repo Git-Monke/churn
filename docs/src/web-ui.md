@@ -117,6 +117,8 @@ token in `.env`, so resume positions and watched state are per user.
 | `DELETE /api/library/requested/:service/:id` | Cancel queue items, delete the title (and files) from the arr, remove matching qBittorrent torrents, refresh Jellyfin |
 | `DELETE /api/library/jellyfin/:itemId` | Delete a Jellyfin-only movie/show and its files, or use the matching arr title when one is found |
 | `GET /api/library/shows/:source/:id` | Show seasons, episodes and download overlays |
+| `GET /api/library/shows/:source/:id/downloads` | Lightweight per-episode qBittorrent stats, polled twice per second while downloading |
+| `GET /api/library/movies/:source/:id/download` | Lightweight live qBittorrent stats for one movie, polled twice per second while downloading |
 | `GET /api/library/shows/:source/:id/releases?season=N` | Progressive per-indexer Prowlarr search with live progress |
 | `POST /api/library/shows/:source/:id/releases/refresh?season=N` | Start a fresh Prowlarr search |
 | `POST /api/library/shows/:source/:id/releases/grab` | Send the chosen torrent or magnet directly to qBittorrent |
@@ -282,6 +284,13 @@ only from qBittorrent and are matched to the show and covered episodes by the
 torrent name, including season packs and active upgrades. Jellyfin shows are
 matched to Sonarr through `ProviderIds.Tvdb`; catalog-only shows use the Sonarr
 source directly.
+
+Open movie and show pages show live download speed, downloaded/total size,
+connected and swarm seeders, and ETA. While a download is active, the page polls
+the lightweight movie/show download endpoint twice per second. Those endpoints
+read only qBittorrent plus a cached title/episode identity populated by the
+full detail route, so Jellyfin, Sonarr and Radarr are not queried on every tick.
+Finished and imported downloads stay on the slower full-detail cadence.
 
 If a qBittorrent download finished before Sonarr imported it, churn asks Sonarr
 to scan its content path. This recovers downloads whose queue record was lost
