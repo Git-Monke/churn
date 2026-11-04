@@ -65,3 +65,37 @@ services:
       - ./config/radarr:/radarr-config:ro
       - "${DATA_DIR:?run churn to set DATA_DIR}:/data"
     restart: "no"
+
+  # Web dashboard. The image is built by CI and pinned in .env by the
+  # installer. Host networking keeps every upstream on 127.0.0.1 (including
+  # the loopback-only VPN status agent) and lets the backend discover the
+  # host's LAN address for browser-facing Jellyfin streams.
+  dashboard:
+    # The installer pins CHURN_DASHBOARD_IMAGE to the matching release tag.
+    # `latest` is only a safety net for older installs (for example a compose
+    # down during uninstall); normal starts always use the pinned tag.
+    image: ${CHURN_DASHBOARD_IMAGE:-ghcr.io/git-monke/churn-dashboard:latest}
+    container_name: churn-dashboard
+    network_mode: host
+    init: true
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    pull_policy: missing
+    environment:
+      - NODE_ENV=production
+      - CHURN_SERVER_DIR=/app
+    volumes:
+      - ./.env:/app/.env:ro
+      - ./config:/app/config:ro
+      - ../torrent/config/prowlarr:/torrent/config/prowlarr:ro
+      - ../torrent/config/qbittorrent:/torrent/config/qbittorrent:ro
+      - churn-cache:/app/.churn-cache
+    tmpfs:
+      - /tmp
+    restart: unless-stopped
+
+volumes:
+  churn-cache:

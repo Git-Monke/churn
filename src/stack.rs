@@ -10,6 +10,12 @@ use crate::security;
 
 pub type Answers = HashMap<Question, String>;
 
+/// Registry image for the web dashboard. CI publishes a tag matching the
+/// installer's package version; an explicit `CHURN_DASHBOARD_IMAGE` wins so a
+/// locally built image can be used during development.
+pub const DASHBOARD_IMAGE_REPO: &str = "ghcr.io/git-monke/churn-dashboard";
+pub const DASHBOARD_IMAGE_ENV: &str = "CHURN_DASHBOARD_IMAGE";
+
 /// Fallback Mullvad location written to `SERVER_COUNTRIES` when the selected
 /// config does not identify a known country.
 ///
@@ -146,6 +152,10 @@ impl Stack {
             ("TZ", envfile::timezone()),
         ];
 
+        if self == Stack::Server {
+            managed.push((DASHBOARD_IMAGE_ENV, dashboard_image()));
+        }
+
         if self == Stack::Torrent {
             managed.push(("VPN_SERVICE_PROVIDER", "mullvad".to_string()));
             managed.push(("VPN_TYPE", "wireguard".to_string()));
@@ -194,6 +204,17 @@ pub fn start_order(mut chosen: Vec<Stack>) -> Vec<Stack> {
     chosen
 }
 
+fn dashboard_image() -> String {
+    dashboard_image_from(std::env::var(DASHBOARD_IMAGE_ENV).ok())
+}
+
+fn dashboard_image_from(override_image: Option<String>) -> String {
+    override_image
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| format!("{DASHBOARD_IMAGE_REPO}:{}", env!("CARGO_PKG_VERSION")))
+}
+
 fn server_countries(existing: Option<&str>, config_entry: Option<&str>) -> String {
     let existing = existing.map(str::trim).filter(|value| !value.is_empty());
     // `Netherlands` was hardcoded by older releases; migrate it instead of
@@ -239,6 +260,17 @@ pub fn summary(question: Question, answers: &Answers) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dashboard_image_defaults_to_the_release_and_honors_an_override() {
+        let release = format!("{DASHBOARD_IMAGE_REPO}:{}", env!("CARGO_PKG_VERSION"));
+        assert_eq!(dashboard_image_from(None), release);
+        assert_eq!(dashboard_image_from(Some("  ".to_string())), release);
+        assert_eq!(
+            dashboard_image_from(Some(" churn-dashboard:dev ".to_string())),
+            "churn-dashboard:dev"
+        );
+    }
 
     #[test]
     fn server_starts_before_torrent() {
