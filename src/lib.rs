@@ -9,5 +9,6 @@ pub mod mullvad;
 pub mod ports;
 pub mod question;
 pub mod security;
+pub mod show;
 pub mod stack;
 pub mod system;

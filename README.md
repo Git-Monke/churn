@@ -73,6 +73,24 @@ sudo ./target/release/churn --stacks server,torrent   # skip the menu
 sudo ./target/release/churn --dry-run                # collect answers, write nothing
 ```
 
+## Service URLs
+
+`churn show` prints the exact URL for every installed service, using the host
+ports in the generated `.env` files and the machine's detected LAN address:
+
+```bash
+churn show
+churn show --stacks torrent
+```
+
+It is read-only: it does not need root, Docker, or running containers. Set
+`CHURN_HOST_IP` when the machine has several addresses or detection picks the
+wrong one:
+
+```bash
+CHURN_HOST_IP=192.168.1.20 churn show
+```
+
 ## Uninstall
 
 `--uninstall` stops and removes the stack containers with `docker compose

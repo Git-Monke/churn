@@ -55,6 +55,18 @@ impl Port {
         }
     }
 
+    pub fn service_name(self) -> &'static str {
+        match self {
+            Port::Jellyfin => "Jellyfin",
+            Port::Sonarr => "Sonarr",
+            Port::Radarr => "Radarr",
+            Port::Dashboard => "Dashboard",
+            Port::Qbittorrent => "qBittorrent",
+            Port::Prowlarr => "Prowlarr",
+            Port::VpnStatus => "VPN status",
+        }
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Port::Jellyfin => "Host port for the Jellyfin web UI",

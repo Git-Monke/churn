@@ -37,10 +37,15 @@ stop/remove the containers and delete generated config without touching DATA_DIR
 
 USAGE:
     churn [OPTIONS]
+    churn show [--stacks <LIST>]
+
+COMMANDS:
+    show              print the URLs for the installed services; does not need
+                      root and does not start or change anything
 
 OPTIONS:
     --stacks <LIST>   comma separated: server,torrent (skips the menu; with
-                      --uninstall, limits what is removed)
+                      --uninstall or show, limits what is handled)
     --uninstall       stop and remove the stack containers, then delete their
                       generated config, cache and .env files; DATA_DIR is kept
     --dry-run         show the plan; write, remove and start nothing
@@ -49,6 +54,7 @@ OPTIONS:
 
 #[derive(Default)]
 struct Args {
+    show: bool,
     stacks: Option<Vec<Stack>>,
     uninstall: bool,
     dry_run: bool,
@@ -65,6 +71,7 @@ fn parse_args() -> Result<Args, String> {
                 let value = raw.next().ok_or("--stacks needs a value")?;
                 args.stacks = Some(parse_stack_list(&value)?);
             }
+            "show" => args.show = true,
             "--uninstall" => args.uninstall = true,
             "--dry-run" => args.dry_run = true,
             "-y" | "--yes" => args.yes = true,
@@ -735,6 +742,22 @@ fn uninstall(args: Args) -> io::Result<bool> {
     Ok(true)
 }
 
+/// Print the configured service URLs. This is read-only on purpose: unlike the
+/// installer it does not require root, Docker or a TTY.
+fn show_services(args: &Args) -> io::Result<()> {
+    let root = envfile::root();
+    let chosen = args.stacks.clone().unwrap_or_else(|| Stack::ALL.to_vec());
+    if churn::show::installed(&root, &chosen).is_empty() {
+        println!("no churn services are installed under {}", root.display());
+        return Ok(());
+    }
+    let host = churn::show::host_ip(&root);
+    for service in churn::show::services(&root, &chosen, &host) {
+        println!("{:<14} {}", service.name, service.url);
+    }
+    Ok(())
+}
+
 /// Returns `false` when a preflight check stopped the installer.
 fn run(args: Args) -> io::Result<bool> {
     if args.uninstall {
@@ -800,6 +823,15 @@ fn main() -> ExitCode {
     if args.help {
         println!("{HELP}");
         return ExitCode::SUCCESS;
+    }
+    if args.show {
+        return match show_services(&args) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(err) => {
+                eprintln!("churn: {err}");
+                ExitCode::FAILURE
+            }
+        };
     }
 
     match run(args) {
