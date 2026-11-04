@@ -425,7 +425,29 @@ fn setup_jellyfin(dry_run: bool) -> io::Result<()> {
             return Err(err);
         }
     }
-    Ok(())
+
+    restart_dashboard()
+}
+
+/// The dashboard reads `JELLYFIN_API_KEY` from `.env` at boot, but churn only
+/// writes that key after the stack is up. Recreate the dashboard once setup has
+/// completed so it starts with the key instead of running without one.
+fn restart_dashboard() -> io::Result<()> {
+    let mut live = LiveLog::start("restarting the dashboard with the Jellyfin API key");
+    match system::compose_recreate_service(
+        &Stack::Server.dir(),
+        stack::DASHBOARD_SERVICE,
+        &mut |line| live.push(line),
+    ) {
+        Ok(()) => {
+            live.success("dashboard restarted with the Jellyfin API key");
+            Ok(())
+        }
+        Err(err) => {
+            live.error("dashboard restart failed");
+            Err(err)
+        }
+    }
 }
 
 fn jellyfin_credentials(env: &envfile::EnvMap) -> io::Result<Credentials> {
@@ -558,7 +580,9 @@ fn uninstall(args: Args) -> io::Result<bool> {
             lines.push_str(&format!("  delete {}\n", path.display()));
         }
     }
-    lines.push_str("\nDATA_DIR, media and downloads are left untouched.");
+    lines.push_str(
+        "\nDATA_DIR, media, downloads and images are left untouched.\nThe dashboard cache volume is removed.",
+    );
     note("About to uninstall", lines.trim_end().to_string())?;
 
     if !args.yes

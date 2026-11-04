@@ -190,9 +190,32 @@ pub fn verify_torrent_isolation(dir: &Path) -> io::Result<()> {
     })
 }
 
-/// Stop and remove the project's containers and networks.
+/// Recreate one service so it picks up values written after `compose up`
+/// (for the dashboard, the Jellyfin API key in `server/.env`).
+pub fn compose_recreate_service(
+    dir: &Path,
+    service: &str,
+    on_event: &mut dyn FnMut(&str),
+) -> io::Result<()> {
+    compose_run(
+        dir,
+        "up",
+        &["up", "-d", "--no-deps", "--force-recreate", service],
+        on_event,
+    )
+}
+
+/// Stop and remove the project's containers, networks and named volumes.
+///
+/// Both stacks only declare bind mounts for media/config; the server stack's
+/// `churn-cache` is the disposable dashboard search cache.
 pub fn compose_down(dir: &Path, on_event: &mut dyn FnMut(&str)) -> io::Result<()> {
-    compose_run(dir, "down", &["down", "--remove-orphans"], on_event)
+    compose_run(
+        dir,
+        "down",
+        &["down", "--remove-orphans", "--volumes"],
+        on_event,
+    )
 }
 
 fn compose_run(

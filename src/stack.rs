@@ -15,6 +15,9 @@ pub type Answers = HashMap<Question, String>;
 /// locally built image can be used during development.
 pub const DASHBOARD_IMAGE_REPO: &str = "ghcr.io/git-monke/churn-dashboard";
 pub const DASHBOARD_IMAGE_ENV: &str = "CHURN_DASHBOARD_IMAGE";
+/// Compose service name, used when the installer recreates it after Jellyfin
+/// setup writes the API key.
+pub const DASHBOARD_SERVICE: &str = "dashboard";
 
 /// Fallback Mullvad location written to `SERVER_COUNTRIES` when the selected
 /// config does not identify a known country.
