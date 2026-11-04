@@ -27,6 +27,29 @@ sudo churn
 Docker if it is missing, writes the stack files, pulls the prebuilt dashboard
 image, and configures the services.
 
+## Update
+
+Update the churn CLI and the server dashboard to the latest release:
+
+```bash
+sudo churn update
+```
+
+`churn update` downloads and checksum-verifies the same release binary that
+`install.sh` installs, replaces it atomically, then pulls the matching dashboard
+image and recreates only the dashboard container. The previous binary is kept
+as `churn.previous` until the dashboard is healthy.
+
+Check versions without changing anything (no root required):
+
+```bash
+churn update --check
+```
+
+Use `--binary-only` or `--dashboard-only` to update one part, and `--to 0.1.4`
+to pin a specific release. Jellyfin, Sonarr and Radarr stay on their pinned
+versions.
+
 ## Usage from a source checkout
 
 To build and run the installer from a checkout:
@@ -467,7 +490,9 @@ scripts/release.sh 0.1.4
 ```
 
 That updates `Cargo.toml` and `Cargo.lock`, commits `Release v0.1.4`, creates
-the tag and pushes both. To check the files without releasing:
+the tag and pushes both. The published assets are what `install.sh` and
+`churn update` download, and the image tag must match the same version. To
+check the files without releasing:
 
 ```bash
 scripts/check-version.sh          # Cargo.toml <-> Cargo.lock

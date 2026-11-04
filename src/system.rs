@@ -322,6 +322,78 @@ pub fn compose_recreate_service(
     )
 }
 
+/// Pull an image, forwarding Docker's plain-text progress to `on_event`.
+pub fn docker_pull(image: &str, on_event: &mut dyn FnMut(&str)) -> io::Result<()> {
+    let mut command = Command::new("docker");
+    command.args(["pull", image]);
+    let output = run_streaming(command, on_event)?;
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let detail = output.tail.join("\n");
+    let mut message = format!("docker pull {image} failed ({})", output.status);
+    if !detail.is_empty() {
+        message.push('\n');
+        message.push_str(&detail);
+    }
+    Err(io::Error::other(message))
+}
+
+/// Confirm an image manifest is available to this Docker daemon.
+pub fn docker_manifest_inspect(image: &str) -> io::Result<()> {
+    let output = Command::new("docker")
+        .args(["manifest", "inspect", image])
+        .output()?;
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(io::Error::other(format!(
+        "image {image} is not published: {}",
+        String::from_utf8_lossy(&output.stderr).trim()
+    )))
+}
+
+/// True when the image is already present locally.
+pub fn docker_image_exists(image: &str) -> bool {
+    Command::new("docker")
+        .args(["image", "inspect", image])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+/// The last `tail` lines of one Compose service's logs, stdout and stderr.
+pub fn compose_logs(dir: &Path, service: &str, tail: usize) -> io::Result<String> {
+    let tail = tail.to_string();
+    let output = Command::new("docker")
+        .args([
+            "compose", "--ansi", "never", "logs", "--tail", &tail, service,
+        ])
+        .current_dir(dir)
+        .output()?;
+    if !output.status.success() {
+        return Err(io::Error::other(format!(
+            "docker compose logs failed in {}: {}",
+            dir.display(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+
+    let mut text = String::from_utf8_lossy(&output.stdout)
+        .trim_end()
+        .to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !stderr.trim().is_empty() {
+        if !text.is_empty() {
+            text.push('\n');
+        }
+        text.push_str(stderr.trim_end());
+    }
+    Ok(text)
+}
+
 /// Stop and remove the project's containers, networks and named volumes.
 ///
 /// Both stacks only declare bind mounts for media/config; the server stack's

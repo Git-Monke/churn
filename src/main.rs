@@ -7,9 +7,10 @@
 use std::collections::HashMap;
 use std::fs;
 use std::io;
-use std::path::Path;
-use std::process::ExitCode;
-use std::time::Duration;
+use std::os::unix::process::CommandExt;
+use std::path::{Path, PathBuf};
+use std::process::{Command, ExitCode};
+use std::time::{Duration, Instant};
 
 use cliclack::{
     confirm, input, intro, log, multiselect, note, outro, outro_cancel, outro_note, password,
@@ -23,8 +24,11 @@ use churn::live::LiveLog;
 use churn::mullvad;
 use churn::ports::{self, Port};
 use churn::question::{Question, Section};
-use churn::stack::{self, Answers, Stack};
+use churn::stack::{
+    self, Answers, DASHBOARD_IMAGE_ENV, DASHBOARD_IMAGE_REPO, DASHBOARD_SERVICE, Stack,
+};
 use churn::system;
+use churn::update;
 
 const HELP: &str = "\
 churn — installer for the torrent/media stack
@@ -38,10 +42,13 @@ stop/remove the containers and delete generated config without touching DATA_DIR
 USAGE:
     churn [OPTIONS]
     churn show [--stacks <LIST>]
+    churn update [OPTIONS]
 
 COMMANDS:
     show              print the URLs for the installed services; does not need
                       root and does not start or change anything
+    update            update the churn binary and/or the server dashboard to the
+                      latest release; see update options below
 
 OPTIONS:
     --stacks <LIST>   comma separated: server,torrent (skips the menu; with
@@ -50,12 +57,27 @@ OPTIONS:
                       generated config, cache and .env files; DATA_DIR is kept
     --dry-run         show the plan; write, remove and start nothing
     -y, --yes         skip the final confirmation
-    -h, --help        show this help";
+    -h, --help        show this help
+
+UPDATE OPTIONS:
+    --check           print installed and latest versions; change nothing
+    --to <VERSION>    update to a specific X.Y.Z instead of the latest release
+    --image <REF>     override the dashboard image reference (development)
+    --binary-only     update the churn binary, skip the dashboard
+    --dashboard-only  update the dashboard, skip the churn binary
+    --force           re-download/re-pull even when already up to date";
 
 #[derive(Default)]
 struct Args {
     show: bool,
+    update: bool,
+    check: bool,
     stacks: Option<Vec<Stack>>,
+    to: Option<String>,
+    image: Option<String>,
+    binary_only: bool,
+    dashboard_only: bool,
+    force: bool,
     uninstall: bool,
     dry_run: bool,
     yes: bool,
@@ -72,6 +94,19 @@ fn parse_args() -> Result<Args, String> {
                 args.stacks = Some(parse_stack_list(&value)?);
             }
             "show" => args.show = true,
+            "update" => args.update = true,
+            "--check" => args.check = true,
+            "--to" => {
+                let value = raw.next().ok_or("--to needs a version")?;
+                args.to = Some(value);
+            }
+            "--image" => {
+                let value = raw.next().ok_or("--image needs a reference")?;
+                args.image = Some(value);
+            }
+            "--binary-only" => args.binary_only = true,
+            "--dashboard-only" => args.dashboard_only = true,
+            "--force" => args.force = true,
             "--uninstall" => args.uninstall = true,
             "--dry-run" => args.dry_run = true,
             "-y" | "--yes" => args.yes = true,
@@ -79,10 +114,43 @@ fn parse_args() -> Result<Args, String> {
             other if other.starts_with("--stacks=") => {
                 args.stacks = Some(parse_stack_list(&other["--stacks=".len()..])?);
             }
+            other if other.starts_with("--to=") => {
+                args.to = Some(other["--to=".len()..].to_string());
+            }
+            other if other.starts_with("--image=") => {
+                args.image = Some(other["--image=".len()..].to_string());
+            }
             other => return Err(format!("unknown option {other:?}")),
         }
     }
+    validate_args(&args)?;
     Ok(args)
+}
+
+fn validate_args(args: &Args) -> Result<(), String> {
+    let update_option = args.check
+        || args.to.is_some()
+        || args.image.is_some()
+        || args.binary_only
+        || args.dashboard_only
+        || args.force;
+    if !args.update && update_option {
+        return Err("update options require the 'update' command".to_string());
+    }
+    if args.update {
+        if args.show || args.uninstall {
+            return Err("'update' cannot be combined with 'show' or '--uninstall'".to_string());
+        }
+        if args.binary_only && args.dashboard_only {
+            return Err("--binary-only and --dashboard-only are mutually exclusive".to_string());
+        }
+        if let Some(stacks) = &args.stacks
+            && stacks.iter().any(|stack| *stack != Stack::Server)
+        {
+            return Err("churn update only supports the server stack".to_string());
+        }
+    }
+    Ok(())
 }
 
 fn parse_stack_list(value: &str) -> Result<Vec<Stack>, String> {
@@ -806,6 +874,494 @@ fn uninstall(args: Args) -> io::Result<bool> {
     Ok(true)
 }
 
+// ---------------------------------------------------------------- update
+
+fn server_installed() -> bool {
+    Stack::Server.env_path().is_file() && Stack::Server.dir().join("docker-compose.yml").is_file()
+}
+
+fn configured_dashboard_image() -> Option<String> {
+    if !server_installed() {
+        return None;
+    }
+    envfile::read(&Stack::Server.env_path())
+        .get(DASHBOARD_IMAGE_ENV)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .or_else(|| Some(update::image_ref(env!("CARGO_PKG_VERSION"))))
+}
+
+fn resolve_target(args: &Args) -> io::Result<String> {
+    if let Some(to) = &args.to {
+        return update::normalize_version(to).map_err(io::Error::other);
+    }
+
+    // A dashboard-only update with an explicit image can work offline; use the
+    // image tag as the target when it looks like a version.
+    if args.dashboard_only
+        && let Some(image) = &args.image
+        && let Some(tag) = update::image_tag(image)
+    {
+        return Ok(update::normalize_version(tag).unwrap_or_else(|_| tag.to_string()));
+    }
+
+    if let Ok(value) = std::env::var("CHURN_VERSION") {
+        let value = value.trim();
+        if !value.is_empty() && !value.eq_ignore_ascii_case("latest") {
+            return update::normalize_version(value).map_err(io::Error::other);
+        }
+    }
+
+    update::fetch_latest_release().map(|release| release.version)
+}
+
+fn dashboard_target_ref(args: &Args, target: &str) -> io::Result<String> {
+    if let Some(image) = &args.image {
+        let image = image.trim();
+        if image.is_empty() {
+            return Err(io::Error::other("--image needs an image reference"));
+        }
+        if update::image_tag(image).is_none() {
+            return Err(io::Error::other(
+                "--image must include a tag, for example ghcr.io/git-monke/churn-dashboard:0.1.4",
+            ));
+        }
+        return Ok(image.to_string());
+    }
+    Ok(update::image_ref(target))
+}
+
+fn current_binary_path() -> io::Result<PathBuf> {
+    let exe = std::env::current_exe()?;
+    Ok(fs::canonicalize(&exe).unwrap_or(exe))
+}
+
+fn update_check(args: &Args) -> io::Result<bool> {
+    let target = resolve_target(args)?;
+    let current_binary = env!("CARGO_PKG_VERSION");
+    let installed = server_installed();
+    let current_image = configured_dashboard_image();
+    let current_dashboard = current_image
+        .as_deref()
+        .and_then(update::image_tag)
+        .unwrap_or("unknown");
+
+    let mut up_to_date = true;
+    if !args.dashboard_only {
+        let stale = current_binary != target;
+        up_to_date &= !stale;
+        println!(
+            "{:<10} installed {:<10} latest {}",
+            "churn", current_binary, target
+        );
+    }
+    if !args.binary_only {
+        if !installed {
+            if args.dashboard_only {
+                return Err(io::Error::other(format!(
+                    "the server dashboard is not installed under {}",
+                    envfile::root().display()
+                )));
+            }
+            up_to_date = false;
+            println!("{:<10} not installed (latest {})", "dashboard", target);
+        } else {
+            let stale = current_dashboard != target;
+            up_to_date &= !stale;
+            println!(
+                "{:<10} installed {:<10} latest {}",
+                "dashboard", current_dashboard, target
+            );
+        }
+    }
+    Ok(up_to_date)
+}
+
+fn finish_update(child: bool, message: impl Into<String>) -> io::Result<()> {
+    let message = message.into();
+    if child {
+        println!("{message}");
+        Ok(())
+    } else {
+        outro(message)
+    }
+}
+
+fn update_host(args: &Args) -> io::Result<()> {
+    let child = std::env::var_os("CHURN_UPDATE_CHILD").is_some();
+    if !child {
+        intro("churn · update")?;
+    }
+    if !args.dry_run && !ensure_root()? {
+        return Err(io::Error::other("root access required"));
+    }
+
+    let target = resolve_target(args)?;
+    let installed = server_installed();
+    if args.dashboard_only && !installed {
+        return Err(io::Error::other(format!(
+            "the server dashboard is not installed under {}; run sudo churn first",
+            envfile::root().display()
+        )));
+    }
+
+    let current_binary = env!("CARGO_PKG_VERSION");
+    let current_image = configured_dashboard_image();
+    let current_tag = current_image.as_deref().and_then(update::image_tag);
+    let want_binary = !args.dashboard_only;
+    let want_dashboard = !args.binary_only && installed;
+
+    let binary_path = if want_binary {
+        Some(current_binary_path()?)
+    } else {
+        None
+    };
+    let binary_managed = binary_path
+        .as_deref()
+        .is_some_and(|path| !update::is_checkout_binary(path));
+
+    if want_binary && !binary_managed && args.binary_only {
+        return Err(io::Error::other(
+            "refusing to replace a binary built from a source checkout; use install.sh for a managed install",
+        ));
+    }
+
+    let binary_needs = want_binary && binary_managed && (current_binary != target || args.force);
+    let dashboard_needs = want_dashboard
+        && (current_tag != Some(target.as_str()) || args.force || args.image.is_some());
+
+    if !installed && !args.binary_only && (current_binary != target || args.force) {
+        log::info("no server install found; updating churn only")?;
+    }
+    if want_binary && !binary_managed && (current_binary != target || args.force) {
+        log::warning("running from a source checkout; skipping the churn binary update")?;
+    }
+
+    if !binary_needs && !dashboard_needs {
+        let message = if want_binary && !binary_managed && current_binary != target {
+            "running from a source checkout; skipping the churn binary update".to_string()
+        } else if server_installed() {
+            format!("churn {current_binary} and the dashboard are up to date")
+        } else {
+            format!("churn {current_binary} is up to date")
+        };
+        cleanup_update_backup();
+        finish_update(child, message)?;
+        return Ok(());
+    }
+
+    let old_ref = current_image
+        .clone()
+        .unwrap_or_else(|| update::image_ref(current_binary));
+    let target_ref = if want_dashboard {
+        dashboard_target_ref(args, &target)?
+    } else {
+        String::new()
+    };
+    if want_dashboard {
+        // Compose gives the process environment precedence over .env. Refuse
+        // rather than update an image that compose would ignore.
+        if let Ok(value) = std::env::var(DASHBOARD_IMAGE_ENV)
+            && !value.trim().is_empty()
+        {
+            return Err(io::Error::other(format!(
+                "{DASHBOARD_IMAGE_ENV} is set in the environment ({value}); unset it before running churn update"
+            )));
+        }
+        if args.image.is_none() && !old_ref.starts_with(&format!("{DASHBOARD_IMAGE_REPO}:")) {
+            return Err(io::Error::other(format!(
+                "the dashboard is pinned to a custom image ({old_ref}); pass --image <ref> to update it"
+            )));
+        }
+    }
+
+    if !child {
+        println!("churn");
+        if binary_needs {
+            println!(
+                "  current  {} {current_binary}",
+                binary_path.as_ref().unwrap().display()
+            );
+            println!(
+                "  target   {} {target}",
+                binary_path.as_ref().unwrap().display()
+            );
+        } else if want_binary && !binary_managed {
+            println!("  skip     source checkout");
+        } else {
+            println!("  up to date ({current_binary})");
+        }
+        if want_dashboard {
+            println!("dashboard");
+            println!("  current  {old_ref}");
+            println!("  target   {target_ref}");
+        }
+    }
+
+    if args.dry_run {
+        if binary_needs {
+            log::info(format!("would download churn {target}"))?;
+        }
+        if dashboard_needs {
+            log::info(format!(
+                "would pull and recreate dashboard from {target_ref}"
+            ))?;
+        }
+        finish_update(child, "dry run complete — nothing downloaded or started")?;
+        return Ok(());
+    }
+
+    let prompt = match (binary_needs, dashboard_needs) {
+        (true, true) => "Update churn and restart the dashboard?",
+        (true, false) => "Update churn?",
+        (false, true) => "Pull and restart the dashboard?",
+        (false, false) => "Nothing to update",
+    };
+    if !args.yes && !confirm(prompt).initial_value(true).interact()? {
+        if !child {
+            outro_cancel("cancelled — nothing changed")?;
+        }
+        return Ok(());
+    }
+
+    if binary_needs {
+        let exe = self_update(&target)?;
+        if !want_dashboard || !dashboard_needs {
+            update::remove_binary_backup(&exe)?;
+            finish_update(child, format!("churn updated to {target}"))?;
+            return Ok(());
+        }
+
+        // The new binary owns the new compose assets. Re-exec it for the
+        // dashboard half; --dashboard-only keeps this from recursing.
+        let mut command = Command::new(&exe);
+        command
+            .arg("update")
+            .arg("--dashboard-only")
+            .arg("--to")
+            .arg(&target)
+            .arg("--yes");
+        if let Some(image) = &args.image {
+            command.arg("--image").arg(image);
+        }
+        if args.force {
+            command.arg("--force");
+        }
+        command.env("CHURN_UPDATE_CHILD", "1");
+        let err = command.exec();
+        let _ = update::restore_binary(&exe);
+        return Err(io::Error::other(format!(
+            "could not start the updated churn: {err}"
+        )));
+    }
+
+    if want_dashboard && dashboard_needs {
+        if !system::docker_ready() {
+            return Err(io::Error::other(
+                "docker with the compose plugin is required to update the dashboard",
+            ));
+        }
+        if let Err(err) = update_dashboard(&target_ref, &old_ref, args.force) {
+            let backup = if child { backup_hint() } else { None };
+            return Err(io::Error::other(match backup {
+                Some(path) => format!("{err}\nprevious churn binary kept at {}", path.display()),
+                None => err.to_string(),
+            }));
+        }
+    }
+
+    cleanup_update_backup();
+    let message = if want_dashboard {
+        format!("churn {current_binary}; dashboard {target_ref}")
+    } else {
+        format!("churn {current_binary}")
+    };
+    finish_update(child, message)?;
+    Ok(())
+}
+
+fn cleanup_update_backup() {
+    if let Ok(exe) = current_binary_path() {
+        let _ = update::remove_binary_backup(&exe);
+    }
+}
+
+fn backup_hint() -> Option<PathBuf> {
+    let exe = current_binary_path().ok()?;
+    let backup = update::binary_backup_path(&exe);
+    backup.exists().then_some(backup)
+}
+
+fn self_update(version: &str) -> io::Result<PathBuf> {
+    let exe = current_binary_path()?;
+    if update::is_checkout_binary(&exe) {
+        return Err(io::Error::other(format!(
+            "refusing to replace the source-checkout binary at {}",
+            exe.display()
+        )));
+    }
+
+    let target = update::release_target().map_err(io::Error::other)?;
+    let asset = update::asset_name(target);
+    let url = update::release_asset_url(version, &asset);
+    let checksum_url = format!("{url}.sha256");
+
+    let progress = spinner();
+    progress.start(format!("downloading churn {version}"));
+    let bytes = match update::download(&url) {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            progress.stop("download failed");
+            return Err(err);
+        }
+    };
+    let checksum = match update::fetch_text(&checksum_url, Duration::from_secs(15)) {
+        Ok(checksum) => checksum,
+        Err(err) => {
+            progress.stop("checksum download failed");
+            return Err(err);
+        }
+    };
+    let Some(expected) = update::parse_checksum(&checksum) else {
+        progress.stop("checksum was invalid");
+        return Err(io::Error::other(format!(
+            "{checksum_url} did not contain a SHA-256 digest"
+        )));
+    };
+    if !update::verify_sha256(&bytes, &expected) {
+        progress.stop("checksum did not match");
+        return Err(io::Error::other(format!(
+            "the downloaded churn binary did not match {checksum_url}"
+        )));
+    }
+    progress.stop(format!("churn {version} downloaded and verified"));
+
+    update::replace_binary(&exe, &bytes)?;
+    log::success(format!("churn updated to {version}"))?;
+    Ok(exe)
+}
+
+fn update_dashboard(target_ref: &str, old_ref: &str, force: bool) -> io::Result<()> {
+    let dir = Stack::Server.dir();
+    let env_path = Stack::Server.env_path();
+
+    if !system::docker_image_exists(target_ref) {
+        let progress = spinner();
+        progress.start(format!("checking {target_ref}"));
+        if let Err(err) = system::docker_manifest_inspect(target_ref) {
+            progress.stop("image is not published");
+            return Err(err);
+        }
+        progress.stop(format!("{target_ref} is available"));
+    }
+
+    if force || !system::docker_image_exists(target_ref) {
+        let progress = spinner();
+        progress.start(format!("pulling {target_ref}"));
+        let result = system::docker_pull(target_ref, &mut |line| {
+            progress.set_message(console::truncate_str(line, 100, "…"));
+        });
+        match result {
+            Ok(()) => progress.stop(format!("pulled {target_ref}")),
+            Err(err) => {
+                progress.stop("image pull failed");
+                return Err(err);
+            }
+        }
+    }
+
+    assets::materialize(&envfile::root(), Stack::Server)?;
+    envfile::upsert(&env_path, DASHBOARD_IMAGE_ENV, target_ref)?;
+
+    let mut live = LiveLog::start("recreating the dashboard");
+    match system::compose_recreate_service(&dir, DASHBOARD_SERVICE, &mut |line| live.push(line)) {
+        Ok(()) => live.success("dashboard container recreated"),
+        Err(err) => {
+            live.error("dashboard recreation failed");
+            if let Ok(logs) = system::compose_logs(&dir, DASHBOARD_SERVICE, 100)
+                && !logs.trim().is_empty()
+            {
+                eprintln!("{logs}");
+            }
+            let rollback = rollback_dashboard(&dir, &env_path, old_ref);
+            return Err(match rollback {
+                Ok(()) => io::Error::other(format!("{err}; rolled back to {old_ref}")),
+                Err(rollback_err) => io::Error::other(format!(
+                    "{err}; rollback to {old_ref} also failed: {rollback_err}"
+                )),
+            });
+        }
+    }
+
+    let port = dashboard_port();
+    let progress = spinner();
+    progress.start("waiting for the dashboard to answer");
+    match wait_for_dashboard(port, Duration::from_secs(60)) {
+        Ok(()) => {
+            progress.stop("dashboard is healthy");
+            Ok(())
+        }
+        Err(err) => {
+            progress.stop("dashboard did not become healthy");
+            if let Ok(logs) = system::compose_logs(&dir, DASHBOARD_SERVICE, 100)
+                && !logs.trim().is_empty()
+            {
+                eprintln!("{logs}");
+            }
+            let rollback = rollback_dashboard(&dir, &env_path, old_ref);
+            Err(match rollback {
+                Ok(()) => io::Error::other(format!("{err}; rolled back to {old_ref}")),
+                Err(rollback_err) => io::Error::other(format!(
+                    "{err}; rollback to {old_ref} also failed: {rollback_err}"
+                )),
+            })
+        }
+    }
+}
+
+fn rollback_dashboard(dir: &Path, env_path: &Path, old_ref: &str) -> io::Result<()> {
+    envfile::upsert(env_path, DASHBOARD_IMAGE_ENV, old_ref)?;
+    let mut live = LiveLog::start(format!("restoring the dashboard to {old_ref}"));
+    match system::compose_recreate_service(dir, DASHBOARD_SERVICE, &mut |line| live.push(line)) {
+        Ok(()) => {
+            live.success(format!("dashboard restored to {old_ref}"));
+            Ok(())
+        }
+        Err(err) => {
+            live.error("dashboard rollback failed");
+            Err(err)
+        }
+    }
+}
+
+fn dashboard_port() -> u16 {
+    envfile::read(&Stack::Server.env_path())
+        .get(Port::Dashboard.env_key())
+        .and_then(|value| ports::validate_port(value).ok())
+        .unwrap_or_else(|| Port::Dashboard.default_port())
+}
+
+fn wait_for_dashboard(port: u16, timeout: Duration) -> io::Result<()> {
+    let url = format!("http://127.0.0.1:{port}/api/health");
+    let deadline = Instant::now() + timeout;
+    loop {
+        if ureq::get(&url)
+            .timeout(Duration::from_secs(2))
+            .call()
+            .is_ok()
+        {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err(io::Error::other(format!(
+                "dashboard did not answer {url} within {}s",
+                timeout.as_secs()
+            )));
+        }
+        std::thread::sleep(Duration::from_secs(1));
+    }
+}
+
 /// Print the configured service URLs. This is read-only on purpose: unlike the
 /// installer it does not require root, Docker or a TTY.
 fn show_services(args: &Args) -> io::Result<()> {
@@ -890,6 +1446,25 @@ fn main() -> ExitCode {
     }
     if args.show {
         return match show_services(&args) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(err) => {
+                eprintln!("churn: {err}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+    if args.update {
+        if args.check {
+            return match update_check(&args) {
+                Ok(true) => ExitCode::SUCCESS,
+                Ok(false) => ExitCode::from(1),
+                Err(err) => {
+                    eprintln!("churn: {err}");
+                    ExitCode::FAILURE
+                }
+            };
+        }
+        return match update_host(&args) {
             Ok(()) => ExitCode::SUCCESS,
             Err(err) => {
                 eprintln!("churn: {err}");

@@ -10,6 +10,9 @@
 #
 # The binary is static (musl), so it does not need a Node.js, npm, Rust or
 # distro-library setup. churn installs Docker itself when it is missing.
+#
+# `sudo churn update` downloads these same release assets, verifies the same
+# SHA-256 sidecar, and then updates the server dashboard.
 
 set -eu
 

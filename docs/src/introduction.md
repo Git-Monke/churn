@@ -28,6 +28,18 @@ The stacks share a single `DATA_DIR`, mounted at `/data` everywhere. That keeps
 media paths consistent between the downloader, the automation apps, and
 Jellyfin.
 
+## Updating
+
+Once installed, update the churn binary and the server dashboard together:
+
+```bash
+sudo churn update
+```
+
+This verifies the release binary's checksum, replaces the running CLI, pulls the
+matching dashboard image, and recreates only the dashboard container. Use
+`churn update --check` to compare versions without changing anything.
+
 ## This book
 
 These pages are a living description of the stack: what each service does, how

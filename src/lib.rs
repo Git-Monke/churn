@@ -12,3 +12,4 @@ pub mod security;
 pub mod show;
 pub mod stack;
 pub mod system;
+pub mod update;
