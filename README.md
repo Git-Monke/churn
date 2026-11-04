@@ -7,7 +7,7 @@ Two roles, one machine each (or both on the same box):
 | stack     | what it runs                                  | ports |
 | --------- | --------------------------------------------- | ----- |
 | `server`  | Jellyfin + Sonarr + Radarr                    | 8096, 8989, 7878 |
-| `torrent` | qBittorrent + Prowlarr + FlareSolverr tunnelled through Mullvad WireGuard | 8080, 9696, 8098 (localhost) |
+| `torrent` | qBittorrent + Prowlarr + FlareSolverr tunnelled through Mullvad WireGuard | 8080 (configurable), 9696, 8098 (localhost) |
 
 ## Install
 

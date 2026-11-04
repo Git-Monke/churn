@@ -58,6 +58,15 @@ fn wireguard_key_must_decode_to_32_bytes() {
 }
 
 #[test]
+fn qbittorrent_port_must_be_unprivileged() {
+    assert!(question::validate_port("8080").is_ok());
+    assert!(question::validate_port("1024").is_ok());
+    assert!(question::validate_port("80").is_err());
+    assert!(question::validate_port("70000").is_err());
+    assert!(question::validate_port("http").is_err());
+}
+
+#[test]
 fn wireguard_address_must_be_ipv4_cidr() {
     assert!(question::validate_wireguard_address("10.64.12.34/32").is_ok());
     assert!(question::validate_wireguard_address("10.64.12.34").is_err());

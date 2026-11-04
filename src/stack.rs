@@ -59,7 +59,11 @@ impl Stack {
     pub fn questions(self) -> &'static [Question] {
         match self {
             Stack::Server => &[Question::DataDir],
-            Stack::Torrent => &[Question::WireguardArchive, Question::DataDir],
+            Stack::Torrent => &[
+                Question::WireguardArchive,
+                Question::DataDir,
+                Question::QbittorrentPort,
+            ],
         }
     }
 
@@ -155,6 +159,17 @@ impl Stack {
             ("TZ", envfile::timezone()),
         ];
 
+        // The dashboard reaches qBittorrent on this host port, and gluetun
+        // publishes qBittorrent's internal 8080 there. Write the same value to
+        // both stacks so a non-default choice stays in sync.
+        let stored_env = envfile::read(&self.env_path());
+        let qbittorrent_port = answers
+            .get(&Question::QbittorrentPort)
+            .cloned()
+            .or_else(|| stored_env.get("QBITTORRENT_PORT").cloned())
+            .unwrap_or_else(|| "8080".to_string());
+        managed.push(("QBITTORRENT_PORT", qbittorrent_port));
+
         if self == Stack::Server {
             managed.push((DASHBOARD_IMAGE_ENV, dashboard_image()));
         }
@@ -174,12 +189,11 @@ impl Stack {
             }
             // No country prompt for now: keep a hand-edited choice, else use
             // the country encoded in the selected Mullvad config filename.
-            let env = envfile::read(&self.env_path());
             let config_entry = answers
                 .get(&Question::WireguardConfig)
-                .or_else(|| env.get("WIREGUARD_CONFIG"));
+                .or_else(|| stored_env.get("WIREGUARD_CONFIG"));
             let countries = server_countries(
-                env.get("SERVER_COUNTRIES").map(String::as_str),
+                stored_env.get("SERVER_COUNTRIES").map(String::as_str),
                 config_entry.map(String::as_str),
             );
             managed.push(("SERVER_COUNTRIES", countries));

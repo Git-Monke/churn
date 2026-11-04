@@ -23,13 +23,17 @@ the internet. Web UI ports `8080` (qBittorrent) and `9696` (Prowlarr) are
 published on the gluetun container. Port `8098` is the dashboard's VPN status
 agent and is bound to the host loopback only.
 
+The qBittorrent host port is configurable as `QBITTORRENT_PORT` (default 8080).
+churn picks a free port during setup if 8080 is taken, and passes the same value
+to the dashboard. qBittorrent keeps listening on 8080 inside the VPN namespace.
+
 The qBittorrent WebUI is published on all host interfaces over plain HTTP and is
 protected by the API key seeded by `qbittorrent-init`. The churn backend reads
 that key from the qBittorrent config file and uses it read-only from the host
 (`/api/v2/torrents/info`) to show live Library progress; the key stays
 server-side and is never sent to the browser. If you do not need the WebUI from
-other machines, bind the published port to `127.0.0.1:8080:8080` in
-`torrent/docker-compose.yml`.
+other machines, bind the published port to
+`127.0.0.1:${QBITTORRENT_PORT:-8080}:8080` in `torrent/docker-compose.yml`.
 
 ## VPN and leak protection
 

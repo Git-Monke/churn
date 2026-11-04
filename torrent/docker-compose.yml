@@ -7,7 +7,7 @@ services:
     devices:
       - /dev/net/tun:/dev/net/tun
     ports:
-      - "8080:8080"                      # qBittorrent web UI (published here, not on qbittorrent)
+      - "${QBITTORRENT_PORT:-8080}:8080" # qBittorrent web UI (published here, not on qbittorrent)
       - "9696:9696"                      # Prowlarr web UI (published here, not on prowlarr)
       - "127.0.0.1:${VPN_STATUS_PORT:-8098}:${VPN_STATUS_PORT:-8098}"  # dashboard VPN check, loopback only
     environment:

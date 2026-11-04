@@ -2,7 +2,7 @@
 
 use std::fs::{self, OpenOptions};
 use std::io;
-use std::net::Ipv4Addr;
+use std::net::{Ipv4Addr, TcpListener};
 use std::path::{Path, PathBuf};
 
 use base64::Engine;
@@ -23,6 +23,7 @@ impl Section {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Question {
     DataDir,
+    QbittorrentPort,
     WireguardArchive,
     WireguardConfig,
     WireguardPrivateKey,
@@ -31,8 +32,9 @@ pub enum Question {
 
 impl Question {
     /// Every variant, used to prefill answers from a previous `.env`.
-    pub const ALL: [Question; 5] = [
+    pub const ALL: [Question; 6] = [
         Question::DataDir,
+        Question::QbittorrentPort,
         Question::WireguardArchive,
         Question::WireguardConfig,
         Question::WireguardPrivateKey,
@@ -52,7 +54,7 @@ impl Question {
             | Question::WireguardConfig
             | Question::WireguardPrivateKey
             | Question::WireguardAddresses => Section::Vpn,
-            Question::DataDir => Section::Storage,
+            Question::DataDir | Question::QbittorrentPort => Section::Storage,
         }
     }
 
@@ -60,6 +62,7 @@ impl Question {
     pub fn env_key(self) -> &'static str {
         match self {
             Question::DataDir => "DATA_DIR",
+            Question::QbittorrentPort => "QBITTORRENT_PORT",
             Question::WireguardArchive => "WIREGUARD_ARCHIVE",
             Question::WireguardConfig => "WIREGUARD_CONFIG",
             Question::WireguardPrivateKey => "WIREGUARD_PRIVATE_KEY",
@@ -70,6 +73,7 @@ impl Question {
     pub fn label(self) -> &'static str {
         match self {
             Question::DataDir => "Where should media and downloads live?",
+            Question::QbittorrentPort => "Host port for the qBittorrent web UI",
             Question::WireguardArchive => "Path to the Mullvad WireGuard config zip",
             Question::WireguardConfig => "WireGuard config file",
             Question::WireguardPrivateKey => "WireGuard private key",
@@ -104,6 +108,25 @@ impl Question {
                         Err(message) => {
                             log::error(message)?;
                             default = normalized;
+                        }
+                    }
+                }
+            }
+            Question::QbittorrentPort => {
+                let mut default = stored
+                    .and_then(|value| validate_port(value).ok())
+                    .map(|port| port.to_string())
+                    .unwrap_or_else(|| suggested_port().to_string());
+                loop {
+                    let value: String = input(self.label())
+                        .placeholder("8080")
+                        .default_input(&default)
+                        .interact()?;
+                    match validate_port(value.trim()) {
+                        Ok(port) => return Ok(port.to_string()),
+                        Err(message) => {
+                            log::error(message)?;
+                            default = value.trim().to_string();
                         }
                     }
                 }
@@ -250,6 +273,31 @@ fn complete_paths(input: &str, include_files: bool) -> Vec<String> {
         .into_iter()
         .map(|(_, _, suggestion)| suggestion)
         .collect()
+}
+
+const QBITTORRENT_DEFAULT_PORT: u16 = 8080;
+/// Host ports churn publishes for its other services; skip them when looking
+/// for a free qBittorrent UI port.
+const CHURN_PUBLISHED_PORTS: [u16; 5] = [8096, 8989, 7878, 9696, 8098];
+
+pub fn validate_port(port: &str) -> Result<u16, String> {
+    let port: u16 = port
+        .parse()
+        .map_err(|_| "Enter a port number between 1024 and 65535.".to_string())?;
+    if !(1024..=65535).contains(&port) {
+        return Err("Use an unprivileged port between 1024 and 65535.".to_string());
+    }
+    Ok(port)
+}
+
+/// First free unprivileged port at or above qBittorrent's usual 8080, skipping
+/// the ports churn already uses. Keeps 8080 when nothing else has claimed it.
+fn suggested_port() -> u16 {
+    (QBITTORRENT_DEFAULT_PORT..=u16::MAX)
+        .find(|port| {
+            !CHURN_PUBLISHED_PORTS.contains(port) && TcpListener::bind(("0.0.0.0", *port)).is_ok()
+        })
+        .unwrap_or(QBITTORRENT_DEFAULT_PORT)
 }
 
 pub fn validate_data_dir(value: &str) -> Result<(), String> {

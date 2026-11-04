@@ -82,6 +82,7 @@ services:
     environment:
       - NODE_ENV=production
       - CHURN_SERVER_DIR=/app
+      - QBITTORRENT_URL=http://127.0.0.1:${QBITTORRENT_PORT:-8080}
     volumes:
       - ./.env:/app/.env:ro
       - ./config:/app/config:ro
