@@ -43,7 +43,7 @@ survive a rerun.
 | `HOST` | `127.0.0.1` | Backend bind address |
 | `PORT` | `4000` | Backend port |
 | `JELLYFIN_URL` | `http://127.0.0.1:8096` | Jellyfin base URL used by the backend |
-| `JELLYFIN_PUBLIC_URL` | LAN address on Jellyfin's port | Browser-facing Jellyfin URL for video playback |
+| `JELLYFIN_PUBLIC_URL` | request host, LAN address as fallback | Browser-facing Jellyfin URL for video playback |
 | `JELLYFIN_API_KEY` | — | Written by churn after Jellyfin setup |
 | `JELLYFIN_ADMIN_USER` | `admin` | Optional non-interactive setup username |
 | `JELLYFIN_ADMIN_PASSWORD` | — | Optional non-interactive setup password |
@@ -63,7 +63,10 @@ survive a rerun.
 Churn completes Jellyfin's first-run setup after starting the server stack. It
 asks for a Jellyfin admin username and password when none is configured yet,
 creates the first admin, completes the wizard with remote access disabled, and
-creates an API key named `churn`. The key is written to `server/.env`:
+creates an API key named `churn`. It also adds the private LAN ranges and
+Tailscale's `100.64.0.0/10` range to Jellyfin's LAN networks, so tailnet clients
+can stream directly from Jellyfin without enabling remote access. The key is
+written to `server/.env`:
 
 ```bash
 JELLYFIN_API_KEY=<generated-key>
@@ -210,7 +213,9 @@ saved in its Radarr movie folder; a single season or episode is saved under
 `Show/Season N`; a multi-season pack is saved in the show folder. These direct
 downloads are tagged `churn-direct`, so Sonarr monitoring and arr import are not
 required. Episode level picking remains available for repairing one missing
-episode and uses Sonarr's direct episode search only to produce the result list.
+episode: the episode chooser reuses the per-indexer Prowlarr season search and
+narrows the cached results to that episode, so the same indexer progress and
+direct qBittorrent grabs apply.
 If qBittorrent has an older arr-managed download that Sonarr never queued, the
 show page matches its filename to the series and season/episode and shows live
 progress. Once that download finishes, churn asks Sonarr to scan its content
@@ -302,8 +307,9 @@ single seasons use `Show/Season N`, while a multi-season pack uses the show
 folder and Jellyfin groups the files by `SxxExx`.
 
 Missing individual episodes also get their own **Choose release** action. That
-uses Sonarr's episode-id search instead of its season search, so single-episode
-releases are available even when no season pack exists. An episode that is
+runs the same per-indexer Prowlarr season search and filters the results down to
+the episode, so single-episode releases and episode-covering season packs both
+appear with the usual indexer progress. An episode that is
 already downloading gets a **Cancel download** action instead: it removes the
 matching Sonarr queue records and download when available, or falls back to
 removing the matched qBittorrent torrent, and leaves imported files alone. A
@@ -336,13 +342,16 @@ those attempts does it show the interruption alert with a **Retry** action.
 
 The token stays out of the page DOM and API responses but is visible to browser
 devtools in redirect targets and Jellyfin HLS playlist/segment URLs; video bytes
-still come directly from Jellyfin. `JELLYFIN_PUBLIC_URL` defaults to the host's
-LAN address (replacing a loopback or container host in `JELLYFIN_URL`, keeping
-scheme, port and base path), so playback works from other devices without
-configuration; set it when the public address is something else, such as a
-reverse-proxy name. The backend logs the effective value at startup. Playback
-failures show the media error alert with an **Open Jellyfin** fallback, except
-for an HLS interruption, which offers **Retry**.
+still come directly from Jellyfin. By default Churn uses the hostname the
+browser used to reach the dashboard (replacing a loopback or container host in
+`JELLYFIN_URL`, keeping scheme, port and base path), so playback works through
+a LAN address, a Tailscale IP or a MagicDNS name without configuration. The
+server stack publishes Jellyfin on port 8096, so tailnet clients reach it the
+same way they reach Churn. Set `JELLYFIN_PUBLIC_URL` when the public address is
+something else, such as a reverse-proxy name; an explicit value always wins.
+The backend logs the effective fallback at startup. Playback failures show the
+media error alert with an **Open Jellyfin** fallback, except for an HLS
+interruption, which offers **Retry**.
 
 ## Roadmap
 

@@ -15,6 +15,7 @@ function makeConfig(): AppConfig {
     sessionTtlMs: 12 * 60 * 60 * 1000,
     cookieSecure: "auto",
     jellyfinPublicUrl: "http://jellyfin.test:8096",
+    jellyfinPublicUrlExplicit: true,
     services: {
       jellyfin: {
         id: "jellyfin",

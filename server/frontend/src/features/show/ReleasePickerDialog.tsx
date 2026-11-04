@@ -5,7 +5,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { ReleasePicker } from "@/features/show/ReleasePicker";
+import { ReleaseChooser } from "@/features/releases/ReleaseChooser";
 
 interface ReleasePickerDialogProps {
   open: boolean;
@@ -35,14 +35,16 @@ export function ReleasePickerDialog({
           <DialogTitle>Choose a release</DialogTitle>
           <DialogDescription>
             {showTitle ? `${showTitle} · ` : ""}
-            Pick a release to start the download right away. Sonarr's automatic search may still be
-            running in the background.
+            Search every indexer for this episode and pick a release to send straight to
+            qBittorrent.
           </DialogDescription>
         </DialogHeader>
-        <ReleasePicker
+        <ReleaseChooser
+          kind="series"
           seriesId={seriesId}
           seasonNumber={seasonNumber}
-          episodeNumber={episodeNumber ?? 1}
+          episodeNumber={episodeNumber}
+          title={showTitle}
           onGrabbed={() => onOpenChange(false)}
         />
       </DialogContent>

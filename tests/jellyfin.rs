@@ -490,3 +490,131 @@ fn real_time_monitoring_is_enabled_on_the_media_libraries() {
             .any(|change| change.contains("real-time monitoring") && change.contains("Movies"))
     );
 }
+
+#[test]
+fn tailnet_subnets_are_added_without_losing_network_config() {
+    let posted = Arc::new(std::sync::Mutex::new(None));
+    let posted_for_handler = Arc::clone(&posted);
+
+    let server = mock_server(
+        move |request| match (request.method.as_str(), request.path()) {
+            ("GET", "/System/Configuration/Network") => {
+                assert_eq!(request.header("x-emby-token"), Some("api-key"));
+                (
+                    200,
+                    r#"{
+                        "BaseUrl":"/jellyfin",
+                        "EnableRemoteAccess":false,
+                        "EnableIPv6":true,
+                        "LocalNetworkSubnets":["192.168.0.0/24"],
+                        "LocalNetworkAddresses":[],
+                        "KnownProxies":[]
+                    }"#
+                    .into(),
+                )
+            }
+            ("POST", "/System/Configuration/Network") => {
+                *posted_for_handler.lock().unwrap() = Some(request.body.clone());
+                (204, String::new())
+            }
+            _ => (404, "{}".into()),
+        },
+    );
+
+    let client = Jellyfin::new(&server.base_url, Duration::from_secs(2));
+    assert!(
+        client
+            .ensure_tailnet_access("api-key")
+            .expect("tailnet setup should succeed")
+    );
+
+    let body: serde_json::Value = serde_json::from_str(
+        posted
+            .lock()
+            .unwrap()
+            .as_deref()
+            .expect("network config was posted"),
+    )
+    .expect("json body");
+    assert_eq!(body["BaseUrl"], "/jellyfin");
+    assert_eq!(body["EnableRemoteAccess"], false);
+    assert_eq!(body["EnableIPv6"], true);
+    let subnets = body["LocalNetworkSubnets"]
+        .as_array()
+        .expect("subnets array");
+    let subnets: Vec<&str> = subnets
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .collect();
+    assert!(subnets.contains(&"192.168.0.0/24"));
+    assert!(subnets.contains(&"192.168.0.0/16"));
+    assert!(subnets.contains(&"100.64.0.0/10"));
+    assert!(subnets.contains(&"fd7a:115c:a1e0::/48"));
+}
+
+#[test]
+fn tailnet_setup_is_a_noop_when_the_subnets_are_already_present() {
+    let posted = Arc::new(AtomicBool::new(false));
+    let posted_for_handler = Arc::clone(&posted);
+
+    let server = mock_server(move |request| {
+        match (request.method.as_str(), request.path()) {
+            ("GET", "/System/Configuration/Network") => (
+                200,
+                r#"{
+                    "LocalNetworkSubnets":["127.0.0.0/8","10.0.0.0/8","172.16.0.0/12","192.168.0.0/16","169.254.0.0/16","100.64.0.0/10","::1/128","fc00::/7","fe80::/10","fd7a:115c:a1e0::/48"]
+                }"#
+                .into(),
+            ),
+            ("POST", "/System/Configuration/Network") => {
+                posted_for_handler.store(true, Ordering::Relaxed);
+                (204, String::new())
+            }
+            _ => (404, "{}".into()),
+        }
+    });
+
+    let client = Jellyfin::new(&server.base_url, Duration::from_secs(2));
+    assert!(
+        !client
+            .ensure_tailnet_access("api-key")
+            .expect("tailnet check should succeed")
+    );
+    assert!(!posted.load(Ordering::Relaxed));
+}
+
+#[test]
+fn restart_waits_until_jellyfin_is_serving_again() {
+    let restarted = Arc::new(AtomicBool::new(false));
+    let down_polls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let restarted_for_handler = Arc::clone(&restarted);
+    let down_polls_for_handler = Arc::clone(&down_polls);
+
+    let server = mock_server(
+        move |request| match (request.method.as_str(), request.path()) {
+            ("GET", "/System/Info/Public") => {
+                if !restarted_for_handler.load(Ordering::Relaxed) {
+                    return (200, r#"{"StartupWizardCompleted":true}"#.into());
+                }
+                let poll = down_polls_for_handler.fetch_add(1, Ordering::Relaxed);
+                if poll < 2 {
+                    (503, String::new())
+                } else {
+                    (200, r#"{"StartupWizardCompleted":true}"#.into())
+                }
+            }
+            ("POST", "/System/Restart") => {
+                assert_eq!(request.header("x-emby-token"), Some("api-key"));
+                restarted_for_handler.store(true, Ordering::Relaxed);
+                (204, String::new())
+            }
+            _ => (404, "{}".into()),
+        },
+    );
+
+    let client = Jellyfin::new(&server.base_url, Duration::from_secs(2));
+    client
+        .restart_and_wait("api-key", Duration::from_secs(5))
+        .expect("restart should wait for the new process");
+    assert!(restarted.load(Ordering::Relaxed));
+}

@@ -21,6 +21,7 @@ function makeConfig(overrides: Partial<AppConfig["services"]> = {}): AppConfig {
     sessionTtlMs: 12 * 60 * 60 * 1000,
     cookieSecure: "auto",
     jellyfinPublicUrl: "http://jellyfin.test:8096",
+    jellyfinPublicUrlExplicit: true,
     services: {
       jellyfin: {
         id: "jellyfin",
@@ -3155,47 +3156,60 @@ describe("show releases", () => {
     await app.close();
   });
 
-  it("searches a single episode by episode id", async () => {
+  it("searches a single episode through per-indexer Prowlarr search", async () => {
     const requestedUrls: string[] = [];
-    installFetch((url) => {
+    installShowReleaseFetch((url) => {
       requestedUrls.push(url);
-      if (url.includes("sonarr.test") && url.endsWith("/api/v3/episode?seriesId=42")) {
+      if (
+        url.includes("prowlarr.test") &&
+        url.includes("/api/v1/search") &&
+        url.includes("indexerIds=1")
+      ) {
         return jsonResponse([
-          { id: 501, seasonNumber: 1, episodeNumber: 1 },
-          { id: 502, seasonNumber: 1, episodeNumber: 2 },
-        ]);
-      }
-      if (url.includes("sonarr.test") && url.includes("/api/v3/release?seriesId=42&episodeId=501")) {
-        return jsonResponse([
-          arrSeasonReleases[0],
+          prowlarrSeasonReleases[0],
           {
-            ...arrSeasonReleases[0],
-            guid: "magnet:?xt=urn:btih:other",
+            ...prowlarrSeasonReleases[0],
+            guid: "episode-two-guid",
             title: "Example.Show.S01E02.1080p",
-            episodeNumbers: [2],
-            mappedEpisodeInfo: [{ id: 502, seasonNumber: 1, episodeNumber: 2 }],
+            infoHash: "episode-two-hash",
+            downloadUrl: "https://prowlarr.test/1/download?link=two",
           },
         ]);
       }
-      throw new Error(`unexpected URL ${url}`);
+      return undefined;
     });
 
     const app = await buildAuthedServer(makeConfig());
-    const response = await app.inject({
-      method: "GET",
-      url: "/api/library/shows/sonarr/42/releases?season=1&episode=1",
-    });
-    const body = response.json();
+    const body = await waitForCachedReleases(
+      app,
+      "/api/library/shows/sonarr/42/releases?season=1&episode=1",
+    );
 
-    expect(response.statusCode).toBe(200);
-    expect(body).toMatchObject({ seriesId: 42, seasonNumber: 1, episodeNumber: 1 });
-    expect(body.releases).toHaveLength(1);
-    expect(body.releases[0]).toMatchObject({
-      title: "Example.Show.S01E01.1080p",
-      episodeLabel: "S01E01",
-      canGrab: true,
+    expect(body).toMatchObject({
+      kind: "series-season",
+      targetId: 42,
+      seasonNumber: 1,
+      episodeNumber: 1,
+      state: "ready",
+      progress: { finished: 2, total: 2 },
     });
-    expect(requestedUrls.some((url) => url.includes("episodeId=501"))).toBe(true);
+    const releases = flattenCachedReleases(body);
+    expect(releases.map((release) => release.title).sort()).toEqual([
+      "Example.Show.S01-03",
+      "Example.Show.S01E01.1080p",
+    ]);
+    expect(
+      releases.find((release) => release.title === "Example.Show.S01E01.1080p"),
+    ).toMatchObject({ episodeLabel: "S01E01", canGrab: true });
+    expect(body.progress.indexers).toEqual([
+      expect.objectContaining({ id: 1, count: 1 }),
+      expect.objectContaining({ id: 2, count: 1 }),
+    ]);
+    expect(
+      requestedUrls.some(
+        (url) => url.includes("/api/v3/release?") && url.includes("episodeId"),
+      ),
+    ).toBe(false);
     await app.close();
   });
 
@@ -3245,48 +3259,27 @@ describe("show releases", () => {
     await app.close();
   });
 
-  it("sends a single episode release straight to qBittorrent", async () => {
-    const episodeRelease = {
-      ...arrSeasonReleases[0],
-      approved: false,
-      rejected: true,
-      downloadAllowed: false,
-      rejections: ["Not enough seeders: 0. Minimum seeders: 1"],
-    };
+  it("sends a selected episode release straight to qBittorrent", async () => {
     let addBody: URLSearchParams | undefined;
-    let posted: Record<string, unknown> | undefined;
-    installFetch((url, init) => {
-      if (url === "http://qbittorrent.test:8080/api/v2/torrents/info") {
-        return jsonResponse([]);
-      }
+    installShowReleaseFetch((url, init) => {
       if (url === "http://qbittorrent.test:8080/api/v2/torrents/add") {
         addBody = new URLSearchParams(String(init?.body));
         return new Response("Ok.", { status: 200 });
       }
-      if (url.includes("sonarr.test") && url.endsWith("/api/v3/series/42")) {
-        return jsonResponse(series);
-      }
-      if (url.includes("sonarr.test") && url.endsWith("/api/v3/episode?seriesId=42")) {
-        return jsonResponse([{ id: 501, seasonNumber: 1, episodeNumber: 1 }]);
-      }
-      if (url.includes("sonarr.test") && url.includes("/api/v3/release?seriesId=42&episodeId=501")) {
-        return jsonResponse([episodeRelease]);
-      }
-      if (url.includes("sonarr.test") && url.endsWith("/api/v3/release") && init?.method === "POST") {
-        posted = readBody(init);
-        return jsonResponse({ id: 1 });
-      }
-      throw new Error(`unexpected URL ${url}`);
+      return undefined;
     });
 
     const config = makeConfig();
     config.qbittorrent.apiKey = "qbt-test-key";
     const app = await buildAuthedServer(config);
-    const list = await app.inject({
-      method: "GET",
-      url: "/api/library/shows/sonarr/42/releases?season=1&episode=1",
-    });
-    const release = list.json().releases[0];
+    const list = await waitForCachedReleases(
+      app,
+      "/api/library/shows/sonarr/42/releases?season=1&episode=1",
+    );
+    const release = flattenCachedReleases(list).find(
+      (item) => item.title === "Example.Show.S01E01.1080p",
+    ) as { id: string };
+
     const response = await app.inject({
       method: "POST",
       url: "/api/library/shows/sonarr/42/releases/grab",
@@ -3294,10 +3287,13 @@ describe("show releases", () => {
     });
 
     expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      status: "grabbed",
+      title: "Example.Show.S01E01.1080p",
+    });
     expect(addBody?.get("urls")).toBe("https://prowlarr.test/1/download?link=single");
     expect(addBody?.get("savepath")).toBe("/data/media/tv/Example Show/Season 1");
     expect(addBody?.get("category")).toBe("tv");
-    expect(posted).toBeUndefined();
     await app.close();
   });
 
@@ -3611,6 +3607,30 @@ describe("playback", () => {
     expect(location).toContain("mediaSourceId=source-1");
     expect(location).toContain("playSessionId=session-1");
     expect(location).toContain("api_key=test-user-token");
+    await app.close();
+  });
+
+  it("follows the host the browser used to reach Churn", async () => {
+    installFetch(() => {
+      throw new Error("the stream route should not call upstream with both ids");
+    });
+    const config = makeConfig({
+      jellyfin: { id: "jellyfin", name: "Jellyfin", url: "http://127.0.0.1:8096" },
+    });
+    config.jellyfinPublicUrl = "http://127.0.0.1:8096";
+    config.jellyfinPublicUrlExplicit = false;
+
+    const app = await buildAuthedServer(config);
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/playback/items/item-1/stream?mediaSourceId=source-1&playSessionId=session-1",
+      headers: { host: "100.117.4.8:5173" },
+    });
+
+    expect(response.statusCode).toBe(302);
+    expect(String(response.headers.location)).toMatch(
+      /^http:\/\/100\.117\.4\.8:8096\/Videos\/item-1\/stream\?/,
+    );
     await app.close();
   });
 

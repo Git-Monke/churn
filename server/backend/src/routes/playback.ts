@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 import { expireSession, requireAuth } from "../auth.js";
-import type { AppConfig } from "../config.js";
+import { jellyfinPublicUrlForRequest, type AppConfig } from "../config.js";
 import { ApiError, isUnauthorized, UpstreamError } from "../errors.js";
 import {
   buildJellyfinHlsUrl,
@@ -138,7 +138,7 @@ export function registerPlaybackRoutes(
       }
 
       const hlsUrl = buildJellyfinHlsUrl(
-        config.jellyfinPublicUrl,
+        jellyfinPublicUrlForRequest(config, request.headers),
         itemId,
         source,
         playSessionId,
@@ -189,7 +189,7 @@ export function registerPlaybackRoutes(
       }
 
       const streamUrl = buildJellyfinStreamUrl(
-        config.jellyfinPublicUrl,
+        jellyfinPublicUrlForRequest(config, request.headers),
         itemId,
         mediaSourceId,
         playSessionId,

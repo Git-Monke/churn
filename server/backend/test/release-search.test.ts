@@ -22,6 +22,7 @@ function config(): AppConfig {
     sessionTtlMs: 60_000,
     cookieSecure: "auto",
     jellyfinPublicUrl: "http://jellyfin.test:8096",
+    jellyfinPublicUrlExplicit: true,
     services: {
       jellyfin: { id: "jellyfin", name: "Jellyfin", url: "http://jellyfin.test:8096" },
       sonarr: {
@@ -207,6 +208,73 @@ describe("progressive Prowlarr release search", () => {
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
     throw new Error("search did not finish");
+  });
+
+  it("narrows a season search to one episode without searching again", async () => {
+    let searches = 0;
+    installFetch((url) => {
+      if (url.endsWith("/api/v1/indexer")) {
+        return json([{ id: 1, name: "EZTV", enable: true }]);
+      }
+      if (url.includes("/api/v3/indexer")) {
+        return json([{ id: 11, name: "EZTV (Prowlarr)" }]);
+      }
+      if (url.includes("/api/v3/parse")) {
+        return parseResponse(new URL(url).searchParams.get("title") ?? "");
+      }
+      if (url.includes("/api/v1/search")) {
+        searches += 1;
+        return json([
+          cachedRelease("Example.Show.S01E01.1080p", 30, 1),
+          cachedRelease("Example.Show.S01E02.1080p", 25, 1),
+          cachedRelease("Example.Show.S01E02E03.1080p", 20, 1),
+          cachedRelease("Example.Show.S01.720p", 10, 1),
+        ]);
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const media = createMediaCache({ cacheDir: path.join(root, "media") });
+    await media.putSeries({
+      version: 1,
+      kind: "series",
+      id: 42,
+      title: "Example Show",
+      year: 2024,
+      seasons: [1],
+      cachedAt: "2026-01-01T00:00:00Z",
+    });
+    const service = createReleaseSearchService(config(), media, {
+      cacheDir: path.join(root, "prowlarr"),
+    });
+
+    await service.getSeriesSeason(42, 1);
+    await waitFor(async () => (await service.getSeriesSeason(42, 1)).state === "ready");
+
+    const episode = await service.getSeriesEpisode(42, 1, 2);
+    expect(episode).toMatchObject({
+      kind: "series-season",
+      targetId: 42,
+      seasonNumber: 1,
+      episodeNumber: 2,
+      state: "ready",
+      releaseCount: 3,
+    });
+    expect(
+      episode.groups
+        .flatMap((group) => group.releases)
+        .map((release) => release.title)
+        .sort(),
+    ).toEqual([
+      "Example.Show.S01.720p",
+      "Example.Show.S01E02.1080p",
+      "Example.Show.S01E02E03.1080p",
+    ]);
+    expect(searches).toBe(1);
+
+    const first = await service.getSeriesEpisode(42, 1, 1);
+    expect(first.releaseCount).toBe(2);
+    expect(first.progress?.indexers[0]).toMatchObject({ id: 1, count: 2 });
   });
 
   it("expands multi-season packs through Sonarr parse", async () => {

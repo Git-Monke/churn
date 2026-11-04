@@ -220,6 +220,18 @@ export function releaseMatchesSeries(
   return parsed.episodeNumbers.includes(episodeNumber);
 }
 
+/** True when a release already matched to a season also covers this episode. */
+export function releaseCoversEpisode(
+  parsed: ParsedReleaseName,
+  episodeNumber: number,
+): boolean {
+  if (parsed.episodeNumbers.length === 0) {
+    // Season and multi-season packs cover every episode in the season.
+    return parsed.seasonPack;
+  }
+  return parsed.episodeNumbers.includes(episodeNumber);
+}
+
 /** Label such as "S01E02" or "S01E02–E04", if the filename contains episodes. */
 export function releaseEpisodeLabel(parsed: ParsedReleaseName): string | undefined {
   if (parsed.episodeNumbers.length === 0 || parsed.seasonNumbers.length === 0) {

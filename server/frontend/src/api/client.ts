@@ -211,13 +211,28 @@ export function fetchEpisodeReleases(
   seriesId: number,
   seasonNumber: number,
   episodeNumber: number,
-): Promise<ShowReleasesResponse> {
+): Promise<CachedReleasesResponse> {
   const params = new URLSearchParams({
     season: String(seasonNumber),
     episode: String(episodeNumber),
   });
-  return getJson<ShowReleasesResponse>(
+  return getJson<CachedReleasesResponse>(
     `/api/library/shows/sonarr/${encodeURIComponent(String(seriesId))}/releases?${params.toString()}`,
+  );
+}
+
+export function refreshEpisodeReleases(
+  seriesId: number,
+  seasonNumber: number,
+  episodeNumber: number,
+): Promise<CachedReleasesResponse> {
+  const params = new URLSearchParams({
+    season: String(seasonNumber),
+    episode: String(episodeNumber),
+  });
+  return postJson<CachedReleasesResponse>(
+    `/api/library/shows/sonarr/${encodeURIComponent(String(seriesId))}/releases/refresh?${params.toString()}`,
+    {},
   );
 }
 

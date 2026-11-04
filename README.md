@@ -124,10 +124,13 @@ After the server stack starts, churn completes Jellyfin's first-run setup,
 creates an API key named `churn`, and writes it to `server/.env` as
 `JELLYFIN_API_KEY`. It also creates or repairs the `Movies` and `Shows`
 libraries at `/data/media/movies` and `/data/media/tv`, and removes any `/data`
-library path so Jellyfin does not index qBittorrent's in-progress downloads. The
-installer asks for a Jellyfin admin username and password when needed; the
-password is not saved. Reruns reuse a valid key. Sonarr and Radarr keys are read
-automatically from `server/config/*/config.xml`.
+library path so Jellyfin does not index qBittorrent's in-progress downloads. It
+also adds the private LAN ranges and Tailscale's `100.64.0.0/10` range to
+Jellyfin's LAN networks, so tailnet clients can stream directly from Jellyfin
+while remote access stays disabled. The installer asks for a Jellyfin admin
+username and password when needed; the password is not saved. Reruns reuse a
+valid key. Sonarr and Radarr keys are read automatically from
+`server/config/*/config.xml`.
 
 Production build:
 
@@ -188,7 +191,9 @@ matched Sonarr series.
 Movies and Jellyfin episodes also open an in-app player:
 video streams from Jellyfin, transcoding to HLS when the browser cannot decode
 the source, resume positions come from the signed-in user, and progress is
-reported back to Jellyfin. See `server/README.md` for
+reported back to Jellyfin. Playback follows the hostname used to open the
+dashboard, so the same install works through a LAN IP, a Tailscale IP or a
+MagicDNS name without extra configuration. See `server/README.md` for
 configuration, `JELLYFIN_PUBLIC_URL` and container notes. Development is
 planned in this order: library/status dashboard, search and media requests
 (done), active downloads in Library (done), Jellyfin login and per-user sessions

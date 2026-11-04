@@ -119,6 +119,9 @@ export function MoviePage({
                 Waiting for qBittorrent to report the new torrent.
               </AlertDescription>
             </Alert>
+          ) : movieQuery.data.jellyfinId ? (
+            // Playable: the header carries the only action (Play), so no torrents.
+            null
           ) : movieQuery.data.radarrId !== undefined ? (
             <ReleaseChooser
               kind="movie"
@@ -136,7 +139,7 @@ export function MoviePage({
               <AlertTitle>No release options available</AlertTitle>
               <AlertDescription>
                 This movie is not matched to a Radarr entry, so there is nothing to search for.
-                Add it to Radarr first, or play the existing file.
+                Add it to Radarr first.
               </AlertDescription>
             </Alert>
           )}

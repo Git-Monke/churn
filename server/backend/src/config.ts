@@ -33,6 +33,12 @@ export interface VpnConfig {
   timeoutMs: number;
 }
 
+export interface BrowserHostHeaders {
+  host?: string;
+  "x-forwarded-host"?: string | string[];
+  forwarded?: string | string[];
+}
+
 export interface AppConfig {
   host: string;
   port: number;
@@ -53,12 +59,14 @@ export interface AppConfig {
   sessionTtlMs: number;
   cookieSecure: CookieSecureSetting;
   /**
-   * Jellyfin URL handed to the browser for video streams. Defaults to the
-   * host's LAN address rather than loopback, so playback works from other
-   * devices and not only from the machine running the backend.
+   * Jellyfin URL handed to the browser for video streams. An explicit
+   * `JELLYFIN_PUBLIC_URL` always wins; otherwise the request host is used (see
+   * `jellyfinPublicUrlForRequest`), with this value as the fallback.
    */
   jellyfinPublicUrl: string;
-  /** Address used as that default; undefined when no LAN interface was found. */
+  /** True when `JELLYFIN_PUBLIC_URL` was set and must override the request host. */
+  jellyfinPublicUrlExplicit: boolean;
+  /** Address used as that fallback; undefined when no LAN interface was found. */
   lanAddress?: string;
   services: Record<ServiceId, ServiceConfig>;
   qbittorrent: QbittorrentConfig;
@@ -222,6 +230,8 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
     timeoutMs: parseVpnTimeout(values.VPN_STATUS_TIMEOUT_MS),
   };
 
+  const explicitPublicUrl = nonEmpty(values.JELLYFIN_PUBLIC_URL);
+
   return {
     host: nonEmpty(values.HOST) ?? "127.0.0.1",
     port: parsePort(values.PORT),
@@ -233,10 +243,11 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
     sessionTtlMs: parseSessionTtl(values.CHURN_SESSION_TTL_MS),
     cookieSecure: parseCookieSecure(values.CHURN_COOKIE_SECURE),
     jellyfinPublicUrl: resolveJellyfinPublicUrl(
-      values.JELLYFIN_PUBLIC_URL,
+      explicitPublicUrl,
       services.jellyfin.url,
       lanAddress,
     ),
+    jellyfinPublicUrlExplicit: explicitPublicUrl !== undefined,
     lanAddress,
     services,
     qbittorrent,
@@ -267,13 +278,13 @@ function cleanApiKey(value: string | undefined): string | undefined {
 }
 
 /**
- * Resolve the URL the browser uses for video streams.
+ * Resolve the LAN-based fallback URL for video streams.
  *
- * An explicit `JELLYFIN_PUBLIC_URL` always wins. Otherwise a loopback address
- * (or a single-label container/service host such as `jellyfin`) is replaced
- * with the host's LAN address, keeping the scheme, port and base path. When no
- * LAN address is available the Jellyfin URL is used unchanged, which keeps
- * loopback-only installs and container setups working as before.
+ * Used when the request host cannot be used, for example for health checks or
+ * a request without a Host header. A loopback Jellyfin address (or a
+ * single-label container/service host such as `jellyfin`) is replaced with the
+ * host's LAN address, keeping the scheme, port and base path. When no LAN
+ * address is available the Jellyfin URL is used unchanged.
  */
 function resolveJellyfinPublicUrl(
   explicit: string | undefined,
@@ -293,6 +304,76 @@ function resolveJellyfinPublicUrl(
   }
   url.hostname = lanAddress;
   return normalizeUrl(url.toString(), jellyfinUrl);
+}
+
+/**
+ * Resolve the Jellyfin URL for the browser that made this request.
+ *
+ * An explicit `JELLYFIN_PUBLIC_URL` always wins. Otherwise a Jellyfin URL that
+ * the browser cannot resolve (loopback or a Docker service name) is rewritten
+ * to the hostname the browser used to reach Churn. That makes the same
+ * deployment work through a LAN IP, a tailnet IP or a MagicDNS name without
+ * extra configuration. When no request host is available the LAN-based
+ * fallback from `loadConfig` is used.
+ */
+export function jellyfinPublicUrlForRequest(
+  config: AppConfig,
+  headers: BrowserHostHeaders,
+): string {
+  if (config.jellyfinPublicUrlExplicit) {
+    return config.jellyfinPublicUrl;
+  }
+
+  const jellyfin = new URL(config.services.jellyfin.url);
+  if (!needsPublicHost(jellyfin.hostname)) {
+    return config.services.jellyfin.url;
+  }
+
+  const hostname = requestHostname(headers) ?? config.lanAddress;
+  if (!hostname) {
+    return config.jellyfinPublicUrl;
+  }
+  jellyfin.hostname = hostname;
+  return normalizeUrl(jellyfin.toString(), config.services.jellyfin.url);
+}
+
+/** Host as the browser saw it, preferring a reverse proxy's public host. */
+function requestHostname(headers: BrowserHostHeaders): string | undefined {
+  const candidates = [
+    firstHeader(headers["x-forwarded-host"]),
+    forwardedHost(firstHeader(headers.forwarded)),
+    firstHeader(headers.host),
+  ];
+  for (const candidate of candidates) {
+    const hostname = parseHostname(candidate);
+    if (hostname) {
+      return hostname;
+    }
+  }
+  return undefined;
+}
+
+function firstHeader(value: string | string[] | undefined): string | undefined {
+  const raw = Array.isArray(value) ? value[0] : value;
+  return raw?.split(",")[0]?.trim() || undefined;
+}
+
+function forwardedHost(value: string | undefined): string | undefined {
+  return value?.match(/(?:^|;)\s*host="?([^";,]+)"?/i)?.[1];
+}
+
+/** Host header characters: names, addresses, ports and IPv6 brackets. */
+const HOST_HEADER_PATTERN = /^[A-Za-z0-9._:[\]-]+$/;
+
+function parseHostname(value: string | undefined): string | undefined {
+  if (!value || value.length > 255 || !HOST_HEADER_PATTERN.test(value)) {
+    return undefined;
+  }
+  try {
+    return new URL(`http://${value}`).hostname || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** True when a browser on another machine cannot resolve this host. */

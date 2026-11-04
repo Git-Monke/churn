@@ -15,6 +15,7 @@ import {
 } from "./media-cache.js";
 import {
   createReleaseParser,
+  releaseCoversEpisode,
   releaseEpisodeLabel,
   releaseMatchesMovie,
   releaseMatchesSeries,
@@ -71,8 +72,19 @@ export interface RawIndexerRelease {
 export interface ReleaseSearchService {
   getMovie(movieId: number): Promise<CachedReleasesResponse>;
   getSeriesSeason(seriesId: number, seasonNumber: number): Promise<CachedReleasesResponse>;
+  /** Narrow the cached season search to one episode. */
+  getSeriesEpisode(
+    seriesId: number,
+    seasonNumber: number,
+    episodeNumber: number,
+  ): Promise<CachedReleasesResponse>;
   refreshMovie(movieId: number): Promise<CachedReleasesResponse>;
   refreshSeriesSeason(seriesId: number, seasonNumber: number): Promise<CachedReleasesResponse>;
+  refreshSeriesEpisode(
+    seriesId: number,
+    seasonNumber: number,
+    episodeNumber: number,
+  ): Promise<CachedReleasesResponse>;
   /** Start missing background searches without waiting for them. */
   warmMovie(movieId: number): Promise<void>;
   /** Warm missing seasons in ascending order, one at a time. */
@@ -476,38 +488,47 @@ export function createReleaseSearchService(
     };
   }
 
-  async function get(target: ReleaseSearchTarget): Promise<CachedReleasesResponse> {
+  async function getJob(target: ReleaseSearchTarget): Promise<SearchJob> {
     const key = targetKey(target);
     const existing = jobs.get(key);
     if (existing) {
-      return buildResponse(existing);
+      return existing;
     }
     const snapshot = await loadSnapshot(target);
     if (snapshot) {
       const job = jobFromSnapshot(target, snapshot);
       jobs.set(key, job);
       pruneJobs();
-      return buildResponse(job);
+      return job;
     }
-    const job = await startJob(target);
-    return buildResponse(job);
+    return startJob(target);
   }
 
-  async function refresh(target: ReleaseSearchTarget): Promise<CachedReleasesResponse> {
+  async function get(target: ReleaseSearchTarget): Promise<CachedReleasesResponse> {
+    return buildResponse(await getJob(target));
+  }
+
+  async function refresh(
+    target: ReleaseSearchTarget,
+    episodeNumber?: number,
+  ): Promise<CachedReleasesResponse> {
     const key = targetKey(target);
     const existing = jobs.get(key);
     if (existing && existing.completedAt === undefined) {
-      return buildResponse(existing);
+      return buildResponse(existing, episodeNumber);
     }
     const snapshot = existing ? undefined : await loadSnapshot(target);
     const job = await startJob(target, snapshot);
-    return buildResponse(job);
+    return buildResponse(job, episodeNumber);
   }
 
-  function buildResponse(job: SearchJob): CachedReleasesResponse {
-    const mapped = mapJobReleases(job);
+  function buildResponse(
+    job: SearchJob,
+    episodeNumber?: number,
+  ): CachedReleasesResponse {
+    const mapped = mapJobReleases(job, episodeNumber);
     const groups = groupShowReleases(mapped, { includeUnavailable: true });
-    const progress = buildProgress(job);
+    const progress = buildProgress(job, episodeNumber);
     const allSettled = job.indexers.length > 0 && job.indexers.every(isSettled);
     const allFailed =
       allSettled && job.indexers.every((indexer) => indexer.state === "error");
@@ -530,6 +551,7 @@ export function createReleaseSearchService(
       service: job.target.kind === "movie" ? "radarr" : "sonarr",
       targetId: job.target.kind === "movie" ? job.target.movieId : job.target.seriesId,
       ...(job.target.kind === "series" ? { seasonNumber: job.target.seasonNumber } : {}),
+      ...(episodeNumber === undefined ? {} : { episodeNumber }),
       state,
       refreshing: job.completedAt === undefined,
       ...(detail ? { detail } : {}),
@@ -540,12 +562,18 @@ export function createReleaseSearchService(
     };
   }
 
-  function mapJobReleases(job: SearchJob): ShowRelease[] {
+  function mapJobReleases(job: SearchJob, episodeNumber?: number): ShowRelease[] {
     const indexers = new Map(job.indexers.map((indexer) => [indexer.id, indexer]));
     const deduped = new Map<string, { release: RawIndexerRelease; indexer: JobIndexer }>();
     for (const release of [...job.releasesByIndexer.values()].flat()) {
       const indexer = indexers.get(release.indexerId);
       if (!indexer) {
+        continue;
+      }
+      if (
+        episodeNumber !== undefined &&
+        !releaseCoversEpisode(release.parsed, episodeNumber)
+      ) {
         continue;
       }
       const key = release.infoHash?.toLowerCase() || `${release.indexerId}:${release.guid}`;
@@ -602,12 +630,20 @@ export function createReleaseSearchService(
     };
   }
 
-  function buildProgress(job: SearchJob): NonNullable<CachedReleasesResponse["progress"]> {
+  function buildProgress(
+    job: SearchJob,
+    episodeNumber?: number,
+  ): NonNullable<CachedReleasesResponse["progress"]> {
     const indexers: ReleaseIndexerProgress[] = job.indexers.map((indexer) => ({
       id: indexer.id,
       name: indexer.name,
       state: indexer.state,
-      count: indexer.count,
+      count:
+        episodeNumber === undefined
+          ? indexer.count
+          : (job.releasesByIndexer.get(indexer.id) ?? []).filter((release) =>
+              releaseCoversEpisode(release.parsed, episodeNumber),
+            ).length,
       canGrab: true,
       ...(indexer.detail ? { detail: indexer.detail } : {}),
     }));
@@ -792,9 +828,15 @@ export function createReleaseSearchService(
     getSeriesSeason(seriesId, seasonNumber) {
       return get({ kind: "series", seriesId, seasonNumber });
     },
+    async getSeriesEpisode(seriesId, seasonNumber, episodeNumber) {
+      const target: ReleaseSearchTarget = { kind: "series", seriesId, seasonNumber };
+      return buildResponse(await getJob(target), episodeNumber);
+    },
     refreshMovie: (movieId) => refresh({ kind: "movie", movieId }),
     refreshSeriesSeason: (seriesId, seasonNumber) =>
       refresh({ kind: "series", seriesId, seasonNumber }),
+    refreshSeriesEpisode: (seriesId, seasonNumber, episodeNumber) =>
+      refresh({ kind: "series", seriesId, seasonNumber }, episodeNumber),
     async warmMovie(movieId) {
       const target: ReleaseSearchTarget = { kind: "movie", movieId };
       if (!jobs.has(targetKey(target))) {

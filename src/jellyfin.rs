@@ -25,6 +25,23 @@ const MEDIA_LIBRARIES: &[(&str, &str, &str)] = &[
     ("Movies", "movies", "/data/media/movies"),
     ("Shows", "tvshows", "/data/media/tv"),
 ];
+/// Jellyfin replaces its default "all private networks are local" rule as soon
+/// as `LocalNetworkSubnets` is non-empty. Keep the private ranges explicitly so
+/// LAN, loopback and Docker clients still work, then add the reserved Tailscale
+/// ranges so tailnet clients can play video while remote access stays off.
+const LOCAL_NETWORK_SUBNETS: &[&str] = &[
+    "127.0.0.0/8",
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+    "169.254.0.0/16",
+    "100.64.0.0/10",
+    "::1/128",
+    "fc00::/7",
+    "fe80::/10",
+    "fd7a:115c:a1e0::/48",
+];
+
 const AUTH_HEADER: &str = concat!(
     "MediaBrowser Client=\"churn\", Device=\"installer\", ",
     "DeviceId=\"churn-installer\", Version=\"0.1.0\""
@@ -139,6 +156,36 @@ impl Jellyfin {
             return Err(http_error("read Jellyfin public info", &response));
         }
         decode(&response, "Jellyfin public info")
+    }
+
+    /// Restart Jellyfin and wait until a fresh process answers again.
+    ///
+    /// Network settings such as `LocalNetworkSubnets` are only applied on
+    /// startup, so churn restarts Jellyfin after changing them. The wait needs
+    /// to see the server go down first; otherwise the old process could answer
+    /// before it has actually restarted.
+    pub fn restart_and_wait(&self, api_key: &str, wait: Duration) -> io::Result<()> {
+        let response = self.send(
+            ureq::post(&format!("{}/System/Restart", self.base_url)).set("X-Emby-Token", api_key),
+        )?;
+        expect_no_content(response, "restart Jellyfin")?;
+
+        let started = Instant::now();
+        let mut saw_down = false;
+        loop {
+            match self.public_info() {
+                Ok(_) if saw_down => return Ok(()),
+                Ok(_) => {}
+                Err(_) => saw_down = true,
+            }
+            if started.elapsed() >= wait {
+                return Err(io::Error::other(format!(
+                    "Jellyfin did not finish restarting within {}s",
+                    wait.as_secs()
+                )));
+            }
+            std::thread::sleep(Duration::from_millis(500));
+        }
     }
 
     /// True when Jellyfin accepts the key for an elevated system-info request.
@@ -376,6 +423,65 @@ impl Jellyfin {
         }
 
         Ok(changes)
+    }
+
+    /// Allow tailnet clients to reach Jellyfin while remote access stays off.
+    ///
+    /// Jellyfin's access middleware rejects every non-local address when
+    /// `EnableRemoteAccess` is false. Tailscale uses the reserved CGNAT range,
+    /// which Jellyfin does not consider local by default, so add it (together
+    /// with the private LAN ranges Jellyfin otherwise detects automatically) to
+    /// `LocalNetworkSubnets`. The rest of the network configuration is sent
+    /// back unchanged. Jellyfin applies this on startup, so the caller restarts
+    /// it after a change.
+    pub fn ensure_tailnet_access(&self, api_key: &str) -> io::Result<bool> {
+        let response = self.send(
+            ureq::get(&format!("{}/System/Configuration/Network", self.base_url))
+                .set("X-Emby-Token", api_key),
+        )?;
+        if response.status != 200 {
+            return Err(http_error("read Jellyfin network configuration", &response));
+        }
+
+        let mut config: serde_json::Value = decode(&response, "Jellyfin network configuration")?;
+        let Some(object) = config.as_object_mut() else {
+            return Err(io::Error::other(
+                "Jellyfin returned a non-object network configuration",
+            ));
+        };
+        let subnets = object
+            .entry("LocalNetworkSubnets")
+            .or_insert_with(|| json!([]));
+        let Some(subnets) = subnets.as_array_mut() else {
+            return Err(io::Error::other(
+                "Jellyfin returned a non-array LocalNetworkSubnets value",
+            ));
+        };
+
+        let mut changed = false;
+        for subnet in LOCAL_NETWORK_SUBNETS {
+            if !subnets.iter().any(|value| {
+                value
+                    .as_str()
+                    .is_some_and(|value| value.trim().eq_ignore_ascii_case(subnet))
+            }) {
+                subnets.push(json!(subnet));
+                changed = true;
+            }
+        }
+        if !changed {
+            return Ok(false);
+        }
+
+        expect_no_content(
+            self.send_json(
+                ureq::post(&format!("{}/System/Configuration/Network", self.base_url))
+                    .set("X-Emby-Token", api_key),
+                config,
+            )?,
+            "allow Tailscale clients in Jellyfin",
+        )?;
+        Ok(true)
     }
 
     /// Let Jellyfin watch the media folders itself. Churn still asks for a scan

@@ -11,11 +11,6 @@ import {
   recoverCompletedShowDownloads,
 } from "../download-import.js";
 import type { ReleaseSearchService } from "../release-search.js";
-import {
-  findRelease,
-  releaseMatchesEpisode,
-  toShowReleases,
-} from "../releases.js";
 import { mediaCoverUrl } from "../search.js";
 import { buildShowDetail } from "../shows.js";
 import { mapShowTorrentDownloads } from "../qbittorrent-show.js";
@@ -25,7 +20,6 @@ import type {
   CachedReleasesResponse,
   GrabShowReleaseResponse,
   ShowDetailResponse,
-  ShowReleasesResponse,
   ShowSeriesSummary,
   ShowSource,
 } from "../types.js";
@@ -34,7 +28,6 @@ import { createQbittorrentClient, type QbittorrentTorrent } from "../upstream/qb
 import {
   createArrClient,
   type ServarrQueueRecord,
-  type ServarrRelease,
   type ServarrSeriesResource,
 } from "../upstream/servarr.js";
 import { errorMessage, stateForError } from "../upstream/states.js";
@@ -77,7 +70,10 @@ export function registerShowRoutes(
     },
   );
 
-  app.post<{ Params: { source: string; id: string }; Querystring: { season?: unknown } }>(
+  app.post<{
+    Params: { source: string; id: string };
+    Querystring: { season?: unknown; episode?: unknown };
+  }>(
     "/api/library/shows/:source/:id/releases/refresh",
     async (request, reply) => {
       reply.header("cache-control", "no-store");
@@ -87,7 +83,14 @@ export function registerShowRoutes(
       }
       const seriesId = parseSonarrId(request.params.id);
       const seasonNumber = parseSeasonNumber(request.query.season);
-      return refreshShowReleases(config, releaseSearch, seriesId, seasonNumber);
+      const episodeNumber = parseOptionalEpisodeNumber(request.query.episode);
+      return refreshShowReleases(
+        config,
+        releaseSearch,
+        seriesId,
+        seasonNumber,
+        episodeNumber,
+      );
     },
   );
 
@@ -289,40 +292,14 @@ async function loadShowReleases(
   seriesId: number,
   seasonNumber: number,
   options: ReleaseSearchOptions = {},
-): Promise<ShowReleasesResponse | CachedReleasesResponse> {
-  const service = config.services.sonarr;
-  if (!service.apiKey) {
+): Promise<CachedReleasesResponse> {
+  if (!config.services.sonarr.apiKey) {
     throw new ApiError(503, "sonarr_unconfigured", unconfiguredDetail("sonarr"));
   }
 
-  const client = createArrClient(
-    "sonarr",
-    service,
-    Math.max(config.requestTimeoutMs, config.releaseTimeoutMs),
-  );
-  const checkedAt = new Date().toISOString();
-
-  if (options.episodeNumber !== undefined) {
-    let releases: ServarrRelease[];
-    try {
-      releases = await getEpisodeReleases(client, seriesId, seasonNumber, options.episodeNumber);
-    } catch (error) {
-      throw releaseApiError(error, "Could not search Sonarr for releases");
-    }
-    return {
-      seriesId,
-      seasonNumber,
-      episodeNumber: options.episodeNumber,
-      checkedAt,
-      releases: toShowReleases(
-        releases.filter((release) =>
-          releaseMatchesEpisode(release, seasonNumber, options.episodeNumber as number),
-        ),
-      ),
-    };
-  }
-
-  return releaseSearch.getSeriesSeason(seriesId, seasonNumber);
+  return options.episodeNumber === undefined
+    ? releaseSearch.getSeriesSeason(seriesId, seasonNumber)
+    : releaseSearch.getSeriesEpisode(seriesId, seasonNumber, options.episodeNumber);
 }
 
 async function refreshShowReleases(
@@ -330,28 +307,14 @@ async function refreshShowReleases(
   releaseSearch: ReleaseSearchService,
   seriesId: number,
   seasonNumber: number,
+  episodeNumber?: number,
 ): Promise<CachedReleasesResponse> {
   if (!config.services.sonarr.apiKey) {
     throw new ApiError(503, "sonarr_unconfigured", unconfiguredDetail("sonarr"));
   }
-  return releaseSearch.refreshSeriesSeason(seriesId, seasonNumber);
-}
-
-async function getEpisodeReleases(
-  client: ReturnType<typeof createArrClient>,
-  seriesId: number,
-  seasonNumber: number,
-  episodeNumber: number,
-): Promise<ServarrRelease[]> {
-  const episodes = await client.getEpisodes(seriesId);
-  const episode = episodes.find(
-    (item) =>
-      item.seasonNumber === seasonNumber && item.episodeNumber === episodeNumber,
-  );
-  if (episode?.id === undefined) {
-    throw new ApiError(404, "episode_not_found", "Episode not found in Sonarr");
-  }
-  return client.getEpisodeReleases(seriesId, episode.id);
+  return episodeNumber === undefined
+    ? releaseSearch.refreshSeriesSeason(seriesId, seasonNumber)
+    : releaseSearch.refreshSeriesEpisode(seriesId, seasonNumber, episodeNumber);
 }
 
 async function grabShowRelease(
@@ -360,76 +323,27 @@ async function grabShowRelease(
   seriesId: number,
   input: ReturnType<typeof parseGrabReleaseInput>,
 ): Promise<GrabShowReleaseResponse> {
-  if (input.episodeNumber === undefined) {
-    const found = await releaseSearch.findRelease(
-      { kind: "series", seriesId, seasonNumber: input.seasonNumber },
-      input.releaseId,
-    );
-    if (!found) {
-      throw new ApiError(
-        404,
-        "release_not_found",
-        "That release is no longer in the search results; search again",
-      );
-    }
-
-    try {
-      const result = await grabTorrentDirect(config, found.release, {
-        kind: "series",
-        arrId: seriesId,
-        title: found.media.title || found.release.title,
-        ...(found.media.year !== undefined ? { year: found.media.year } : {}),
-        seasonNumber: input.searchSeasonNumber ?? input.seasonNumber,
-        multiSeason: found.release.parsed.seasonNumbers.length > 1,
-      });
-      return { status: "grabbed", title: result.title };
-    } catch (error) {
-      throw directGrabError(error);
-    }
-  }
-
-  const service = config.services.sonarr;
-  if (!service.apiKey) {
-    throw new ApiError(503, "sonarr_unconfigured", unconfiguredDetail("sonarr"));
-  }
-
-  const client = createArrClient(
-    "sonarr",
-    service,
-    Math.max(config.requestTimeoutMs, config.releaseTimeoutMs),
+  const searchSeasonNumber = input.searchSeasonNumber ?? input.seasonNumber;
+  const found = await releaseSearch.findRelease(
+    { kind: "series", seriesId, seasonNumber: searchSeasonNumber },
+    input.releaseId,
   );
-  let releases: ServarrRelease[];
-  try {
-    releases = await getEpisodeReleases(
-      client,
-      seriesId,
-      input.seasonNumber,
-      input.episodeNumber,
+  if (!found) {
+    throw new ApiError(
+      404,
+      "release_not_found",
+      "That release is no longer in the search results; search again",
     );
-  } catch (error) {
-    throw releaseApiError(error, "Could not search Sonarr for releases");
-  }
-
-  const release = findRelease(releases, input.releaseId);
-  if (!release) {
-    throw new ApiError(404, "release_not_found", "Release not found. Search again.");
-  }
-
-  let series: ServarrSeriesResource;
-  try {
-    series = await client.getSeries(seriesId);
-  } catch (error) {
-    throw releaseApiError(error, "Could not load the Sonarr series folder");
   }
 
   try {
-    const result = await grabTorrentDirect(config, release, {
+    const result = await grabTorrentDirect(config, found.release, {
       kind: "series",
       arrId: seriesId,
-      title: series.title?.trim() || release.title?.trim() || "Unknown series",
-      ...(series.year !== undefined ? { year: series.year } : {}),
-      ...(series.path ? { libraryPath: series.path } : {}),
-      seasonNumber: input.seasonNumber,
+      title: found.media.title || found.release.title,
+      ...(found.media.year !== undefined ? { year: found.media.year } : {}),
+      seasonNumber: searchSeasonNumber,
+      multiSeason: found.release.parsed.seasonNumbers.length > 1,
     });
     return { status: "grabbed", title: result.title };
   } catch (error) {

@@ -7,8 +7,10 @@ const app = await buildServer(config, { logger: true });
 // Video streams are handed to the browser as absolute Jellyfin URLs, so the
 // effective public address matters when playback fails on another device.
 app.log.info(
-  `video streams resolve to ${config.jellyfinPublicUrl}` +
-    (config.lanAddress ? ` (LAN address ${config.lanAddress})` : " (no LAN address detected)"),
+  config.jellyfinPublicUrlExplicit
+    ? `video streams resolve to ${config.jellyfinPublicUrl} (JELLYFIN_PUBLIC_URL)`
+    : `video streams follow the request host (fallback ${config.jellyfinPublicUrl})` +
+        (config.lanAddress ? `, LAN address ${config.lanAddress}` : ""),
 );
 
 try {

@@ -111,7 +111,7 @@ export function ShowPage({ source, id }: { source: ShowSource; id: string }) {
 
   // Share the chooser's cache key so opening it does not trigger another fetch.
   const seasonReleasesQuery = useQuery<CachedReleasesResponse>({
-    queryKey: ["season-releases", sonarrSeriesId, selectedSeason],
+    queryKey: ["season-releases", sonarrSeriesId, selectedSeason, null],
     queryFn: () =>
       fetchSeasonReleases(sonarrSeriesId as number, selectedSeason as number),
     enabled:

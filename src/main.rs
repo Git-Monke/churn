@@ -402,6 +402,28 @@ fn setup_jellyfin(dry_run: bool) -> io::Result<()> {
             return Err(err);
         }
     }
+
+    let progress = spinner();
+    progress.start("checking Jellyfin tailnet access");
+    match client.ensure_tailnet_access(&api_key) {
+        Ok(true) => {
+            progress.stop("Jellyfin now allows Tailscale clients");
+            let progress = spinner();
+            progress.start("restarting Jellyfin to apply network settings");
+            match client.restart_and_wait(&api_key, Duration::from_secs(120)) {
+                Ok(()) => progress.stop("Jellyfin restarted"),
+                Err(err) => {
+                    progress.stop("could not restart Jellyfin");
+                    return Err(err);
+                }
+            }
+        }
+        Ok(false) => progress.stop("Jellyfin already allows Tailscale clients"),
+        Err(err) => {
+            progress.stop("could not allow Tailscale clients in Jellyfin");
+            return Err(err);
+        }
+    }
     Ok(())
 }
 

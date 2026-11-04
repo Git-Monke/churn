@@ -40,7 +40,9 @@ downloads under `/data` and incomplete files under `/data/incomplete`, so a
 root-level library makes Jellyfin index media that is still downloading.
 Churn creates or repairs the `Movies` and `Shows` libraries at
 `/data/media/movies` and `/data/media/tv`, removes any `/data` library path it
-finds, and is safe to rerun.
+finds, and is safe to rerun. It also adds the private LAN ranges and Tailscale's
+`100.64.0.0/10` range to Jellyfin's LAN networks, so tailnet clients can stream
+video directly from Jellyfin while remote access stays disabled.
 
 ## Configuration
 

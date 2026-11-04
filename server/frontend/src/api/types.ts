@@ -420,6 +420,8 @@ export interface CachedReleasesResponse {
   service: "radarr" | "sonarr";
   targetId: number;
   seasonNumber?: number;
+  /** Set when the season results were narrowed to one episode. */
+  episodeNumber?: number;
   state: "ready" | "searching" | "error";
   refreshing: boolean;
   detail?: string;

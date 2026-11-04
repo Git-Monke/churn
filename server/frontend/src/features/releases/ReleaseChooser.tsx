@@ -10,10 +10,12 @@ import {
 import { toast } from "sonner";
 
 import {
+  fetchEpisodeReleases,
   fetchMovieReleases,
   fetchSeasonReleases,
   grabMovieRelease,
   grabShowRelease,
+  refreshEpisodeReleases,
   refreshMovieReleases,
   refreshSeasonReleases,
 } from "@/api/client";
@@ -34,6 +36,8 @@ type ReleaseChooserProps =
       kind: "series";
       seriesId: number;
       seasonNumber: number;
+      /** Narrow the season search to one episode. */
+      episodeNumber?: number;
       title?: string;
       onGrabbed?: () => void;
     }
@@ -47,16 +51,19 @@ type ReleaseChooserProps =
 export function ReleaseChooser(props: ReleaseChooserProps) {
   const queryClient = useQueryClient();
   const isSeries = props.kind === "series";
+  const episodeNumber = isSeries ? props.episodeNumber : undefined;
   const queryKey = isSeries
-    ? ["season-releases", props.seriesId, props.seasonNumber]
+    ? ["season-releases", props.seriesId, props.seasonNumber, episodeNumber ?? null]
     : ["movie-releases", props.movieId];
 
   const releasesQuery = useQuery<CachedReleasesResponse>({
     queryKey,
     queryFn: () =>
-      isSeries
-        ? fetchSeasonReleases(props.seriesId, props.seasonNumber)
-        : fetchMovieReleases(props.movieId),
+      !isSeries
+        ? fetchMovieReleases(props.movieId)
+        : episodeNumber === undefined
+          ? fetchSeasonReleases(props.seriesId, props.seasonNumber)
+          : fetchEpisodeReleases(props.seriesId, props.seasonNumber, episodeNumber),
     staleTime: 30_000,
     refetchOnWindowFocus: false,
     refetchInterval: (query) =>
@@ -67,9 +74,11 @@ export function ReleaseChooser(props: ReleaseChooserProps) {
 
   const refreshMutation = useMutation({
     mutationFn: () =>
-      isSeries
-        ? refreshSeasonReleases(props.seriesId, props.seasonNumber)
-        : refreshMovieReleases(props.movieId),
+      !isSeries
+        ? refreshMovieReleases(props.movieId)
+        : episodeNumber === undefined
+          ? refreshSeasonReleases(props.seriesId, props.seasonNumber)
+          : refreshEpisodeReleases(props.seriesId, props.seasonNumber, episodeNumber),
     onSuccess: (data) => {
       queryClient.setQueryData(queryKey, data);
       toast.info("Refreshing release options…");
@@ -140,7 +149,9 @@ export function ReleaseChooser(props: ReleaseChooserProps) {
       <div className="flex flex-wrap items-start justify-between gap-3 px-4">
         <div className="flex flex-col gap-1">
           <h3 className="font-heading text-base font-semibold">
-            {isSeries ? `Releases for ${seasonName(props.seasonNumber)}` : "Available releases"}
+            {isSeries
+              ? `Releases for ${releaseTargetLabel(props.seasonNumber, episodeNumber)}`
+              : "Available releases"}
           </h3>
           <p className="text-sm text-muted-foreground">
             {data?.state === "searching"
@@ -420,7 +431,13 @@ function defaultTier(groups: ReleaseGroup[]): number {
   return known[0] ?? groups[0]?.tier ?? 99;
 }
 
-function seasonName(seasonNumber: number): string {
+function releaseTargetLabel(
+  seasonNumber: number,
+  episodeNumber?: number,
+): string {
+  if (episodeNumber !== undefined) {
+    return `S${String(seasonNumber).padStart(2, "0")}E${String(episodeNumber).padStart(2, "0")}`;
+  }
   return seasonNumber === 0 ? "Specials" : `Season ${seasonNumber}`;
 }
 
