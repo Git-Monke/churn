@@ -97,12 +97,11 @@ impl Question {
     /// has already claimed, and ports that are currently in use.
     pub fn ask_port(self, port: Port, suggested: u16, reserved: &[u16]) -> io::Result<String> {
         let mut default = suggested.to_string();
-        let placeholder = port.default_port().to_string();
         loop {
-            let value: String = input(self.label())
-                .placeholder(&placeholder)
-                .default_input(&default)
-                .interact()?;
+            // Let cliclack render the default as "8081 (default)". Setting a
+            // separate placeholder here made the prompt show the conventional
+            // port (8080) while Enter actually submitted the suggested one.
+            let value: String = input(self.label()).default_input(&default).interact()?;
             let candidate = match ports::validate_port(value.trim()) {
                 Ok(candidate) => candidate,
                 Err(message) => {
