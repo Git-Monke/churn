@@ -2,7 +2,6 @@
 services:
   gluetun:
     image: qmcgaw/gluetun:v3.41.3
-    container_name: gluetun
     cap_add:
       - NET_ADMIN
     devices:
@@ -41,7 +40,6 @@ services:
   # Gluetun's local resolver. qBittorrent, Prowlarr and FlareSolverr wait for it.
   vpn-check:
     image: curlimages/curl:8.23.0
-    container_name: vpn-check
     network_mode: "service:gluetun"
     user: "0:0"
     environment:
@@ -62,7 +60,6 @@ services:
   # published on the host loopback only; the churn backend is the only client.
   vpn-status:
     image: curlimages/curl:8.23.0
-    container_name: vpn-status
     network_mode: "service:gluetun"
     user: "0:0"
     environment:
@@ -88,7 +85,6 @@ services:
   # Shares Gluetun's network namespace so browser traffic also exits the VPN.
   flaresolverr:
     image: flaresolverr/flaresolverr:v3.5.2
-    container_name: flaresolverr
     network_mode: "service:gluetun"
     depends_on:
       gluetun:
@@ -107,7 +103,6 @@ services:
   # One-shot: seeds qBittorrent's config with a stable API key before it starts.
   qbittorrent-init:
     image: curlimages/curl:8.23.0
-    container_name: qbittorrent-init
     network_mode: "none"                # writes config only; no network at all
     user: "0:0"
     environment:
@@ -121,7 +116,6 @@ services:
 
   qbittorrent:
     image: lscr.io/linuxserver/qbittorrent:5.3.0_v2.1.2-ls485
-    container_name: qbittorrent
     network_mode: "service:gluetun"      # all traffic exits through the VPN; kill switch included
     depends_on:
       gluetun:
@@ -143,7 +137,6 @@ services:
 
   prowlarr:
     image: lscr.io/linuxserver/prowlarr:2.7.0.5723-ls166
-    container_name: prowlarr
     network_mode: "service:gluetun"      # indexer traffic also exits through the VPN
     depends_on:
       gluetun:
@@ -163,7 +156,6 @@ services:
   # One-shot: wires qBittorrent, public indexers, and Sonarr/Radarr.
   prowlarr-init:
     image: curlimages/curl:8.23.0
-    container_name: prowlarr-init
     network_mode: "service:gluetun"      # localhost reaches Prowlarr and qBittorrent
     user: "0:0"
     environment:
