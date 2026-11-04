@@ -455,6 +455,25 @@ same host.
 cargo test
 ```
 
+### Releasing
+
+`Cargo.toml` is the single source of truth for the version. The `churn`
+binary embeds it (`CARGO_PKG_VERSION`) and CI refuses to publish an image whose
+`v*` tag does not match it. Use the helper so the version bump, lockfile, commit
+and tag cannot drift apart:
+
+```bash
+scripts/release.sh 0.1.4
+```
+
+That updates `Cargo.toml` and `Cargo.lock`, commits `Release v0.1.4`, creates
+the tag and pushes both. To check the files without releasing:
+
+```bash
+scripts/check-version.sh          # Cargo.toml <-> Cargo.lock
+scripts/check-version.sh v0.1.4   # ...and the tag
+```
+
 ### Documentation
 
 The stack notes are an mdBook in `docs/`. Markdown pages live in `docs/src/`.

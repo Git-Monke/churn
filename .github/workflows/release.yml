@@ -21,6 +21,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check release tag matches the Cargo version
+        run: scripts/check-version.sh "$GITHUB_REF_NAME"
+
       - uses: taiki-e/install-action@v2
         with:
           tool: cross
@@ -50,6 +53,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Check release tag matches the Cargo version
+        run: scripts/check-version.sh "$GITHUB_REF_NAME"
 
       # The churn binary pins <repo>:<CARGO_PKG_VERSION>. Never publish a
       # release whose matching image is missing or not anonymously pullable,
