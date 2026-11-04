@@ -16,6 +16,7 @@ use cliclack::{
     spinner,
 };
 
+use churn::assets;
 use churn::envfile;
 use churn::jellyfin::{self, Credentials, Jellyfin};
 use churn::live::LiveLog;
@@ -477,6 +478,7 @@ fn jellyfin_credentials(env: &envfile::EnvMap) -> io::Result<Credentials> {
 }
 
 fn write_stacks(chosen: &[Stack], answers: &Answers, dry_run: bool) -> io::Result<()> {
+    let root = envfile::root();
     let progress = spinner();
     for (index, stack) in chosen.iter().enumerate() {
         progress.start(format!(
@@ -486,11 +488,22 @@ fn write_stacks(chosen: &[Stack], answers: &Answers, dry_run: bool) -> io::Resul
             stack.key()
         ));
         if dry_run {
-            progress.stop(format!("would write {}", stack.env_path().display()));
+            progress.stop(format!(
+                "would write {} stack files and {}",
+                stack.key(),
+                stack.env_path().display()
+            ));
             continue;
         }
-        let path = stack.apply(answers)?;
-        progress.stop(format!("wrote {}", path.display()));
+        match assets::materialize(&root, *stack).and_then(|()| stack.apply(answers)) {
+            Ok(path) => {
+                progress.stop(format!("wrote stack files and {}", path.display()));
+            }
+            Err(err) => {
+                progress.stop(format!("failed to write {} stack files", stack.key()));
+                return Err(err);
+            }
+        }
     }
     Ok(())
 }

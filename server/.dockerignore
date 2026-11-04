@@ -1,0 +1,18 @@
+# Dependencies are installed inside the build stage.
+node_modules/
+**/node_modules/
+
+# Build output is produced inside the build stage.
+backend/dist/
+frontend/dist/
+**/*.tsbuildinfo
+
+# Generated install state and secrets must never enter an image layer.
+.env
+config/
+cache/
+.churn-cache/
+
+# Local noise.
+**/*.log
+.DS_Store
