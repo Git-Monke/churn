@@ -52,6 +52,37 @@ pub struct TreeStats {
     pub links: u64,
 }
 
+/// One `rsync --info=progress2` update.
+///
+/// rsync reports its own percentage, which is relative to the bytes it still
+/// has to transfer rather than to the whole tree, so a resumed copy can sit at
+/// `100%` after a few megabytes. Callers should therefore drive a bar from
+/// `percent` and treat the absolute figures as informational.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Progress2 {
+    /// Bytes transferred so far.
+    pub bytes: u64,
+    /// rsync's own completion percentage, 0..=100.
+    pub percent: u8,
+    /// Transfer rate exactly as rsync printed it, e.g. `3.00GB/s`.
+    pub rate: String,
+    /// Remaining time exactly as rsync printed it, e.g. `0:00:12`.
+    pub eta: String,
+    /// Files transferred (`xfr#N`).
+    pub files_done: u64,
+    /// Files still to check (`to-chk=L`).
+    pub files_left: u64,
+    /// Files in the transfer (`to-chk=L/T`).
+    pub files_total: u64,
+}
+
+/// One event from a `rsync` run, or a line it printed that was not progress.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CopyEvent<'a> {
+    Progress(Progress2),
+    Line(&'a str),
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct VerifyReport {
     pub files: u64,
@@ -528,8 +559,12 @@ fn verify_into(source: &Path, destination: &Path, report: &mut VerifyReport) -> 
 ///
 /// rsync is preferred because `--partial` makes an interrupted run resumable.
 /// A plain `cp -a` fallback preserves ownership and permissions but restarts
-/// the affected file.
-pub fn copy(source: &Path, destination: &Path, on_line: &mut dyn FnMut(&str)) -> io::Result<()> {
+/// the affected file, and never reports progress.
+pub fn copy(
+    source: &Path,
+    destination: &Path,
+    on_event: &mut dyn FnMut(CopyEvent<'_>),
+) -> io::Result<()> {
     fs::create_dir_all(destination)?;
 
     let command = if system::which("rsync") {
@@ -553,12 +588,24 @@ pub fn copy(source: &Path, destination: &Path, on_line: &mut dyn FnMut(&str)) ->
         command
     };
 
-    let output = system::run_streaming(command, on_line)?;
+    let mut emit = |line: &str| match parse_progress2(line) {
+        Some(progress) => on_event(CopyEvent::Progress(progress)),
+        None => on_event(CopyEvent::Line(line)),
+    };
+    let output = system::run_streaming(command, &mut emit)?;
     if output.status.success() {
         return Ok(());
     }
 
-    let detail = output.tail.join("\n");
+    // Progress frames would fill the whole tail and push the actual complaint
+    // out of the 200 retained lines.
+    let detail = output
+        .tail
+        .iter()
+        .filter(|line| parse_progress2(line).is_none())
+        .cloned()
+        .collect::<Vec<_>>()
+        .join("\n");
     let mut message = format!(
         "copy from {} to {} failed ({})",
         source.display(),
@@ -574,6 +621,76 @@ pub fn copy(source: &Path, destination: &Path, on_line: &mut dyn FnMut(&str)) ->
         message.push_str(&explanation);
     }
     Err(io::Error::other(message))
+}
+
+/// Parse one `--info=progress2` update, or `None` for any other output.
+///
+/// rsync prints these as `\r`-terminated frames that look like
+///
+/// ```text
+///      1,234,567  45%    3.00GB/s    0:00:12 (xfr#12, to-chk=48/60)
+/// ```
+///
+/// The shape is matched strictly: anything unrecognised (file names, `deleting
+/// …`, `rsync error: …`, rsync's closing `sent … bytes` summary) is reported as
+/// a plain [`CopyEvent::Line`] instead of being mistaken for progress.
+pub fn parse_progress2(line: &str) -> Option<Progress2> {
+    let mut fields = line.split_whitespace();
+    let bytes = parse_grouped_u64(fields.next()?)?;
+    let percent = fields.next()?.strip_suffix('%')?.parse::<u8>().ok()?;
+    if percent > 100 {
+        return None;
+    }
+    let rate = fields.next()?;
+    if !rate.ends_with("B/s") {
+        return None;
+    }
+    let eta = fields.next()?;
+    if !is_eta(eta) {
+        return None;
+    }
+
+    let mut progress = Progress2 {
+        bytes,
+        percent,
+        rate: rate.to_string(),
+        eta: eta.to_string(),
+        ..Progress2::default()
+    };
+    for field in fields {
+        if let Some(value) = field.strip_prefix("(xfr#") {
+            progress.files_done = value.trim_end_matches(',').parse().ok()?;
+        } else if let Some(value) = field.strip_prefix("to-chk=") {
+            let (left, total) = value.trim_end_matches(')').split_once('/')?;
+            progress.files_left = left.parse().ok()?;
+            progress.files_total = total.parse().ok()?;
+        }
+    }
+    Some(progress)
+}
+
+/// A digit run with rsync's thousands separators, e.g. `41,943,040`.
+fn parse_grouped_u64(field: &str) -> Option<u64> {
+    let digits: String = field.chars().filter(|ch| *ch != ',').collect();
+    if digits.is_empty() || !digits.chars().all(|ch| ch.is_ascii_digit()) {
+        return None;
+    }
+    digits.parse().ok()
+}
+
+/// `H:MM:SS` or `MM:SS`, both of which rsync prints.
+fn is_eta(field: &str) -> bool {
+    let mut parts = field.split(':');
+    let (Some(first), second, third) = (parts.next(), parts.next(), parts.next()) else {
+        return false;
+    };
+    if parts.next().is_some() || second.is_none() || third.is_none() {
+        return false;
+    }
+    [Some(first), second, third]
+        .into_iter()
+        .flatten()
+        .all(|part| !part.is_empty() && part.chars().all(|ch| ch.is_ascii_digit()))
 }
 
 /// Explain the common "files look complete but rsync still failed" case.
@@ -953,6 +1070,92 @@ mod tests {
             assert_eq!(env.get("PUID").map(String::as_str), Some("1000"));
             assert_eq!(env.get("KEEP").map(String::as_str), Some("yes"));
         }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    fn progress(line: &str) -> Progress2 {
+        parse_progress2(line).unwrap_or_else(|| panic!("not progress: {line:?}"))
+    }
+
+    #[test]
+    fn progress_frames_are_parsed_with_their_file_counts() {
+        let frame = progress("    1,234,567  45%    3.00GB/s    0:00:12 (xfr#12, to-chk=48/60)");
+        assert_eq!(
+            frame,
+            Progress2 {
+                bytes: 1_234_567,
+                percent: 45,
+                rate: "3.00GB/s".to_string(),
+                eta: "0:00:12".to_string(),
+                files_done: 12,
+                files_left: 48,
+                files_total: 60,
+            }
+        );
+    }
+
+    #[test]
+    fn progress_frames_without_file_counts_keep_zeroes() {
+        let frame = progress("0   0%    0.00kB/s    0:00:00");
+        assert_eq!(frame.bytes, 0);
+        assert_eq!(frame.percent, 0);
+        assert_eq!(frame.files_total, 0);
+
+        // The final frame rsync emits for a fully skipped resume.
+        let frame = progress("0 100%    0.00kB/s    0:00:00 (xfr#0, to-chk=0/0)");
+        assert_eq!(frame.percent, 100);
+        assert_eq!(frame.files_total, 0);
+    }
+
+    #[test]
+    fn progress_survives_a_resumed_copy_finishing_early() {
+        let frame = progress("      2,097,152 100%    1.92GB/s    0:00:00 (xfr#1, to-chk=0/3)");
+        assert_eq!(frame.bytes, 2_097_152);
+        assert_eq!(frame.percent, 100);
+    }
+
+    #[test]
+    fn non_progress_output_is_never_mistaken_for_progress() {
+        for line in [
+            "",
+            "deleting media/movies/film.mkv",
+            "skipping directory incomplete",
+            "sending incremental file list",
+            "sent 41,943,040 bytes  received 35 bytes  83,886,150.00 bytes/sec",
+            "total size is 41,943,040  speedup is 1.00",
+            "rsync: [sender] read errors mapping \"/data/a.mkv\": Input/output error (5)",
+            "rsync error: some files/attrs were not transferred (code 23) at main.c:1",
+            "0000 50% 1.00MB/s not-a-time",
+            "123 101% 1.00MB/s 0:00:00",
+            "123 45 1.00MB/s 0:00:00",
+        ] {
+            assert!(
+                parse_progress2(line).is_none(),
+                "{line:?} parsed as progress"
+            );
+        }
+    }
+
+    #[test]
+    fn copy_reports_progress_and_passes_other_lines_through() {
+        let (root, source, destination) = fixture("events");
+        let mut seen: Vec<String> = Vec::new();
+        copy(&source, &destination, &mut |event| match event {
+            CopyEvent::Progress(progress) => seen.push(format!("progress {}", progress.percent)),
+            CopyEvent::Line(line) => seen.push(format!("line {line}")),
+        })
+        .unwrap();
+        // rsync reports progress; cp -a in the fallback does not. Only assert
+        // the split is consistent with whichever engine ran.
+        if system::which("rsync") {
+            assert!(
+                seen.iter().any(|entry| entry.starts_with("progress ")),
+                "rsync produced no progress events: {seen:?}"
+            );
+        } else {
+            assert!(seen.iter().all(|entry| entry.starts_with("line ")));
+        }
+        assert!(destination.join("media/movies/film.mkv").is_file());
         fs::remove_dir_all(root).unwrap();
     }
 

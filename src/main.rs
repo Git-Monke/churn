@@ -911,6 +911,31 @@ fn uninstall(args: Args) -> io::Result<bool> {
 
 // ---------------------------------------------------------------- migrate
 
+/// rsync's percentage is the only unit the copy bar uses, so its length is 100.
+const COPY_PROGRESS_LEN: u64 = 100;
+
+/// The informational half of the copy bar.
+///
+/// No total is shown: rsync's `--info=progress2` counts only the bytes and files
+/// that still need transferring, so on a resumed copy the totals from the plan
+/// and from rsync disagree.
+fn copy_detail(progress: &migrate::Progress2) -> String {
+    let mut detail = format!(
+        "{} · {} · ETA {}",
+        migrate::format_bytes(progress.bytes),
+        progress.rate,
+        progress.eta
+    );
+    if progress.files_total > 0 {
+        detail.push_str(&format!(
+            " · {}/{} files",
+            progress.files_total.saturating_sub(progress.files_left),
+            progress.files_total
+        ));
+    }
+    detail
+}
+
 fn show_migration_plan(plan: &migrate::Plan, args: &Args) -> io::Result<()> {
     let mut lines = String::new();
     lines.push_str(&format!("{:<14} {}\n", "from", plan.source.display()));
@@ -1134,12 +1159,29 @@ fn migrate_storage(args: &Args) -> io::Result<bool> {
         return Err(with_restart(err, restart));
     }
 
-    let mut live = LiveLog::start(format!(
-        "copying {} to {}",
-        plan.source.display(),
-        plan.destination.display()
-    ));
-    let copied = migrate::copy(&plan.source, &plan.destination, &mut |line| live.push(line));
+    // rsync reports `--info=progress2` frames, which the caller renders as a
+    // bar. The `cp -a` fallback prints nothing, so it keeps the spinner.
+    let bar = system::which("rsync");
+    let mut live = if bar {
+        LiveLog::progress(
+            format!("copying {}", plan.destination.display()),
+            COPY_PROGRESS_LEN,
+        )
+    } else {
+        LiveLog::start(format!(
+            "copying {} to {}",
+            plan.source.display(),
+            plan.destination.display()
+        ))
+    };
+    let copied = migrate::copy(&plan.source, &plan.destination, &mut |event| match event {
+        migrate::CopyEvent::Progress(progress) => {
+            live.update(progress.percent as u64, copy_detail(&progress));
+        }
+        // Non-progress rsync output is captured in the error tail instead of
+        // being rendered live; see `migrate::copy`.
+        migrate::CopyEvent::Line(_) => {}
+    });
     if let Err(err) = copied {
         live.error("copy failed; the old data is untouched");
         let restart = start_stacks(&stacks, false);

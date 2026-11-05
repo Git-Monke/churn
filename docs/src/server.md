@@ -63,6 +63,12 @@ verifies every file's size and symlink target, updates `DATA_DIR`, `PUID` and
 `PGID` in both `.env` files, restarts the stacks and runs the Jellyfin health
 check.
 
+The copy shows live progress from rsync: bytes moved, transfer rate, ETA and how
+many files are left to check. The percentage is rsync's own, so it describes the
+bytes still to transfer — a resumed copy can reach 100% early. When rsync is not
+installed the `cp -a` fallback runs behind a spinner instead. If churn's output
+is redirected to a file, only one progress line per 10% is written.
+
 The old copy is kept by default. `--move` (alias `--delete-old`) removes it only
 after the copy has been verified and the services are running again. Each
 stack's previous file is saved as `.env.churn-migrate.bak` and the command
