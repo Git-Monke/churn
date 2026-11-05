@@ -570,7 +570,10 @@ function EpisodeRow({
 
           {download ? (
             <div className="flex flex-col gap-1.5">
-              <Progress value={download.progress} label={`${episode.title} download progress`} />
+              <Progress
+                value={download.progress}
+                aria-label={`${episode.title} download progress`}
+              />
               <div className="text-xs text-muted-foreground">
                 {download.seasonPack ? "Season pack · " : ""}
                 {download.progress}% complete

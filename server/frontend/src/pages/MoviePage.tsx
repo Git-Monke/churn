@@ -19,6 +19,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DownloadStats } from "@/features/download/DownloadStats";
+import { CancelRequestDialog } from "@/features/library/CancelRequestDialog";
 import { CancelMovieDownloadDialog } from "@/features/movie/CancelMovieDownloadDialog";
 import { ReleaseChooser } from "@/features/releases/ReleaseChooser";
 
@@ -30,6 +31,7 @@ export function MoviePage({
   id: string;
 }) {
   const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelRequestOpen, setCancelRequestOpen] = useState(false);
   const [awaitingDownload, setAwaitingDownload] = useState(false);
   // Briefly disable Cancel after a grab. The release chooser is replaced by
   // the download card under the cursor, so a second click (double-click) could
@@ -56,6 +58,14 @@ export function MoviePage({
   const download = liveDownload?.ready
     ? liveDownload.download
     : movieQuery.data?.download;
+  // A Radarr request with no Jellyfin copy and nothing downloading is waiting on
+  // a release pick, which is also the only state where cancelling the request
+  // makes sense from this page.
+  const radarrId = movieQuery.data?.radarrId;
+  const cancelRequestTarget =
+    !download && movieQuery.data?.jellyfinId === undefined && radarrId !== undefined
+      ? ({ service: "radarr", id: radarrId } as const)
+      : undefined;
 
   useEffect(() => {
     if (download) {
@@ -137,16 +147,31 @@ export function MoviePage({
             // Playable: the header carries the only action (Play), so no torrents.
             null
           ) : movieQuery.data.radarrId !== undefined ? (
-            <ReleaseChooser
-              kind="movie"
-              movieId={movieQuery.data.radarrId}
-              title={movieQuery.data.movie.title}
-              onGrabbed={() => {
-                setCancelReady(false);
-                setAwaitingDownload(true);
-                void movieQuery.refetch();
-              }}
-            />
+            <div className="flex flex-col gap-3">
+              <ReleaseChooser
+                kind="movie"
+                movieId={movieQuery.data.radarrId}
+                title={movieQuery.data.movie.title}
+                onGrabbed={() => {
+                  setCancelReady(false);
+                  setAwaitingDownload(true);
+                  void movieQuery.refetch();
+                }}
+              />
+              {cancelRequestTarget ? (
+                <div className="flex justify-end">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                    onClick={() => setCancelRequestOpen(true)}
+                  >
+                    <Trash2Icon data-icon="inline-start" />
+                    Cancel request
+                  </Button>
+                </div>
+              ) : null}
+            </div>
           ) : (
             <Alert>
               <CircleAlertIcon />
@@ -163,6 +188,14 @@ export function MoviePage({
               onOpenChange={setCancelOpen}
               source={source}
               id={id}
+              title={movieQuery.data.movie.title}
+            />
+          ) : null}
+          {cancelRequestTarget ? (
+            <CancelRequestDialog
+              open={cancelRequestOpen}
+              onOpenChange={setCancelRequestOpen}
+              target={cancelRequestTarget}
               title={movieQuery.data.movie.title}
             />
           ) : null}
@@ -256,7 +289,7 @@ function MovieDownloadCard({
             Cancel download
           </Button>
         </div>
-        <Progress value={download.progress} label="Movie download progress" />
+        <Progress value={download.progress} aria-label="Movie download progress" />
         <div className="text-xs text-muted-foreground">
           {download.progress}% complete
         </div>

@@ -5,17 +5,17 @@ import {
   CircleAlertIcon,
   FilmIcon,
   SearchIcon,
-  UserRoundIcon,
   XIcon,
 } from "lucide-react";
 
 import { fetchActivity, fetchLibrary, fetchRequestedLibrary } from "@/api/client";
 import type {
   ActivityServiceState,
+  LibraryResponse,
   ReleaseRepickEvent,
   RequestedLibraryServiceState,
 } from "@/api/types";
-import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
   Empty,
@@ -31,16 +31,17 @@ import {
   InputGroupButton,
   InputGroupInput,
 } from "@/components/ui/input-group";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Toggle } from "@/components/ui/toggle";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useAuth } from "@/features/auth/AuthProvider";
+import { ContinueWatching } from "@/features/library/ContinueWatching";
 import { LibraryGrid, LibraryGridSkeleton } from "@/features/library/LibraryGrid";
+import { OnTheWay } from "@/features/library/OnTheWay";
 import { searchLibraryEntries } from "@/features/library/library-search";
 import { LibraryStateNotice } from "@/features/library/LibraryStateNotice";
-import {
-  mergeLibraryEntries,
-  type LibraryEntry,
-} from "@/features/library/library-entries";
+import { mergeLibraryEntries } from "@/features/library/library-entries";
 import { useLibraryScanState } from "@/features/library/use-library-scan-state";
+import { cn } from "@/lib/utils";
 
 type Filter = "all" | "Movie" | "Series";
 
@@ -85,9 +86,26 @@ export function LibraryPage({ jellyfinUrl }: { jellyfinUrl?: string }) {
     [activityQuery.data, libraryQuery.data, requestedQuery.data],
   );
   const displayEntries = useLibraryScanState(entries);
+  // Shows always live in the grid, even before anything is playable: their page
+  // is where seasons and releases get picked. Movies only join the grid once
+  // Jellyfin has them; until then they are "On the way".
+  const browseable = useMemo(
+    () =>
+      displayEntries.filter(
+        (entry) => entry.library !== undefined || entry.type === "Series",
+      ),
+    [displayEntries],
+  );
+  const onTheWay = useMemo(
+    () =>
+      displayEntries.filter(
+        (entry) => entry.activity !== undefined || !browseable.includes(entry),
+      ),
+    [browseable, displayEntries],
+  );
   const searched = useMemo(
-    () => searchLibraryEntries(displayEntries, query),
-    [displayEntries, query],
+    () => searchLibraryEntries(browseable, query),
+    [browseable, query],
   );
   const mineActive = addedByMe && currentUserId !== undefined;
   const scoped = useMemo(
@@ -105,8 +123,6 @@ export function LibraryPage({ jellyfinUrl }: { jellyfinUrl?: string }) {
     [filter, scoped],
   );
   const searching = query.trim().length > 0;
-  const narrowed = searching || mineActive;
-  const activeCount = displayEntries.filter((entry) => entry.activity).length;
   const loading =
     (libraryQuery.isLoading || requestedQuery.isLoading || activityQuery.isLoading) &&
     displayEntries.length === 0;
@@ -137,7 +153,6 @@ export function LibraryPage({ jellyfinUrl }: { jellyfinUrl?: string }) {
   const requestedNotices = requestedQuery.data?.services.filter(
     (service) => service.state !== "ok" && service.state !== "unconfigured",
   );
-  const libraryOk = libraryQuery.data?.state === "ok";
   const activitySettled =
     activityQuery.data?.services.every((service) => service.state === "ok") ?? false;
   const requestedSettled =
@@ -147,179 +162,261 @@ export function LibraryPage({ jellyfinUrl }: { jellyfinUrl?: string }) {
   );
 
   return (
-    <section className="flex flex-col gap-4">
-      <div className="flex flex-col gap-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <h2 className="font-heading text-xl font-semibold tracking-tight">Library</h2>
-          {displayEntries.length > 0 ? (
-            <span className="text-sm text-muted-foreground">
-              {narrowed ? `${scoped.length} of ` : ""}
-              {displayEntries.length} {displayEntries.length === 1 ? "title" : "titles"}
-            </span>
-          ) : null}
-          {activeCount > 0 ? (
-            <span className="text-sm text-muted-foreground">
-              · {activeCount} active {activeCount === 1 ? "download" : "downloads"}
-            </span>
-          ) : null}
-        </div>
-        <p className="text-sm text-muted-foreground">
-          Playable titles from Jellyfin, your added library, and live qBittorrent downloads.
-        </p>
-      </div>
+    <div className="flex flex-col [&>*+*]:mt-10 [&>*+*]:border-t [&>*+*]:border-border [&>*+*]:pt-10">
+      <Alerts
+        libraryState={libraryQuery.data}
+        libraryError={libraryQuery.error}
+        requestedError={requestedQuery.error}
+        activityError={activityQuery.error}
+        requestedNotices={requestedNotices}
+        activityNotices={activityNotices}
+        repicks={repicks}
+        jellyfinUrl={jellyfinUrl}
+        onDismissRepick={(id) =>
+          setDismissedRepicks((current) => [...current, id])
+        }
+      />
 
-      {displayEntries.length > 0 ? (
-        <div className="flex flex-wrap items-center gap-2">
-          <InputGroup className="w-full sm:max-w-xs">
-            <InputGroupAddon>
-              <SearchIcon />
-            </InputGroupAddon>
-            <InputGroupInput
-              type="search"
-              value={query}
-              aria-label="Search the library"
-              placeholder="Search titles, years, networks…"
-              onChange={(event) => setQuery(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Escape") {
-                  setQuery("");
-                }
-              }}
-            />
-            {query ? (
-              <InputGroupAddon align="inline-end">
-                <InputGroupButton
-                  size="icon-xs"
-                  aria-label="Clear search"
-                  onClick={() => setQuery("")}
-                >
-                  <XIcon />
-                </InputGroupButton>
-              </InputGroupAddon>
-            ) : null}
-          </InputGroup>
-          {currentUserId ? (
-            <Button
-              type="button"
-              size="sm"
-              variant={mineActive ? "default" : "outline"}
-              aria-pressed={mineActive}
-              onClick={() => setAddedByMe((value) => !value)}
+      <ContinueWatching />
+
+      <OnTheWay entries={onTheWay} />
+
+      <section aria-labelledby="library-heading" className="flex flex-col gap-4">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+          <div className="flex items-baseline gap-2">
+            <h2
+              id="library-heading"
+              className="font-heading text-xl font-semibold tracking-tight"
             >
-              <UserRoundIcon data-icon="inline-start" />
-              Added by me
-            </Button>
-          ) : null}
-        </div>
-      ) : null}
+              Library
+            </h2>
+            <span className="text-sm text-muted-foreground">
+              {filtered.length} {filtered.length === 1 ? "title" : "titles"}
+            </span>
+          </div>
 
-      {libraryQuery.error && !libraryQuery.data ? (
+          <div className="ml-auto flex flex-wrap items-center gap-3">
+            <ToggleGroup
+              type="single"
+              value={filter}
+              onValueChange={(value) => setLibraryFilter(value, setFilter)}
+              aria-label="Filter the library"
+              className="gap-1 bg-card p-1"
+            >
+              {FILTERS.map((option) => (
+                <ToggleGroupItem
+                  key={option.value}
+                  value={option.value}
+                  className={cn(
+                    "text-muted-foreground",
+                    filter === option.value && "bg-secondary text-foreground",
+                  )}
+                >
+                  {option.label}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
+
+            {currentUserId ? (
+              <Toggle
+                variant="outline"
+                pressed={mineActive}
+                onPressedChange={setAddedByMe}
+                className={cn(mineActive && "border-primary")}
+              >
+                Added by me
+              </Toggle>
+            ) : null}
+
+            {browseable.length > 0 ? (
+              <InputGroup className="w-full bg-card sm:w-65">
+                <InputGroupAddon>
+                  <SearchIcon />
+                </InputGroupAddon>
+                <InputGroupInput
+                  type="search"
+                  value={query}
+                  aria-label="Search library"
+                  placeholder="Search library"
+                  onChange={(event) => setQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      setQuery("");
+                    }
+                  }}
+                />
+                {query ? (
+                  <InputGroupAddon align="inline-end">
+                    <InputGroupButton
+                      size="icon-xs"
+                      aria-label="Clear search"
+                      onClick={() => setQuery("")}
+                    >
+                      <XIcon />
+                    </InputGroupButton>
+                  </InputGroupAddon>
+                ) : null}
+              </InputGroup>
+            ) : null}
+          </div>
+        </div>
+
+        {loading ? <LibraryGridSkeleton /> : null}
+
+        {!loading && filtered.length > 0 ? (
+          <LibraryGrid entries={filtered} />
+        ) : null}
+
+        {!loading && filtered.length === 0 && browseable.length > 0 ? (
+          <NoMatches
+            query={searching ? query.trim() : undefined}
+            mine={mineActive}
+            filter={filter}
+            onClearSearch={() => setQuery("")}
+            onShowEveryone={() => setAddedByMe(false)}
+          />
+        ) : null}
+
+        {!loading &&
+        browseable.length === 0 &&
+        activityQuery.data &&
+        activitySettled &&
+        requestedSettled ? (
+          <EmptyLibrary />
+        ) : null}
+      </section>
+    </div>
+  );
+}
+
+const FILTERS = [
+  { value: "all", label: "All" },
+  { value: "Movie", label: "Movies" },
+  { value: "Series", label: "Shows" },
+] as const;
+
+function Alerts({
+  libraryState,
+  libraryError,
+  requestedError,
+  activityError,
+  requestedNotices,
+  activityNotices,
+  repicks,
+  jellyfinUrl,
+  onDismissRepick,
+}: {
+  libraryState?: LibraryResponse;
+  libraryError: Error | null;
+  requestedError: Error | null;
+  activityError: Error | null;
+  requestedNotices: RequestedLibraryServiceState[] | undefined;
+  activityNotices: ActivityServiceState[] | undefined;
+  repicks: ReleaseRepickEvent[];
+  jellyfinUrl?: string;
+  onDismissRepick: (id: number) => void;
+}) {
+  const hasLibraryError = Boolean(libraryError && !libraryState);
+  const hasRequestedError = Boolean(requestedError);
+  const hasActivityError = Boolean(activityError);
+  const showLibraryState = Boolean(libraryState && libraryState.state !== "ok");
+
+  if (
+    !hasLibraryError &&
+    !hasRequestedError &&
+    !hasActivityError &&
+    !showLibraryState &&
+    !requestedNotices?.length &&
+    !activityNotices?.length &&
+    repicks.length === 0
+  ) {
+    return null;
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      {hasLibraryError ? (
         <Alert variant="destructive">
           <CircleAlertIcon />
           <AlertTitle>Could not load the Jellyfin library</AlertTitle>
-          <AlertDescription>{libraryQuery.error.message}</AlertDescription>
+          <AlertDescription>{libraryError?.message}</AlertDescription>
         </Alert>
       ) : null}
-      {requestedQuery.error && !requestedQuery.data ? (
+      {hasRequestedError ? (
         <Alert variant="destructive">
           <CircleAlertIcon />
           <AlertTitle>Could not load requested titles</AlertTitle>
-          <AlertDescription>{requestedQuery.error.message}</AlertDescription>
+          <AlertDescription>{requestedError?.message}</AlertDescription>
         </Alert>
       ) : null}
-      {activityQuery.error && !activityQuery.data ? (
+      {hasActivityError ? (
         <Alert variant="destructive">
           <CircleAlertIcon />
           <AlertTitle>Could not load active downloads</AlertTitle>
-          <AlertDescription>{activityQuery.error.message}</AlertDescription>
+          <AlertDescription>{activityError?.message}</AlertDescription>
         </Alert>
       ) : null}
-
       {requestedNotices?.map((service) => (
         <RequestedServiceNotice key={service.id} service={service} />
       ))}
       {activityNotices?.map((service) => (
         <ActivityServiceNotice key={service.id} service={service} />
       ))}
-
       {repicks.length > 0 ? (
-        <RepickNotice
-          events={repicks}
-          onDismiss={(id) => setDismissedRepicks((current) => [...current, id])}
-        />
+        <RepickNotice events={repicks} onDismiss={onDismissRepick} />
       ) : null}
-
-      {libraryQuery.data && libraryQuery.data.state !== "ok" ? (
-        <LibraryStateNotice library={libraryQuery.data} jellyfinUrl={jellyfinUrl} />
+      {showLibraryState && libraryState ? (
+        <LibraryStateNotice library={libraryState} jellyfinUrl={jellyfinUrl} />
       ) : null}
+    </div>
+  );
+}
 
-      {loading ? <LibraryGridSkeleton /> : null}
-
-      {!loading && displayEntries.length > 0 ? (
-        <Tabs value={filter} onValueChange={(value) => setLibraryFilter(value, setFilter)}>
-          <TabsList>
-            <TabsTrigger value="all">All ({scoped.length})</TabsTrigger>
-            <TabsTrigger value="Movie">{`Movies (${countType(scoped, "Movie")})`}</TabsTrigger>
-            <TabsTrigger value="Series">{`Series (${countType(scoped, "Series")})`}</TabsTrigger>
-          </TabsList>
-          <TabsContent value={filter}>
-            {filtered.length > 0 ? (
-              <LibraryGrid entries={filtered} />
-            ) : (
-              <Empty>
-                <EmptyHeader>
-                  <EmptyMedia variant="icon">
-                    <FilmIcon />
-                  </EmptyMedia>
-                  <EmptyTitle>
-                    {searching
-                      ? `No matches for “${query.trim()}”`
-                      : mineActive
-                        ? "Nothing added by you"
-                        : "Nothing here yet"}
-                  </EmptyTitle>
-                  <EmptyDescription>
-                    {searching
-                      ? `No ${filter === "Movie" ? "movies" : "series"} match your search${
-                          mineActive ? " in your additions" : ""
-                        }.`
-                      : mineActive
-                        ? "Nothing in this view was added by you."
-                        : `No ${filter === "Movie" ? "movies" : "series"} match this view.`}
-                  </EmptyDescription>
-                </EmptyHeader>
-                {searching ? (
-                  <EmptyContent>
-                    <Button variant="outline" size="sm" onClick={() => setQuery("")}>
-                      Clear search
-                    </Button>
-                  </EmptyContent>
-                ) : mineActive ? (
-                  <EmptyContent>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setAddedByMe(false)}
-                    >
-                      Show everyone&apos;s library
-                    </Button>
-                  </EmptyContent>
-                ) : null}
-              </Empty>
-            )}
-          </TabsContent>
-        </Tabs>
+function NoMatches({
+  query,
+  mine,
+  filter,
+  onClearSearch,
+  onShowEveryone,
+}: {
+  query?: string;
+  mine: boolean;
+  filter: Filter;
+  onClearSearch: () => void;
+  onShowEveryone: () => void;
+}) {
+  const typeLabel = filter === "Movie" ? "movies" : filter === "Series" ? "shows" : "titles";
+  return (
+    <Empty>
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <FilmIcon />
+        </EmptyMedia>
+        <EmptyTitle>
+          {query ? `No matches for “${query}”` : mine ? "Nothing added by you" : "Nothing here yet"}
+        </EmptyTitle>
+        <EmptyDescription>
+          {query
+            ? `No ${typeLabel} match your search${mine ? " in your additions" : ""}.`
+            : mine
+              ? "Nothing in this view was added by you."
+              : `No ${typeLabel} match this view.`}
+        </EmptyDescription>
+      </EmptyHeader>
+      {query ? (
+        <EmptyContent>
+          <Button variant="outline" size="sm" onClick={onClearSearch}>
+            Clear search
+          </Button>
+        </EmptyContent>
+      ) : mine ? (
+        <EmptyContent>
+          <Button variant="outline" size="sm" onClick={onShowEveryone}>
+            Show everyone&apos;s library
+          </Button>
+        </EmptyContent>
       ) : null}
-
-      {!loading &&
-      displayEntries.length === 0 &&
-      libraryOk &&
-      activityQuery.data &&
-      activitySettled &&
-      requestedSettled ? (
-        <EmptyLibrary />
-      ) : null}
-    </section>
+    </Empty>
   );
 }
 
@@ -423,24 +520,20 @@ function EmptyLibrary() {
         </EmptyMedia>
         <EmptyTitle>Nothing in the library yet</EmptyTitle>
         <EmptyDescription>
-          Request a movie or show from Search, or add media under <code>/data/media</code> and
-          scan it in Jellyfin.
+          Request a movie or show from Find something new, or add media under{" "}
+          <code>/data/media</code> and scan it in Jellyfin.
         </EmptyDescription>
       </EmptyHeader>
       <EmptyContent>
         <Button asChild variant="outline" size="sm">
           <a href="#/search">
             <SearchIcon data-icon="inline-start" />
-            Search for something to watch
+            Find something new
           </a>
         </Button>
       </EmptyContent>
     </Empty>
   );
-}
-
-function countType(entries: LibraryEntry[], type: LibraryEntry["type"]): number {
-  return entries.filter((entry) => entry.type === type).length;
 }
 
 function setLibraryFilter(value: string, setFilter: (value: Filter) => void): void {
