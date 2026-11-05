@@ -8,7 +8,7 @@ tags:
     - playback
     - shows
 created_at: 2026-11-05T18:26:10Z
-updated_at: 2026-11-05T18:39:17Z
+updated_at: 2026-11-05T18:54:01Z
 ---
 
 ## Goal
@@ -117,10 +117,13 @@ intro range, and let `churn-daog` start its next-episode countdown at
 - Backend tests: client/mapping, cache persistence/corruption, single-episode
   and season warm-up, playback route segments.
 - `server/README.md` and `docs/src/web-ui.md`.
+- Player: time-derived **Skip intro** button above the native controls
+  (`PlayPage.tsx` + `lib/playback-segments.ts`), seeks to `intro.endSec` and
+  preserves play/pause. No unit test per review (the range check is trivial).
 
 ## Remaining
 
-- Player UI: `Skip intro` / `Skip recap` overlay in `PlayPage`.
+- Skip-recap and post-credits UI are deferred.
 - Optional: warm a season when a show page opens for shows downloaded outside
   Churn (Sonarr-native downloads will otherwise have no cached segments).
 - Feed `outro.startSec` into `churn-daog`'s countdown (tracked there).
@@ -134,5 +137,14 @@ intro range, and let `churn-daog` start its next-episode countdown at
 - [x] Map segments into `PlaybackItem` (backend + frontend types)
 - [x] Playback reads the cache only; never calls IntroDB
 - [x] Backend tests for client, cache, warm-up and playback route
-- [ ] Add the Skip intro / Skip recap overlay to `PlayPage`
+- [x] Add the Skip intro button to `PlayPage` (see `plans/skip-intro-button.md`)
 - [ ] Expose `segments.outro.startSec` so `churn-daog` can trigger its countdown at the credits
+
+## Plan
+
+Skip-intro button scope and implementation: `plans/skip-intro-button.md`.
+
+This change is deliberately limited to `segments.intro`: a time-derived
+`Skip intro` overlay that seeks to `intro.endSec`. Skip-recap, post-credits UI
+and fullscreen custom controls are follow-ups; `churn-daog` consumes
+`segments.outro.startSec` separately.

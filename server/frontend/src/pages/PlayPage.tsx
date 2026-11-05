@@ -7,6 +7,7 @@ import {
   CircleAlertIcon,
   LoaderCircleIcon,
   PlayIcon,
+  SkipForwardIcon,
   TriangleAlertIcon,
 } from "lucide-react";
 
@@ -34,6 +35,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { showHash, type ShowReturnContext } from "@/hooks/use-hash-route";
+import { isInsideSegment } from "@/lib/playback-segments";
 
 const TICKS_PER_SECOND = 10_000_000;
 const REPORT_INTERVAL_MS = 10_000;
@@ -75,6 +77,7 @@ export function PlayPage({ id, from }: { id: string; from?: ShowReturnContext })
   } | null>(null);
   const [switchingQuality, setSwitchingQuality] = useState(false);
   const [resumed, setResumed] = useState(false);
+  const [showSkipIntro, setShowSkipIntro] = useState(false);
   const [mediaIssue, setMediaIssue] = useState<MediaIssue | null>(null);
   const [recovering, setRecovering] = useState(false);
   const [recovery, setRecovery] = useState<{
@@ -182,6 +185,7 @@ export function PlayPage({ id, from }: { id: string; from?: ShowReturnContext })
     setRecovery(null);
     setRecovering(false);
     setMediaIssue(null);
+    setShowSkipIntro(false);
     return () => clearRecoveryTimer();
   }, [item?.id]);
 
@@ -514,6 +518,14 @@ export function PlayPage({ id, from }: { id: string; from?: ShowReturnContext })
     const video = videoRef.current;
     if (video) {
       positionRef.current = Math.round(video.currentTime * TICKS_PER_SECOND);
+      const intro = itemRef.current?.segments?.intro;
+      setShowSkipIntro(
+        !video.ended &&
+          !recoveringRef.current &&
+          !mediaIssue &&
+          intro !== undefined &&
+          isInsideSegment(intro, video.currentTime),
+      );
       if (
         !recoveringRef.current &&
         recoveryRef.current.attempts > 0 &&
@@ -533,6 +545,24 @@ export function PlayPage({ id, from }: { id: string; from?: ShowReturnContext })
       positionRef.current = Math.round(video.currentTime * TICKS_PER_SECOND);
       reportProgress(true);
     }
+  }
+
+  function skipIntro() {
+    const intro = itemRef.current?.segments?.intro;
+    const video = videoRef.current;
+    if (!intro || !video) {
+      return;
+    }
+    // The intro range may extend past the last playable frame on a damaged
+    // file; keep the seek just inside the duration in that case.
+    const duration = video.duration;
+    const target =
+      Number.isFinite(duration) && duration > 0.25
+        ? Math.min(intro.endSec, duration - 0.25)
+        : intro.endSec;
+    video.currentTime = target;
+    positionRef.current = Math.round(target * TICKS_PER_SECOND);
+    setShowSkipIntro(false);
   }
 
   function retryPlayback() {
@@ -749,7 +779,7 @@ export function PlayPage({ id, from }: { id: string; from?: ShowReturnContext })
         </Alert>
       ) : null}
 
-      <Card className="gap-0 overflow-hidden bg-black py-0">
+      <Card className="relative gap-0 overflow-hidden bg-black py-0">
         <video
           ref={videoRef}
           className="aspect-video w-full bg-black"
@@ -767,6 +797,19 @@ export function PlayPage({ id, from }: { id: string; from?: ShowReturnContext })
           onCanPlay={handleCanPlay}
           onError={handleVideoError}
         />
+        {showSkipIntro && !recovering && !mediaIssue ? (
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="absolute bottom-16 right-4 z-10 shadow-lg"
+            onClick={skipIntro}
+            aria-label="Skip intro"
+          >
+            <SkipForwardIcon className="size-4" />
+            Skip intro
+          </Button>
+        ) : null}
       </Card>
 
       {item.qualities.length > 1 ? (

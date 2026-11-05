@@ -390,8 +390,9 @@ or episode release is grabbed — not when the player opens — and cached per
 series in `server/cache/releases/introdb/<imdbId>.json`. `GET /api/playback/items/:itemId`
 exposes them as `segments` (`intro`, `recap`, `outro`, `postCredits`, in
 seconds) when the cache has data. IntroDB receives only the IMDb id and
-season/episode number; no session, account or viewing progress is sent. The
-skip-intro control that consumes these ranges is the next player change.
+season/episode number; no session, account or viewing progress is sent. While
+playback is inside the intro range, the player shows a **Skip intro** button
+that jumps to the end of the intro.
 
 Playback is codec-aware. Browser-compatible sources use a same-origin
 `/api/playback/items/:itemId/stream` URL; the backend validates the session and
