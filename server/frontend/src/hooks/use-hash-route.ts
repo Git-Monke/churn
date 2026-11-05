@@ -29,7 +29,7 @@ export function parseHash(hash: string): AppRoute {
   const parts = path.split("/").filter(Boolean);
 
   if (parts.length === 0) {
-    return { page: "services" };
+    return { page: "library" };
   }
   if (parts.length === 1 && parts[0] === "services") {
     return { page: "services" };
@@ -72,5 +72,5 @@ export function parseHash(hash: string): AppRoute {
       id: decodeURIComponent(parts[3]),
     };
   }
-  return { page: "services" };
+  return { page: "library" };
 }

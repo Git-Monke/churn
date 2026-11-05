@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRightLeftIcon, CircleAlertIcon, FilmIcon, SearchIcon } from "lucide-react";
+import {
+  ArrowRightLeftIcon,
+  CircleAlertIcon,
+  FilmIcon,
+  SearchIcon,
+  XIcon,
+} from "lucide-react";
 
 import { fetchActivity, fetchLibrary, fetchRequestedLibrary } from "@/api/client";
 import type {
@@ -18,8 +24,15 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@/components/ui/input-group";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LibraryGrid, LibraryGridSkeleton } from "@/features/library/LibraryGrid";
+import { searchLibraryEntries } from "@/features/library/library-search";
 import { LibraryStateNotice } from "@/features/library/LibraryStateNotice";
 import {
   mergeLibraryEntries,
@@ -32,6 +45,7 @@ type Filter = "all" | "Movie" | "Series";
 export function LibraryPage({ jellyfinUrl }: { jellyfinUrl?: string }) {
   const queryClient = useQueryClient();
   const [filter, setFilter] = useState<Filter>("all");
+  const [query, setQuery] = useState("");
   const [dismissedRepicks, setDismissedRepicks] = useState<number[]>([]);
   const [scanActive, setScanActive] = useState(false);
   const [activityActive, setActivityActive] = useState(false);
@@ -66,13 +80,18 @@ export function LibraryPage({ jellyfinUrl }: { jellyfinUrl?: string }) {
     [activityQuery.data, libraryQuery.data, requestedQuery.data],
   );
   const displayEntries = useLibraryScanState(entries);
+  const searched = useMemo(
+    () => searchLibraryEntries(displayEntries, query),
+    [displayEntries, query],
+  );
   const filtered = useMemo(
     () =>
       filter === "all"
-        ? displayEntries
-        : displayEntries.filter((entry) => entry.type === filter),
-    [displayEntries, filter],
+        ? searched
+        : searched.filter((entry) => entry.type === filter),
+    [searched, filter],
   );
+  const searching = query.trim().length > 0;
   const activeCount = displayEntries.filter((entry) => entry.activity).length;
   const loading =
     (libraryQuery.isLoading || requestedQuery.isLoading || activityQuery.isLoading) &&
@@ -120,6 +139,7 @@ export function LibraryPage({ jellyfinUrl }: { jellyfinUrl?: string }) {
           <h2 className="font-heading text-xl font-semibold tracking-tight">Library</h2>
           {displayEntries.length > 0 ? (
             <span className="text-sm text-muted-foreground">
+              {searching ? `${searched.length} of ` : ""}
               {displayEntries.length} {displayEntries.length === 1 ? "title" : "titles"}
             </span>
           ) : null}
@@ -133,6 +153,37 @@ export function LibraryPage({ jellyfinUrl }: { jellyfinUrl?: string }) {
           Playable titles from Jellyfin, your added library, and live qBittorrent downloads.
         </p>
       </div>
+
+      {displayEntries.length > 0 ? (
+        <InputGroup className="w-full sm:max-w-xs">
+          <InputGroupAddon>
+            <SearchIcon />
+          </InputGroupAddon>
+          <InputGroupInput
+            type="search"
+            value={query}
+            aria-label="Search the library"
+            placeholder="Search titles, years, networks…"
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                setQuery("");
+              }
+            }}
+          />
+          {query ? (
+            <InputGroupAddon align="inline-end">
+              <InputGroupButton
+                size="icon-xs"
+                aria-label="Clear search"
+                onClick={() => setQuery("")}
+              >
+                <XIcon />
+              </InputGroupButton>
+            </InputGroupAddon>
+          ) : null}
+        </InputGroup>
+      ) : null}
 
       {libraryQuery.error && !libraryQuery.data ? (
         <Alert variant="destructive">
@@ -179,9 +230,9 @@ export function LibraryPage({ jellyfinUrl }: { jellyfinUrl?: string }) {
       {!loading && displayEntries.length > 0 ? (
         <Tabs value={filter} onValueChange={(value) => setLibraryFilter(value, setFilter)}>
           <TabsList>
-            <TabsTrigger value="all">All ({displayEntries.length})</TabsTrigger>
-            <TabsTrigger value="Movie">{`Movies (${countType(displayEntries, "Movie")})`}</TabsTrigger>
-            <TabsTrigger value="Series">{`Series (${countType(displayEntries, "Series")})`}</TabsTrigger>
+            <TabsTrigger value="all">All ({searched.length})</TabsTrigger>
+            <TabsTrigger value="Movie">{`Movies (${countType(searched, "Movie")})`}</TabsTrigger>
+            <TabsTrigger value="Series">{`Series (${countType(searched, "Series")})`}</TabsTrigger>
           </TabsList>
           <TabsContent value={filter}>
             {filtered.length > 0 ? (
@@ -192,11 +243,21 @@ export function LibraryPage({ jellyfinUrl }: { jellyfinUrl?: string }) {
                   <EmptyMedia variant="icon">
                     <FilmIcon />
                   </EmptyMedia>
-                  <EmptyTitle>Nothing here yet</EmptyTitle>
+                  <EmptyTitle>
+                    {searching ? `No matches for “${query.trim()}”` : "Nothing here yet"}
+                  </EmptyTitle>
                   <EmptyDescription>
-                    No {filter === "Movie" ? "movies" : "series"} match this view.
+                    No {filter === "Movie" ? "movies" : "series"} match
+                    {searching ? " your search" : " this view"}.
                   </EmptyDescription>
                 </EmptyHeader>
+                {searching ? (
+                  <EmptyContent>
+                    <Button variant="outline" size="sm" onClick={() => setQuery("")}>
+                      Clear search
+                    </Button>
+                  </EmptyContent>
+                ) : null}
               </Empty>
             )}
           </TabsContent>

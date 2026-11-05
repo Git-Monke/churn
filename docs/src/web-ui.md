@@ -2,7 +2,8 @@
 
 The dashboard is a TypeScript app under `server/` with two workspaces. It has
 three pages — Services, Library and Search — selected by hash routes
-(`#/services`, `#/library`, `#/search`). Services has **Services** and **VPN**
+(`#/services`, `#/library`, `#/search`). An empty or unknown hash lands on the
+library (`#/library`). Services has **Services** and **VPN**
 tabs; the VPN tab runs a live leak test when opened and on demand.
 
 ```
@@ -279,6 +280,13 @@ arr catalog) and `/api/activity` (qBittorrent):
 - active downloads sort before available titles;
 - qBittorrent failures show a download notice without hiding Jellyfin, and arr
   failures only affect release search/request actions.
+
+The Library toolbar has a search box that filters the grid in the browser: no
+API call, no navigation. It matches every word of the query against the title,
+and any word can instead hit the year, network, content rating, score or
+overview, so `2021`, `hbo` or `spiders` work. Title hits are listed before
+metadata-only hits, the type tabs and their counts follow the search, and
+Escape or the clear button resets it.
 
 Every card has a trash button. Sonarr/Radarr-backed cards call
 `DELETE /api/library/requested/:service/:id`, which removes the title's queue
