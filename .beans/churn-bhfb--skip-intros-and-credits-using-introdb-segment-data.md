@@ -1,14 +1,14 @@
 ---
 # churn-bhfb
 title: Skip intros and credits using IntroDB segment data
-status: in-progress
+status: completed
 type: feature
 priority: normal
 tags:
     - playback
     - shows
 created_at: 2026-11-05T18:26:10Z
-updated_at: 2026-11-05T18:54:01Z
+updated_at: 2026-11-05T19:35:17Z
 ---
 
 ## Goal
