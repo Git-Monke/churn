@@ -74,6 +74,8 @@ preserves unknown keys, so hand-added settings survive a rerun.
 | `RADARR_API_KEY` | `server/config/radarr/config.xml` | Optional override |
 | `PROWLARR_URL` | `http://127.0.0.1:9696` | Prowlarr base URL used for progressive release search |
 | `PROWLARR_API_KEY` | `torrent/config/prowlarr/config.xml` | Optional override for progressive release search |
+| `INTRODB_URL` | `https://api.introdb.app` | IntroDB base URL for intro/recap/credits timestamps |
+| `INTRODB_TIMEOUT_MS` | `5000` | Timeout for the unauthenticated IntroDB reads |
 | `QBITTORRENT_URL` | `http://127.0.0.1:8080` | qBittorrent WebUI used for live torrent progress |
 | `QBITTORRENT_API_KEY` | `torrent/config/qbittorrent/qBittorrent/qBittorrent.conf` | Optional override for direct grabs, live progress, duplicate recovery and untracked-download detection |
 | `VPN_STATUS_URL` | `http://127.0.0.1:8098` | Loopback address of the torrent stack's `vpn-status` agent |
@@ -235,7 +237,7 @@ are per Jellyfin user; no static playback token is stored in `.env`.
 | `POST /api/library/shows/:source/:id/releases/refresh?season=N` | Start a fresh per-indexer Prowlarr search |
 | `POST /api/library/shows/:source/:id/releases/grab` | Send the chosen season or episode torrent directly to qBittorrent |
 | `DELETE /api/library/shows/sonarr/:id/episodes/:season/:episode/download` | Cancel that episode's active download, blocklist the release and keep imported files |
-| `GET /api/playback/items/:itemId` | Playable item metadata, resume position, media source and same-origin stream URL |
+| `GET /api/playback/items/:itemId` | Playable item metadata, resume position, media source, same-origin stream URL and cached episode segments |
 | `GET /api/playback/items/:itemId/stream` | Redirect the media element to Jellyfin's direct stream URL for this session |
 | `GET /api/playback/items/:itemId/hls.m3u8` | Redirect to a Jellyfin HLS transcode (H.264/AAC) when the source is not browser-compatible |
 | `POST /api/playback/items/:itemId/start` | Report playback start to Jellyfin |
@@ -418,6 +420,23 @@ The token never appears in the page DOM or API responses, but it is visible in
 browser devtools, redirect targets and Jellyfin HLS playlist/segment URLs. That
 is the accepted tradeoff for stream redirection; a backend proxy would be needed
 if Churn is exposed beyond the LAN.
+
+### Skip-intro metadata
+
+Episode segments come from [IntroDB](https://introdb.app), a crowdsourced
+public API. Reads need no key and are rate limited, so Churn only calls it while
+a download is being set up: when a season or episode release is grabbed, the
+backend resolves the series' IMDb id from Sonarr (or the cached series
+metadata), then fetches segments for every episode of that season, or just the
+single episode, sequentially in the background. Results are stored in
+`server/cache/releases/introdb/<imdbId>.json`.
+
+Playback never calls IntroDB. `GET /api/playback/items/:itemId` reads the cached
+JSON for the episode and exposes `segments` (`intro`, `recap`, `outro`,
+`postCredits`, in seconds) when data exists. A missing file, no IMDb id, a 404 or
+a failed lookup simply means no segments are returned; playback and the grab
+response are unaffected. IntroDB only receives the series IMDb id and
+season/episode numbers, never the Jellyfin session or a user identity.
 
 By default the browser-facing Jellyfin URL follows the hostname used to reach
 Churn. A loopback host or a single-label container name in `JELLYFIN_URL`

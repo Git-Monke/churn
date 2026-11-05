@@ -633,6 +633,23 @@ export interface PlaybackItem {
   quality: PlaybackQuality;
   /** Selectable presets for this source; always contains `max`. */
   qualities: PlaybackQualityOption[];
+  /**
+   * Intro/recap/credits ranges warmed from IntroDB when the season or episode
+   * was grabbed. Absent when there is no cached data for this episode.
+   */
+  segments?: PlaybackSegments;
+}
+
+export interface PlaybackSegment {
+  startSec: number;
+  endSec: number;
+}
+
+export interface PlaybackSegments {
+  intro?: PlaybackSegment;
+  recap?: PlaybackSegment;
+  outro?: PlaybackSegment;
+  postCredits?: PlaybackSegment;
 }
 
 export type PlaybackQuality = "max" | "high" | "medium" | "low";

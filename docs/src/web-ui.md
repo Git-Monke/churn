@@ -61,6 +61,8 @@ survive a rerun.
 | `RELEASE_TIMEOUT_MS` | `120000` | Timeout for Sonarr/Radarr release lookups; direct grabs go to qBittorrent |
 | `PROWLARR_URL` | `http://127.0.0.1:9696` | Prowlarr base URL for progressive release search |
 | `PROWLARR_API_KEY` | `torrent/config/prowlarr/config.xml` | Optional Prowlarr API-key override |
+| `INTRODB_URL` | `https://api.introdb.app` | IntroDB base URL for intro/recap/credits timestamps |
+| `INTRODB_TIMEOUT_MS` | `5000` | Timeout for unauthenticated IntroDB reads |
 | `CHURN_SESSION_TTL_MS` | `43200000` (12 hours) | Server-side idle session TTL; clamped to 5 minutes–30 days |
 | `CHURN_STATE_DIR` | `server/.churn-state` (`/app/state` in the container) | Persisted profiles, sessions and added-by tags |
 | `CHURN_COOKIE_SECURE` | `auto` | `auto`, `true` or `false` for the session cookie's `Secure` flag |
@@ -381,6 +383,15 @@ Movies in Library and episodes in show detail open `#/play/<itemId>`. The player
 uses Jellyfin's per-user `UserData` to resume where you stopped, then sends
 playback start/progress/stop reports so Jellyfin apps see the same position and
 watched state.
+
+Episode metadata also carries intro, recap and credits ranges from
+[IntroDB](https://introdb.app). They are fetched in the background when a season
+or episode release is grabbed — not when the player opens — and cached per
+series in `server/cache/releases/introdb/<imdbId>.json`. `GET /api/playback/items/:itemId`
+exposes them as `segments` (`intro`, `recap`, `outro`, `postCredits`, in
+seconds) when the cache has data. IntroDB receives only the IMDb id and
+season/episode number; no session, account or viewing progress is sent. The
+skip-intro control that consumes these ranges is the next player change.
 
 Playback is codec-aware. Browser-compatible sources use a same-origin
 `/api/playback/items/:itemId/stream` URL; the backend validates the session and

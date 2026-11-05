@@ -1,4 +1,5 @@
 import { ApiError } from "./errors.js";
+import type { IntroDbSegments } from "./introdb.js";
 import type {
   JellyfinItem,
   JellyfinMediaSource,
@@ -76,6 +77,11 @@ export interface PlaybackItem {
   quality: PlaybackQuality;
   /** Selectable presets for this source; always contains `max`. */
   qualities: PlaybackQualityOption[];
+  /**
+   * Intro/recap/credits ranges warmed from IntroDB when the season or episode
+   * was grabbed. Absent when there is no cached data for this episode.
+   */
+  segments?: IntroDbSegments;
 }
 
 export interface PlaybackItemResponse {

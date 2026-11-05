@@ -70,6 +70,10 @@ describe("config loading", () => {
     expect(config.services.sonarr.apiKey).toBe("sonarr-key");
     expect(config.services.radarr.apiKey).toBe("radarr-key");
     expect(config.prowlarr).toEqual({ url: "http://127.0.0.1:9696" });
+    expect(config.introdb).toEqual({
+      url: "https://api.introdb.app",
+      timeoutMs: 5_000,
+    });
     expect(config.vpn).toEqual({
       statusUrl: "http://127.0.0.1:8098",
       timeoutMs: 25_000,
@@ -335,6 +339,8 @@ describe("config loading", () => {
         CHURN_COOKIE_SECURE: "true",
         PROWLARR_URL: "http://prowlarr:9696/",
         PROWLARR_API_KEY: "prowlarr-env-key",
+        INTRODB_URL: "https://introdb.example.test/",
+        INTRODB_TIMEOUT_MS: "3000",
         VPN_STATUS_URL: "http://vpn-status:8098/",
         VPN_STATUS_TIMEOUT_MS: "30000",
         SEARCH_TIMEOUT_MS: "15000",
@@ -359,6 +365,10 @@ describe("config loading", () => {
     expect(config.prowlarr).toEqual({
       url: "http://prowlarr:9696",
       apiKey: "prowlarr-env-key",
+    });
+    expect(config.introdb).toEqual({
+      url: "https://introdb.example.test",
+      timeoutMs: 3_000,
     });
     expect(config.vpn).toEqual({
       statusUrl: "http://vpn-status:8098",

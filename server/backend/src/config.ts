@@ -32,6 +32,12 @@ export interface ProwlarrConfig {
   apiKey?: string;
 }
 
+/** Public read-only IntroDB API used for intro/recap/outro timestamps. */
+export interface IntroDbConfig {
+  url: string;
+  timeoutMs: number;
+}
+
 export interface VpnConfig {
   /** Loopback-only address of the torrent stack's vpn-status agent. */
   statusUrl: string;
@@ -79,6 +85,7 @@ export interface AppConfig {
   services: Record<ServiceId, ServiceConfig>;
   qbittorrent: QbittorrentConfig;
   prowlarr: ProwlarrConfig;
+  introdb: IntroDbConfig;
   vpn: VpnConfig;
 }
 
@@ -98,6 +105,7 @@ const SERVICE_DEFAULTS: Record<ServiceId, { name: string; url: string }> = {
 
 const QBITTORRENT_DEFAULT_URL = "http://127.0.0.1:8080";
 const PROWLARR_DEFAULT_URL = "http://127.0.0.1:9696";
+const INTRODB_DEFAULT_URL = "https://api.introdb.app";
 const VPN_STATUS_DEFAULT_URL = "http://127.0.0.1:8098";
 
 /** Resolve the `server/` directory from this module, under both src/ and dist/. */
@@ -236,6 +244,11 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
     apiKey: cleanApiKey(values.PROWLARR_API_KEY) ?? readProwlarrApiKey(serverDir),
   };
 
+  const introdb: IntroDbConfig = {
+    url: normalizeUrl(values.INTRODB_URL, INTRODB_DEFAULT_URL),
+    timeoutMs: parseIntroDbTimeout(values.INTRODB_TIMEOUT_MS),
+  };
+
   const vpn: VpnConfig = {
     statusUrl: normalizeUrl(values.VPN_STATUS_URL, VPN_STATUS_DEFAULT_URL),
     timeoutMs: parseVpnTimeout(values.VPN_STATUS_TIMEOUT_MS),
@@ -264,6 +277,7 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
     services,
     qbittorrent,
     prowlarr,
+    introdb,
     vpn,
   };
 }
@@ -468,6 +482,19 @@ function parseTimeout(value: string | undefined): number {
   const timeout = Number.parseInt(value, 10);
   if (!Number.isInteger(timeout) || timeout < 250 || timeout > 60_000) {
     throw new Error(`invalid REQUEST_TIMEOUT_MS: ${value}`);
+  }
+  return timeout;
+}
+
+const DEFAULT_INTRODB_TIMEOUT_MS = 5_000;
+
+function parseIntroDbTimeout(value: string | undefined): number {
+  if (!value?.trim()) {
+    return DEFAULT_INTRODB_TIMEOUT_MS;
+  }
+  const timeout = Number.parseInt(value, 10);
+  if (!Number.isInteger(timeout) || timeout < 250 || timeout > 60_000) {
+    throw new Error(`invalid INTRODB_TIMEOUT_MS: ${value}`);
   }
   return timeout;
 }

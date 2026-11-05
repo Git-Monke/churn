@@ -16,7 +16,8 @@ import {
   playbackStreamPath,
   type PlaybackItemResponse,
 } from "../playback.js";
-import { createJellyfinClient } from "../upstream/jellyfin.js";
+import type { IntroDbService } from "../introdb-warm.js";
+import { createJellyfinClient, providerString } from "../upstream/jellyfin.js";
 import { errorMessage } from "../upstream/states.js";
 
 type ReportKind = "start" | "progress" | "stop";
@@ -41,7 +42,12 @@ const SESSION_ID_PATTERN = /^[A-Za-z0-9._~-]{1,128}$/;
 export function registerPlaybackRoutes(
   app: FastifyInstance,
   config: AppConfig,
+  introDb: IntroDbService,
 ): void {
+  const seriesImdbCache = new Map<
+    string,
+    { imdbId?: string; fetchedAt: number }
+  >();
   app.get<{ Params: PlaybackParams; Querystring: ItemQuery }>(
     "/api/playback/items/:itemId",
     async (request, reply): Promise<PlaybackItemResponse> => {
@@ -106,6 +112,36 @@ export function registerPlaybackRoutes(
           "playback_item_not_found",
           "Item is not a playable movie or episode",
         );
+      }
+
+      // Segment timestamps are warmed when the episode/season is grabbed;
+      // playback only reads the cache. Any lookup problem simply means the
+      // player gets no skip affordance.
+      if (
+        mapped.type === "Episode" &&
+        mapped.seriesId &&
+        mapped.seasonNumber !== undefined &&
+        mapped.episodeNumber !== undefined
+      ) {
+        try {
+          const imdbId = await resolveSeriesImdb(
+            client,
+            mapped.seriesId,
+            seriesImdbCache,
+          );
+          const segments = imdbId
+            ? await introDb.segmentsFor(
+                imdbId,
+                mapped.seasonNumber,
+                mapped.episodeNumber,
+              )
+            : undefined;
+          if (segments) {
+            mapped.segments = segments;
+          }
+        } catch {
+          // IntroDB data is optional; playback must not depend on it.
+        }
       }
 
       return { state: "ok", item: mapped };
@@ -300,6 +336,36 @@ function playbackRouteError(
     return new ApiError(502, "jellyfin_playback_failed", `${fallback}: ${error.message}`);
   }
   return new ApiError(502, "jellyfin_playback_failed", errorMessage(error));
+}
+
+const SERIES_IMDB_TTL_MS = 60 * 60 * 1000;
+const SERIES_IMDB_CACHE_MAX = 200;
+
+/**
+ * The episode item does not repeat the series provider ids, so read them from
+ * the series once. Binging a season then costs one Jellyfin item lookup, not
+ * one per episode.
+ */
+async function resolveSeriesImdb(
+  client: ReturnType<typeof createJellyfinClient>,
+  seriesId: string,
+  cache: Map<string, { imdbId?: string; fetchedAt: number }>,
+): Promise<string | undefined> {
+  const cached = cache.get(seriesId);
+  if (cached && Date.now() - cached.fetchedAt < SERIES_IMDB_TTL_MS) {
+    return cached.imdbId;
+  }
+
+  const series = await client.getItem(seriesId);
+  const imdbId = providerString(series, "imdb");
+  if (cache.size >= SERIES_IMDB_CACHE_MAX) {
+    const oldest = cache.keys().next().value;
+    if (oldest !== undefined) {
+      cache.delete(oldest);
+    }
+  }
+  cache.set(seriesId, { ...(imdbId ? { imdbId } : {}), fetchedAt: Date.now() });
+  return imdbId;
 }
 
 function parseItemId(value: string): string {

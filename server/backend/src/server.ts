@@ -14,6 +14,8 @@ import {
 import type { AppConfig } from "./config.js";
 import { ApiError, UpstreamError } from "./errors.js";
 import { createLibraryScanWatcher } from "./library-scan.js";
+import { createIntroDbCache } from "./introdb-cache.js";
+import { createIntroDbService } from "./introdb-warm.js";
 import { createMediaAttributionStore } from "./media-attribution.js";
 import { createMediaCache } from "./media-cache.js";
 import { createReleaseSearchService } from "./release-search.js";
@@ -52,6 +54,12 @@ export async function buildServer(
   const releaseEvents = createReleaseEventStore();
   const cacheDir = resolveReleaseCacheDir(config.serverDir);
   const mediaCache = createMediaCache({ cacheDir: path.join(cacheDir, "media") });
+  const introDb = createIntroDbService({
+    config,
+    mediaCache,
+    cache: createIntroDbCache({ cacheDir: path.join(cacheDir, "introdb") }),
+    onWarning: (message) => app.log.warn(message),
+  });
   const mediaAttribution = createMediaAttributionStore({
     stateDir: config.stateDir,
     onWarning: (message) => app.log.warn(message),
@@ -156,13 +164,13 @@ export async function buildServer(
   registerStatusRoutes(app, config);
   registerVpnRoutes(app, config);
   registerLibraryRoutes(app, config, releaseSearch, mediaAttribution);
-  registerPlaybackRoutes(app, config);
+  registerPlaybackRoutes(app, config, introDb);
   registerRequestedLibraryRoutes(app, config, mediaCache, releaseSearch, mediaAttribution);
   registerMovieRoutes(app, config, releaseSearch);
   registerSearchRoutes(app, config);
   registerRequestRoutes(app, config, mediaCache, releaseSearch, mediaAttribution);
   registerActivityRoutes(app, config, releaseEvents);
-  registerShowRoutes(app, config, releaseSearch);
+  registerShowRoutes(app, config, releaseSearch, introDb);
   registerServiceRoutes(app, config);
 
   const hasFrontend = existsSync(path.join(config.frontendDist, "index.html"));

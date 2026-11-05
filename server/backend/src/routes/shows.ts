@@ -6,6 +6,7 @@ import { requireAuth, type AuthContext } from "../auth.js";
 import { ApiError, isUnauthorized, isUpstreamNotFound, UpstreamError } from "../errors.js";
 import { refreshJellyfinLibrary } from "../library-scan.js";
 import { directGrabError, grabTorrentDirect } from "../direct-grab.js";
+import type { IntroDbService } from "../introdb-warm.js";
 import {
   createLiveDownloadStore,
   loadQbittorrentTorrents,
@@ -42,6 +43,7 @@ export function registerShowRoutes(
   app: FastifyInstance,
   config: AppConfig,
   releaseSearch: ReleaseSearchService,
+  introDb: IntroDbService,
 ): void {
   const downloads = createLiveDownloadStore();
 
@@ -152,6 +154,7 @@ export function registerShowRoutes(
       return grabShowRelease(
         config,
         releaseSearch,
+        introDb,
         seriesId,
         parseGrabReleaseInput(request.body),
       );
@@ -368,6 +371,7 @@ async function refreshShowReleases(
 async function grabShowRelease(
   config: AppConfig,
   releaseSearch: ReleaseSearchService,
+  introDb: IntroDbService,
   seriesId: number,
   input: ReturnType<typeof parseGrabReleaseInput>,
 ): Promise<GrabShowReleaseResponse> {
@@ -393,6 +397,13 @@ async function grabShowRelease(
       seasonNumber: searchSeasonNumber,
       multiSeason: found.release.parsed.seasonNumbers.length > 1,
     });
+    // Warm IntroDB while the torrent downloads. A season grab fetches every
+    // episode of that season; an episode grab fetches only that episode.
+    void introDb.warmFromGrab(
+      seriesId,
+      input.seasonNumber,
+      input.episodeNumber,
+    );
     return { status: "grabbed", title: result.title };
   } catch (error) {
     throw directGrabError(error);

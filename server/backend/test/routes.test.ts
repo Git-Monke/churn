@@ -52,6 +52,7 @@ function makeConfig(overrides: Partial<AppConfig["services"]> = {}): AppConfig {
       url: "http://prowlarr.test:9696",
       apiKey: "prowlarr-key",
     },
+    introdb: { url: "https://api.introdb.test", timeoutMs: 500 },
     vpn: {
       statusUrl: "http://vpn-status.test:8098",
       timeoutMs: 500,
@@ -4098,7 +4099,72 @@ describe("playback", () => {
       directPlay: true,
       playbackMethod: "direct",
     });
+    expect(body.item.segments).toBeUndefined();
     expect(JSON.stringify(body)).not.toContain("test-user-token");
+    await app.close();
+  });
+
+  it("adds IntroDB segments warmed for an episode", async () => {
+    const config = makeConfig();
+    const cacheDir = path.join(
+      config.serverDir,
+      "cache",
+      "releases",
+      "introdb",
+    );
+    mkdirSync(cacheDir, { recursive: true });
+    writeFileSync(
+      path.join(cacheDir, "tt0903747.json"),
+      JSON.stringify({
+        version: 1,
+        imdbId: "tt0903747",
+        episodes: {
+          s1e2: {
+            fetchedAt: "2026-01-01T00:00:00.000Z",
+            segments: {
+              intro: { startSec: 2.5, endSec: 58 },
+              outro: { startSec: 3_300, endSec: 3_500 },
+            },
+          },
+        },
+      }),
+    );
+
+    installFetch((url) => {
+      if (url.includes("/PlaybackInfo?")) {
+        return jsonResponse(playbackInfo);
+      }
+      if (/\/Items\/item-1\?/.test(url)) {
+        return jsonResponse({
+          ...playbackItem,
+          Type: "Episode",
+          Name: "Episode Two",
+          SeriesId: "series-1",
+          ParentIndexNumber: 1,
+          IndexNumber: 2,
+        });
+      }
+      if (/\/Items\/series-1\?/.test(url)) {
+        return jsonResponse({
+          Id: "series-1",
+          Type: "Series",
+          ProviderIds: { Imdb: "tt0903747" },
+        });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildAuthedServer(config);
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/playback/items/item-1",
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().item.segments).toEqual({
+      intro: { startSec: 2.5, endSec: 58 },
+      outro: { startSec: 3_300, endSec: 3_500 },
+    });
     await app.close();
   });
 
