@@ -13,6 +13,12 @@ export interface ServiceConfig {
   id: ServiceId;
   name: string;
   url: string;
+  /**
+   * Browser-facing URL override (`<ID>_PUBLIC_URL`). When set it is used
+   * verbatim for status links and redirects; otherwise the host the browser
+   * used to reach the dashboard is used (see `serviceUrlForRequest`).
+   */
+  publicUrl?: string;
   apiKey?: string;
 }
 
@@ -201,18 +207,21 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
       id: "jellyfin",
       name: SERVICE_DEFAULTS.jellyfin.name,
       url: normalizeUrl(values.JELLYFIN_URL, SERVICE_DEFAULTS.jellyfin.url),
+      publicUrl: publicUrlOverride(values.JELLYFIN_PUBLIC_URL, SERVICE_DEFAULTS.jellyfin.url),
       apiKey: nonEmpty(values.JELLYFIN_API_KEY),
     },
     sonarr: {
       id: "sonarr",
       name: SERVICE_DEFAULTS.sonarr.name,
       url: normalizeUrl(values.SONARR_URL, SERVICE_DEFAULTS.sonarr.url),
+      publicUrl: publicUrlOverride(values.SONARR_PUBLIC_URL, SERVICE_DEFAULTS.sonarr.url),
       apiKey: cleanApiKey(values.SONARR_API_KEY) ?? readApiKeyFromConfigXml(serverDir, "sonarr"),
     },
     radarr: {
       id: "radarr",
       name: SERVICE_DEFAULTS.radarr.name,
       url: normalizeUrl(values.RADARR_URL, SERVICE_DEFAULTS.radarr.url),
+      publicUrl: publicUrlOverride(values.RADARR_PUBLIC_URL, SERVICE_DEFAULTS.radarr.url),
       apiKey: cleanApiKey(values.RADARR_API_KEY) ?? readApiKeyFromConfigXml(serverDir, "radarr"),
     },
   };
@@ -280,6 +289,14 @@ function cleanApiKey(value: string | undefined): string | undefined {
   return nonEmpty(value?.replace(/^["']|["']$/g, ""));
 }
 
+/** Normalize an optional `<ID>_PUBLIC_URL` override against the service URL. */
+function publicUrlOverride(
+  value: string | undefined,
+  serviceUrl: string,
+): string | undefined {
+  return nonEmpty(value) ? normalizeUrl(value, serviceUrl) : undefined;
+}
+
 /**
  * Resolve the LAN-based fallback URL for video streams.
  *
@@ -310,14 +327,48 @@ function resolveJellyfinPublicUrl(
 }
 
 /**
+ * Resolve the browser-facing URL of a service for the request that is being
+ * served.
+ *
+ * An explicit `<ID>_PUBLIC_URL` always wins. Otherwise a service URL the
+ * browser cannot resolve (loopback, `localhost` or a Docker service name) is
+ * rewritten to the hostname the browser used to reach Churn, keeping scheme,
+ * port and base path. That makes the same deployment work through a LAN IP, a
+ * tailnet IP or a MagicDNS name without extra configuration. When no request
+ * host is available the host's LAN address is used, falling back to the
+ * configured service URL.
+ *
+ * Backend probes and upstream API calls keep using `service.url`; only URLs
+ * handed to the browser go through this function.
+ */
+export function serviceUrlForRequest(
+  config: AppConfig,
+  id: ServiceId,
+  headers: BrowserHostHeaders,
+): string {
+  const service = config.services[id];
+  if (service.publicUrl) {
+    return service.publicUrl;
+  }
+
+  const url = new URL(service.url);
+  if (!needsPublicHost(url.hostname)) {
+    return service.url;
+  }
+
+  const hostname = requestHostname(headers) ?? config.lanAddress;
+  if (!hostname) {
+    return service.url;
+  }
+  url.hostname = hostname;
+  return normalizeUrl(url.toString(), service.url);
+}
+
+/**
  * Resolve the Jellyfin URL for the browser that made this request.
  *
- * An explicit `JELLYFIN_PUBLIC_URL` always wins. Otherwise a Jellyfin URL that
- * the browser cannot resolve (loopback or a Docker service name) is rewritten
- * to the hostname the browser used to reach Churn. That makes the same
- * deployment work through a LAN IP, a tailnet IP or a MagicDNS name without
- * extra configuration. When no request host is available the LAN-based
- * fallback from `loadConfig` is used.
+ * Thin wrapper kept for existing callers; see `serviceUrlForRequest` for the
+ * general behaviour. An explicit `JELLYFIN_PUBLIC_URL` still always wins.
  */
 export function jellyfinPublicUrlForRequest(
   config: AppConfig,
@@ -326,18 +377,7 @@ export function jellyfinPublicUrlForRequest(
   if (config.jellyfinPublicUrlExplicit) {
     return config.jellyfinPublicUrl;
   }
-
-  const jellyfin = new URL(config.services.jellyfin.url);
-  if (!needsPublicHost(jellyfin.hostname)) {
-    return config.services.jellyfin.url;
-  }
-
-  const hostname = requestHostname(headers) ?? config.lanAddress;
-  if (!hostname) {
-    return config.jellyfinPublicUrl;
-  }
-  jellyfin.hostname = hostname;
-  return normalizeUrl(jellyfin.toString(), config.services.jellyfin.url);
+  return serviceUrlForRequest(config, "jellyfin", headers);
 }
 
 /** Host as the browser saw it, preferring a reverse proxy's public host. */

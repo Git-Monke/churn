@@ -99,14 +99,21 @@ function Dashboard() {
       ) : null}
       {route.page === "library" ? <LibraryPage jellyfinUrl={jellyfinUrl} /> : null}
       {route.page === "show" ? (
-        <ShowPage key={`${route.source}:${route.id}`} source={route.source} id={route.id} />
+        <ShowPage
+          key={`${route.source}:${route.id}`}
+          source={route.source}
+          id={route.id}
+          season={route.season}
+        />
       ) : null}
       {route.page === "movie" ? (
         <MoviePage key={`${route.source}:${route.id}`} source={route.source} id={route.id} />
       ) : null}
       {route.page === "search" ? <SearchPage /> : null}
       {route.page === "people" && isAdmin ? <PeoplePage /> : null}
-      {route.page === "play" ? <PlayPage key={route.id} id={route.id} /> : null}
+      {route.page === "play" ? (
+        <PlayPage key={route.id} id={route.id} from={route.from} />
+      ) : null}
     </div>
   );
 }

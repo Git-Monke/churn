@@ -421,6 +421,45 @@ describe("status", () => {
     expect(body.services[2].state).toBe("unauthorized");
     await app.close();
   });
+
+  it("reports browser-facing URLs for loopback services", async () => {
+    installFetch((url) => {
+      if (url.includes("127.0.0.1:8096")) {
+        return jsonResponse({ Version: "10.11.11", StartupWizardCompleted: false });
+      }
+      return jsonResponse({ appName: "Sonarr", version: "4.0.20" });
+    });
+
+    const config = makeConfig({
+      jellyfin: { id: "jellyfin", name: "Jellyfin", url: "http://127.0.0.1:8096" },
+      sonarr: {
+        id: "sonarr",
+        name: "Sonarr",
+        url: "http://127.0.0.1:8989",
+        apiKey: "sonarr-key",
+      },
+      radarr: {
+        id: "radarr",
+        name: "Radarr",
+        url: "http://127.0.0.1:7878",
+        apiKey: "radarr-key",
+      },
+    });
+    const app = await buildAuthedServer(config);
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/status",
+      headers: { host: "100.90.93.111:4000" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().services.map((service: { url: string }) => service.url)).toEqual([
+      "http://100.90.93.111:8096",
+      "http://100.90.93.111:8989",
+      "http://100.90.93.111:7878",
+    ]);
+    await app.close();
+  });
 });
 
 describe("library", () => {
@@ -1317,6 +1356,29 @@ describe("service links and unknown routes", () => {
     const unknown = await app.inject({ method: "GET", url: "/api/services/nope/open" });
     expect(unknown.statusCode).toBe(404);
     expect(unknown.json().error.code).toBe("unknown_service");
+    await app.close();
+  });
+
+  it("redirects loopback services to the host the browser used", async () => {
+    const app = await buildAuthedServer(
+      makeConfig({
+        jellyfin: { id: "jellyfin", name: "Jellyfin", url: "http://127.0.0.1:8096" },
+        sonarr: {
+          id: "sonarr",
+          name: "Sonarr",
+          url: "http://127.0.0.1:8989",
+          apiKey: "sonarr-key",
+        },
+      }),
+    );
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/services/sonarr/open",
+      headers: { host: "100.90.93.111:4000" },
+    });
+
+    expect(response.statusCode).toBe(302);
+    expect(response.headers.location).toBe("http://100.90.93.111:8989");
     await app.close();
   });
 

@@ -44,9 +44,17 @@ import { DownloadStats } from "@/features/download/DownloadStats";
 import { ReleaseChooser } from "@/features/releases/ReleaseChooser";
 import { ReleasePickerDialog } from "@/features/show/ReleasePickerDialog";
 import { CancelEpisodeDownloadDialog } from "@/features/show/CancelEpisodeDownloadDialog";
-import type { ShowSource } from "@/hooks/use-hash-route";
+import { playHash, replaceHash, showHash, type ShowSource } from "@/hooks/use-hash-route";
 
-export function ShowPage({ source, id }: { source: ShowSource; id: string }) {
+export function ShowPage({
+  source,
+  id,
+  season,
+}: {
+  source: ShowSource;
+  id: string;
+  season?: number;
+}) {
   const showQuery = useQuery({
     queryKey: ["show", source, id],
     queryFn: () => fetchShow(source, id),
@@ -82,15 +90,16 @@ export function ShowPage({ source, id }: { source: ShowSource; id: string }) {
       return;
     }
     setSelectedSeason((current) => {
+      const preferred = season ?? current;
       if (
-        current !== null &&
-        data.seasons.some((season) => season.seasonNumber === current)
+        preferred !== null &&
+        data.seasons.some((entry) => entry.seasonNumber === preferred)
       ) {
-        return current;
+        return preferred;
       }
       return data.defaultSeason ?? data.seasons[0]?.seasonNumber ?? null;
     });
-  }, [showQuery.data]);
+  }, [showQuery.data, season]);
 
   const episodes = useMemo(() => {
     if (!showQuery.data || selectedSeason === null) {
@@ -247,7 +256,12 @@ export function ShowPage({ source, id }: { source: ShowSource; id: string }) {
                 </div>
                 <Select
                   value={selectedSeason === null ? undefined : String(selectedSeason)}
-                  onValueChange={(value) => setSelectedSeason(Number(value))}
+                  onValueChange={(value) => {
+                    const next = Number(value);
+                    setSelectedSeason(next);
+                    // Keep the season in the URL so the player can return to it.
+                    replaceHash(showHash(source, id, next));
+                  }}
                 >
                   <SelectTrigger className="w-56" aria-label="Choose season">
                     <SelectValue placeholder="Choose season" />
@@ -365,7 +379,11 @@ export function ShowPage({ source, id }: { source: ShowSource; id: string }) {
                       episode={episode}
                       playHref={
                         episode.jellyfinId && episode.availability === "jellyfin"
-                          ? `#/play/${encodeURIComponent(episode.jellyfinId)}`
+                          ? playHash(episode.jellyfinId, {
+                              source,
+                              id,
+                              season: selectedSeason ?? undefined,
+                            })
                           : undefined
                       }
                       onChooseRelease={

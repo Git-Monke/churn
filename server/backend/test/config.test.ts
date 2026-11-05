@@ -10,6 +10,7 @@ import {
   readApiKeyFromConfigXml,
   readProwlarrApiKey,
   readQbittorrentApiKey,
+  serviceUrlForRequest,
 } from "../src/config.js";
 
 function tempServerDir(): string {
@@ -167,6 +168,50 @@ describe("config loading", () => {
     expect(
       jellyfinPublicUrlForRequest(routable, { host: "100.117.4.8:4000" }),
     ).toBe("http://media.example.test:8096");
+  });
+
+  it("uses the request host for every service, keeping each port", () => {
+    const config = loadConfig({
+      serverDir: tempServerDir(),
+      env: {},
+      readDotEnv: false,
+      detectLan: () => "192.168.0.97",
+    });
+
+    expect(serviceUrlForRequest(config, "jellyfin", { host: "100.90.93.111:4000" })).toBe(
+      "http://100.90.93.111:8096",
+    );
+    expect(serviceUrlForRequest(config, "sonarr", { host: "100.90.93.111:4000" })).toBe(
+      "http://100.90.93.111:8989",
+    );
+    expect(
+      serviceUrlForRequest(config, "radarr", {
+        host: "127.0.0.1:4000",
+        "x-forwarded-host": "fedora.tail457b41.ts.net",
+      }),
+    ).toBe("http://fedora.tail457b41.ts.net:7878");
+    // The internal addresses used for probes never change.
+    expect(config.services.sonarr.url).toBe("http://127.0.0.1:8989");
+    expect(config.services.radarr.url).toBe("http://127.0.0.1:7878");
+  });
+
+  it("honours explicit public URL overrides for the arrs", () => {
+    const config = loadConfig({
+      serverDir: tempServerDir(),
+      env: {
+        SONARR_PUBLIC_URL: "https://sonarr.example.test/",
+        RADARR_PUBLIC_URL: "https://radarr.example.test",
+      },
+      readDotEnv: false,
+      detectLan: () => "192.168.0.97",
+    });
+
+    expect(serviceUrlForRequest(config, "sonarr", { host: "100.90.93.111:4000" })).toBe(
+      "https://sonarr.example.test",
+    );
+    expect(serviceUrlForRequest(config, "radarr", {})).toBe(
+      "https://radarr.example.test",
+    );
   });
 
   it("keeps the scheme, port and base path when substituting the LAN address", () => {

@@ -33,6 +33,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { showHash, type ShowReturnContext } from "@/hooks/use-hash-route";
 
 const TICKS_PER_SECOND = 10_000_000;
 const REPORT_INTERVAL_MS = 10_000;
@@ -45,7 +46,7 @@ const RECOVERY_FATAL_GRACE_MS = 1_500;
 
 type MediaIssue = "codec" | "stream";
 
-export function PlayPage({ id }: { id: string }) {
+export function PlayPage({ id, from }: { id: string; from?: ShowReturnContext }) {
   const queryClient = useQueryClient();
   const [quality, setQuality] = useState<PlaybackQuality>("max");
   const playbackQuery = useQuery({
@@ -589,6 +590,14 @@ export function PlayPage({ id }: { id: string }) {
     stopPlayback(durationTicks);
   }
 
+  // Return to the season the episode came from instead of dumping the user in
+  // the library. Movies and context-less deep links keep the library link.
+  const backHref = from ? showHash(from.source, from.id, from.season) : "#/library";
+  const backLabel = from
+    ? (item?.seriesName ??
+      (from.season !== undefined ? `Back to season ${from.season}` : "Back to show"))
+    : "Back to Library";
+
   if (playbackQuery.isLoading) {
     return <PlaybackLoading />;
   }
@@ -598,6 +607,8 @@ export function PlayPage({ id }: { id: string }) {
       <PlaybackMessage
         title="Could not load this video"
         detail={playbackQuery.error.message}
+        backHref={backHref}
+        backLabel={backLabel}
       />
     );
   }
@@ -613,6 +624,8 @@ export function PlayPage({ id }: { id: string }) {
             ? "Sign out and sign in again to refresh your Jellyfin session."
             : "Check that Jellyfin is running and reachable, then try again.")
         }
+        backHref={backHref}
+        backLabel={backLabel}
       />
     );
   }
@@ -624,11 +637,11 @@ export function PlayPage({ id }: { id: string }) {
   return (
     <div className="flex flex-col gap-6">
       <a
-        href="#/library"
+        href={backHref}
         className="inline-flex w-fit items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
       >
         <ChevronLeftIcon className="size-4" />
-        Back to Library
+        {backLabel}
       </a>
 
       <div className="flex flex-col gap-3">
@@ -656,9 +669,13 @@ export function PlayPage({ id }: { id: string }) {
           {item.type === "Episode" && item.seriesName ? (
             <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
               <span>{item.seriesName}</span>
-              {item.seriesId ? (
+              {from || item.seriesId ? (
                 <a
-                  href={`#/library/show/jellyfin/${encodeURIComponent(item.seriesId)}`}
+                  href={
+                    from
+                      ? backHref
+                      : `#/library/show/jellyfin/${encodeURIComponent(item.seriesId ?? "")}`
+                  }
                   className="underline-offset-4 hover:text-foreground hover:underline"
                 >
                   View show
@@ -795,18 +812,22 @@ export function PlayPage({ id }: { id: string }) {
 function PlaybackMessage({
   title,
   detail,
+  backHref = "#/library",
+  backLabel = "Back to Library",
 }: {
   title: string;
   detail: string;
+  backHref?: string;
+  backLabel?: string;
 }) {
   return (
     <div className="flex flex-col gap-6">
       <a
-        href="#/library"
+        href={backHref}
         className="inline-flex w-fit items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
       >
         <ChevronLeftIcon className="size-4" />
-        Back to Library
+        {backLabel}
       </a>
       <Alert variant="destructive">
         <CircleAlertIcon />

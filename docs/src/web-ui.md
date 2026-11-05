@@ -3,8 +3,11 @@
 The dashboard is a TypeScript app under `server/` with two workspaces. It has
 three pages — Services, Library and Search — selected by hash routes
 (`#/services`, `#/library`, `#/search`). An empty or unknown hash lands on the
-library (`#/library`). Services has **Services** and **VPN**
-tabs; the VPN tab runs a live leak test when opened and on demand.
+library (`#/library`). The selected season lives in the URL
+(`#/library/show/<source>/<id>/season/<n>`), and the player records
+where it was opened from so it can return to that season. Services has
+**Services** and **VPN** tabs; the VPN tab runs a live test when opened and on
+demand.
 
 ```
 server/backend/    Fastify API, also serves frontend/dist
@@ -44,7 +47,8 @@ survive a rerun.
 | `HOST` | `0.0.0.0` in the compose container | Backend bind address |
 | `PORT` | `4000` | Backend port (`DASHBOARD_PORT` in compose) |
 | `JELLYFIN_URL` | `http://127.0.0.1:8096` | Jellyfin base URL used by the backend |
-| `JELLYFIN_PUBLIC_URL` | request host, LAN address as fallback | Browser-facing Jellyfin URL for video playback |
+| `JELLYFIN_PUBLIC_URL` | request host, LAN address as fallback | Browser-facing Jellyfin URL for video playback and service links |
+| `SONARR_PUBLIC_URL` / `RADARR_PUBLIC_URL` | request host, LAN address as fallback | Browser-facing arr URLs for service links and redirects |
 | `JELLYFIN_API_KEY` | — | Written by churn after Jellyfin setup |
 | `JELLYFIN_ADMIN_USER` | `admin` | Optional non-interactive setup username |
 | `JELLYFIN_ADMIN_PASSWORD` | — | Optional non-interactive setup password |
@@ -425,6 +429,12 @@ something else, such as a reverse-proxy name; an explicit value always wins.
 The backend logs the effective fallback at startup. Playback failures show the
 media error alert with an **Open Jellyfin** fallback, except for an HLS
 interruption, which offers **Retry**.
+
+The Services page and `/api/services/:id/open` follow the same rule: each
+service link uses the host the browser used to reach the dashboard, so a
+tailnet client sees `http://100.x.y.z:8096` rather than `http://127.0.0.1:8096`.
+Internal health probes still call the configured internal URLs.
+`SONARR_PUBLIC_URL` and `RADARR_PUBLIC_URL` override the arr links.
 
 ## Roadmap
 

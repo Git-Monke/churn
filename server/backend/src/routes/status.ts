@@ -1,20 +1,31 @@
 import type { FastifyInstance } from "fastify";
 
-import type { AppConfig, ServiceConfig, ServiceId } from "../config.js";
+import {
+  serviceUrlForRequest,
+  type AppConfig,
+  type ServiceConfig,
+  type ServiceId,
+} from "../config.js";
 import { isUnauthorized, UpstreamError } from "../errors.js";
 import type { ServiceState, ServiceStatus, StatusResponse } from "../types.js";
 import { createJellyfinClient } from "../upstream/jellyfin.js";
 import { createArrClient } from "../upstream/servarr.js";
 
 export function registerStatusRoutes(app: FastifyInstance, config: AppConfig): void {
-  app.get("/api/status", async (_request, reply) => {
+  app.get("/api/status", async (request, reply) => {
     reply.header("cache-control", "no-store");
     const checkedAt = new Date().toISOString();
-    const services = await Promise.all([
+    const probed = await Promise.all([
       probeJellyfin(config.services.jellyfin, config.requestTimeoutMs),
       probeArr("sonarr", config.services.sonarr, config.requestTimeoutMs),
       probeArr("radarr", config.services.radarr, config.requestTimeoutMs),
     ]);
+    // Health checks run against the internal URLs; the browser gets an address
+    // it can actually reach (LAN, tailnet or MagicDNS host).
+    const services = probed.map((service) => ({
+      ...service,
+      url: serviceUrlForRequest(config, service.id, request.headers),
+    }));
     const response: StatusResponse = { checkedAt, services };
     return response;
   });

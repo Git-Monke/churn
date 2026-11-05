@@ -3,12 +3,19 @@ import { useEffect, useState } from "react";
 export type ShowSource = "jellyfin" | "sonarr";
 export type MovieSource = "jellyfin" | "radarr";
 
+/** Where playback was started from, so the player can return there. */
+export interface ShowReturnContext {
+  source: ShowSource;
+  id: string;
+  season?: number;
+}
+
 export type AppRoute =
   | { page: "services" }
   | { page: "library" }
-  | { page: "show"; source: ShowSource; id: string }
+  | { page: "show"; source: ShowSource; id: string; season?: number }
   | { page: "movie"; source: MovieSource; id: string }
-  | { page: "play"; id: string }
+  | { page: "play"; id: string; from?: ShowReturnContext }
   | { page: "search" }
   | { page: "people" };
 
@@ -24,9 +31,42 @@ export function useHashRoute(): AppRoute {
   return route;
 }
 
+/** Replace the current hash without adding a history entry. */
+export function replaceHash(hash: string): void {
+  if (window.location.hash === hash) {
+    return;
+  }
+  window.history.replaceState(null, "", hash);
+  // `replaceState` does not emit `hashchange`; notify the router ourselves.
+  window.dispatchEvent(new HashChangeEvent("hashchange"));
+}
+
+/** Hash for a show page, optionally pinned to one season. */
+export function showHash(source: ShowSource, id: string, season?: number): string {
+  const base = `#/library/show/${source}/${encodeURIComponent(id)}`;
+  return season === undefined ? base : `${base}/season/${season}`;
+}
+
+/**
+ * Hash for the player. `from` carries the show/season context so the player's
+ * back link can return to the season the episode belongs to.
+ */
+export function playHash(itemId: string, from?: ShowReturnContext): string {
+  const base = `#/play/${encodeURIComponent(itemId)}`;
+  if (!from) {
+    return base;
+  }
+  const params = new URLSearchParams({ source: from.source, show: from.id });
+  if (from.season !== undefined) {
+    params.set("season", String(from.season));
+  }
+  return `${base}?${params.toString()}`;
+}
+
 export function parseHash(hash: string): AppRoute {
-  const path = hash.replace(/^#\/?/, "");
-  const parts = path.split("/").filter(Boolean);
+  const [path, search = ""] = hash.replace(/^#\/?/, "").split("?");
+  const parts = (path ?? "").split("/").filter(Boolean);
+  const query = new URLSearchParams(search);
 
   if (parts.length === 0) {
     return { page: "library" };
@@ -44,19 +84,24 @@ export function parseHash(hash: string): AppRoute {
     return { page: "people" };
   }
   if (parts.length === 2 && parts[0] === "play" && parts[1]) {
-    return { page: "play", id: decodeURIComponent(parts[1]) };
+    const from = parseReturnContext(query);
+    return from
+      ? { page: "play", id: decodeURIComponent(parts[1]), from }
+      : { page: "play", id: decodeURIComponent(parts[1]) };
   }
   if (
-    parts.length === 4 &&
+    (parts.length === 4 || parts.length === 6) &&
     parts[0] === "library" &&
     parts[1] === "show" &&
     (parts[2] === "jellyfin" || parts[2] === "sonarr") &&
     parts[3]
   ) {
+    const season = parts.length === 6 && parts[4] === "season" ? parseSeason(parts[5]) : undefined;
     return {
       page: "show",
       source: parts[2],
       id: decodeURIComponent(parts[3]),
+      ...(season === undefined ? {} : { season }),
     };
   }
   if (
@@ -73,4 +118,26 @@ export function parseHash(hash: string): AppRoute {
     };
   }
   return { page: "library" };
+}
+
+function parseReturnContext(query: URLSearchParams): ShowReturnContext | undefined {
+  const source = query.get("source");
+  const id = query.get("show");
+  if ((source !== "jellyfin" && source !== "sonarr") || !id) {
+    return undefined;
+  }
+  const season = parseSeason(query.get("season"));
+  return {
+    source,
+    id,
+    ...(season === undefined ? {} : { season }),
+  };
+}
+
+function parseSeason(value: string | null | undefined): number | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const season = Number(value);
+  return Number.isInteger(season) && season >= 0 ? season : undefined;
 }

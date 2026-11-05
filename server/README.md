@@ -63,7 +63,8 @@ preserves unknown keys, so hand-added settings survive a rerun.
 | `HOST` | `127.0.0.1` | Backend bind address |
 | `PORT` | `4000` | Backend port |
 | `JELLYFIN_URL` | `http://127.0.0.1:8096` | Jellyfin base URL used by the backend |
-| `JELLYFIN_PUBLIC_URL` | request host, LAN address as fallback | Jellyfin URL the browser uses for video streams |
+| `JELLYFIN_PUBLIC_URL` | request host, LAN address as fallback | Jellyfin URL the browser uses for video streams and service links |
+| `SONARR_PUBLIC_URL` / `RADARR_PUBLIC_URL` | request host, LAN address as fallback | Browser-facing arr URLs for service links and redirects |
 | `JELLYFIN_API_KEY` | — | Written by churn after Jellyfin setup |
 | `JELLYFIN_ADMIN_USER` | `admin` | Optional non-interactive setup username |
 | `JELLYFIN_ADMIN_PASSWORD` | — | Optional non-interactive setup password; not persisted |
@@ -434,6 +435,14 @@ proxy or a TLS name. An explicit value always wins. Preview the fallback in the
 backend's startup log (`video streams follow the request host (fallback …)`).
 Playback failures show the media error alert with an **Open Jellyfin** fallback,
 except for an HLS interruption, which offers **Retry**.
+
+The same rule applies to the links on the Services page and to
+`/api/services/:id/open`: status responses report each service at the host the
+browser used (so a Tailscale client sees `http://100.x.y.z:8096`, not
+`http://127.0.0.1:8096`), while health probes keep using the internal
+`JELLYFIN_URL`/`SONARR_URL`/`RADARR_URL`. Set `SONARR_PUBLIC_URL` or
+`RADARR_PUBLIC_URL` when those services are reachable at a different public
+address.
 
 ## Development
 
