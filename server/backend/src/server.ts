@@ -32,6 +32,7 @@ import { registerRequestedLibraryRoutes } from "./routes/requested.js";
 import { registerSearchRoutes } from "./routes/search.js";
 import { registerServiceRoutes } from "./routes/services.js";
 import { registerShowRoutes } from "./routes/shows.js";
+import { registerStatsRoutes } from "./routes/stats.js";
 import { registerStatusRoutes } from "./routes/status.js";
 import { registerVpnRoutes } from "./routes/vpn.js";
 
@@ -162,6 +163,7 @@ export async function buildServer(
   registerAuthRoutes(app, config, { store: sessionStore, throttle: loginThrottle });
   registerProfileRoutes(app, config, { store: sessionStore });
   registerStatusRoutes(app, config);
+  registerStatsRoutes(app, config);
   registerVpnRoutes(app, config);
   registerLibraryRoutes(app, config, releaseSearch, mediaAttribution);
   registerPlaybackRoutes(app, config, introDb);

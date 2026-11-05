@@ -8,7 +8,13 @@ export function formatBytes(bytes: number): string {
   if (bytes < 1024 ** 3) {
     return `${Math.round(bytes / 1024 ** 2)} MB`;
   }
-  return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+  if (bytes < 1024 ** 4) {
+    return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+  }
+  if (bytes < 1024 ** 5) {
+    return `${(bytes / 1024 ** 4).toFixed(1)} TB`;
+  }
+  return `${(bytes / 1024 ** 5).toFixed(1)} PB`;
 }
 
 export function formatSpeed(bytesPerSecond: number): string {

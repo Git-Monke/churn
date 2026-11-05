@@ -20,6 +20,36 @@ export interface StatusResponse {
   services: ServiceStatus[];
 }
 
+export type StatsSource = "qbittorrent" | "disk";
+
+export interface StatsSourceError {
+  source: StatsSource;
+  message: string;
+}
+
+export interface StatsQbittorrent {
+  /** All-time downloaded bytes. */
+  totalDownloadedBytes: number;
+  /** All-time uploaded bytes. */
+  totalUploadedBytes: number;
+}
+
+export interface StatsDiskUsage {
+  totalBytes: number;
+  freeBytes: number;
+  usedBytes: number;
+  /** One decimal, 0–100. */
+  usedPercent: number;
+}
+
+export interface StatsResponse {
+  checkedAt: string;
+  qbittorrent?: StatsQbittorrent;
+  disk?: StatsDiskUsage;
+  /** Sources that could not be read; the rest of the response is still valid. */
+  errors: StatsSourceError[];
+}
+
 export type VpnCheckId =
   | "mullvad_exit"
   | "kill_switch"

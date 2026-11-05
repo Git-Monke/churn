@@ -40,6 +40,24 @@ export interface QbittorrentTorrent {
   tags?: string;
 }
 
+/** The qBittorrent `server_state` fields used by the stats page. */
+export interface QbittorrentServerState {
+  /** All-time downloaded bytes. */
+  alltime_dl?: number;
+  /** All-time uploaded bytes. */
+  alltime_ul?: number;
+  /** Bytes downloaded since qBittorrent started (session only). */
+  dl_info_data?: number;
+  /** Bytes uploaded since qBittorrent started (session only). */
+  up_info_data?: number;
+  /** Free bytes on the disk qBittorrent writes to. */
+  free_space_on_disk?: number;
+}
+
+export interface QbittorrentMainData {
+  server_state?: QbittorrentServerState;
+}
+
 export type QbittorrentContentLayout = "Original" | "Subfolder" | "NoSubfolder";
 
 export interface QbittorrentAddTorrentInput {
@@ -83,6 +101,14 @@ export function createQbittorrentClient(config: QbittorrentConfig, timeoutMs: nu
   return {
     async getTorrents(): Promise<QbittorrentTorrent[]> {
       return fetchJson<QbittorrentTorrent[]>("qbittorrent", `${config.url}/api/v2/torrents/info`, {
+        timeoutMs,
+        headers: authHeaders(),
+      });
+    },
+
+    /** Full sync payload; `server_state` carries the all-time totals and free space. */
+    async getMainData(): Promise<QbittorrentMainData> {
+      return fetchJson<QbittorrentMainData>("qbittorrent", `${config.url}/api/v2/sync/maindata`, {
         timeoutMs,
         headers: authHeaders(),
       });

@@ -31,6 +31,7 @@ import type {
   ShowDownloadsResponse,
   ShowReleasesResponse,
   ShowSource,
+  StatsResponse,
   StatusResponse,
   VpnStatusResponse,
 } from "./types";
@@ -124,6 +125,10 @@ export function deleteProfile(id: string): Promise<void> {
 
 export function fetchStatus(): Promise<StatusResponse> {
   return getJson<StatusResponse>("/api/status");
+}
+
+export function fetchStats(): Promise<StatsResponse> {
+  return getJson<StatsResponse>("/api/stats");
 }
 
 export function fetchVpnStatus(): Promise<VpnStatusResponse> {

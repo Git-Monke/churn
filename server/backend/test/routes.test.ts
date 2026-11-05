@@ -463,6 +463,83 @@ describe("status", () => {
   });
 });
 
+describe("stats", () => {
+  it("requires a dashboard session", async () => {
+    const app = await buildServer(appConfig);
+    const response = await app.inject({ method: "GET", url: "/api/stats" });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json().error.code).toBe("unauthenticated");
+    await app.close();
+  });
+
+  it("returns all-time transfer totals and disk usage", async () => {
+    installFetch((url) => {
+      if (url.endsWith("/api/v2/sync/maindata")) {
+        return jsonResponse({
+          server_state: { alltime_dl: 300, alltime_ul: 100, free_space_on_disk: 500 },
+        });
+      }
+      if (url.endsWith("/api/v3/diskspace")) {
+        return jsonResponse([{ path: "/data", freeSpace: 600, totalSpace: 2_000 }]);
+      }
+      if (url.endsWith("/api/v3/rootfolder")) {
+        return jsonResponse([{ path: "/data/media/tv", accessible: true }]);
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const config = makeConfig();
+    config.qbittorrent.apiKey = "qbt-test-key";
+    const app = await buildAuthedServer(config);
+    const response = await app.inject({ method: "GET", url: "/api/stats" });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(body).toMatchObject({
+      qbittorrent: { totalDownloadedBytes: 300, totalUploadedBytes: 100 },
+      disk: { totalBytes: 2_000, freeBytes: 500, usedBytes: 1_500, usedPercent: 75 },
+      errors: [],
+    });
+    await app.close();
+  });
+
+  it("keeps the disk section when qBittorrent is unreachable", async () => {
+    installFetch((url) => {
+      if (url.includes("qbittorrent.test")) {
+        throw new Error("connection refused");
+      }
+      if (url.endsWith("/api/v3/diskspace")) {
+        return jsonResponse([{ path: "/data", freeSpace: 600, totalSpace: 2_000 }]);
+      }
+      if (url.endsWith("/api/v3/rootfolder")) {
+        return jsonResponse([{ path: "/data/media/tv", accessible: true }]);
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const config = makeConfig();
+    config.qbittorrent.apiKey = "qbt-test-key";
+    const app = await buildAuthedServer(config);
+    const response = await app.inject({ method: "GET", url: "/api/stats" });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(body.disk).toEqual({
+      totalBytes: 2_000,
+      freeBytes: 600,
+      usedBytes: 1_400,
+      usedPercent: 70,
+    });
+    expect(body.qbittorrent).toBeUndefined();
+    expect(body.errors).toEqual([
+      { source: "qbittorrent", message: "qbittorrent is unreachable" },
+    ]);
+    await app.close();
+  });
+});
+
 describe("library", () => {
   it("returns setup_required when Jellyfin's wizard is incomplete", async () => {
     installFetch(() => jsonResponse({ Version: "10.11.11", StartupWizardCompleted: false }));

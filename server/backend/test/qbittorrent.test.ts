@@ -31,6 +31,41 @@ describe("qBittorrent client", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("reads all-time transfer totals and free space from sync maindata", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      expect(String(input)).toBe("http://qbittorrent.test:8080/api/v2/sync/maindata");
+      expect(init?.headers).toMatchObject({
+        accept: "application/json",
+        authorization: "Bearer qbt_test-key",
+      });
+      return new Response(
+        JSON.stringify({
+          server_state: {
+            alltime_dl: 1024,
+            alltime_ul: 256,
+            free_space_on_disk: 4096,
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createQbittorrentClient(
+      { url: "http://qbittorrent.test:8080", apiKey: "qbt_test-key" },
+      500,
+    );
+
+    await expect(client.getMainData()).resolves.toEqual({
+      server_state: {
+        alltime_dl: 1024,
+        alltime_ul: 256,
+        free_space_on_disk: 4096,
+      },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("removes a duplicate torrent without deleting its files", async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       expect(String(input)).toBe("http://qbittorrent.test:8080/api/v2/torrents/delete");

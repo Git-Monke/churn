@@ -77,6 +77,32 @@ export interface StatusResponse {
   services: ServiceStatus[];
 }
 
+export type StatsSource = "qbittorrent" | "disk";
+
+export interface StatsSourceError {
+  source: StatsSource;
+  message: string;
+}
+
+export interface StatsQbittorrent {
+  totalDownloadedBytes: number;
+  totalUploadedBytes: number;
+}
+
+export interface StatsDiskUsage {
+  totalBytes: number;
+  freeBytes: number;
+  usedBytes: number;
+  usedPercent: number;
+}
+
+export interface StatsResponse {
+  checkedAt: string;
+  qbittorrent?: StatsQbittorrent;
+  disk?: StatsDiskUsage;
+  errors: StatsSourceError[];
+}
+
 export type VpnCheckId =
   | "mullvad_exit"
   | "kill_switch"

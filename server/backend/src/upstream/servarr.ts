@@ -30,6 +30,13 @@ export interface ServarrRootFolder {
   freeSpace?: number;
 }
 
+export interface ServarrDiskSpace {
+  path: string;
+  label?: string;
+  freeSpace?: number;
+  totalSpace?: number;
+}
+
 export interface ServarrImage {
   coverType?: string;
   url?: string;
@@ -322,6 +329,10 @@ export function createArrClient(service: ArrServiceId, config: ServiceConfig, ti
 
     async getRootFolders(): Promise<ServarrRootFolder[]> {
       return get<ServarrRootFolder[]>("/api/v3/rootfolder");
+    },
+
+    async getDiskSpace(): Promise<ServarrDiskSpace[]> {
+      return get<ServarrDiskSpace[]>("/api/v3/diskspace");
     },
 
     async getQueue(): Promise<ServarrQueueRecord[]> {

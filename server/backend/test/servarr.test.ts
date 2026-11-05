@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { createArrClient } from "../src/upstream/servarr.js";
 import {
   arrMonitorName,
   interleaveResults,
@@ -200,5 +201,37 @@ describe("interleaveResults", () => {
     expect(
       interleaveResults([[series("s1"), series("s2")], [movie("m1")]]).map((item) => item.key),
     ).toEqual(["s1", "m1", "s2"]);
+  });
+});
+
+describe("arr client", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("reads disk space with the arr API key", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      expect(String(input)).toBe("http://sonarr.test:8989/api/v3/diskspace");
+      expect(init?.headers).toMatchObject({
+        accept: "application/json",
+        "X-Api-Key": "sonarr-key",
+      });
+      return new Response(
+        JSON.stringify([{ path: "/data", label: "data", freeSpace: 1024, totalSpace: 4096 }]),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createArrClient(
+      "sonarr",
+      { id: "sonarr", name: "Sonarr", url: "http://sonarr.test:8989", apiKey: "sonarr-key" },
+      500,
+    );
+
+    await expect(client.getDiskSpace()).resolves.toEqual([
+      { path: "/data", label: "data", freeSpace: 1024, totalSpace: 4096 },
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
