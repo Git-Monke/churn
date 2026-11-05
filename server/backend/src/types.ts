@@ -1,4 +1,5 @@
 import type { ServiceId } from "./config.js";
+import type { MediaAddedBy } from "./media-attribution.js";
 import type { ReleasePickReason } from "./release-pick.js";
 import type { ReleaseRepickEvent } from "./release-events.js";
 
@@ -77,6 +78,7 @@ export interface LibraryItem {
   tmdbId?: number;
   tvdbId?: number;
   imdbId?: string;
+  addedBy?: MediaAddedBy;
 }
 
 export interface LibraryResponse {
@@ -103,6 +105,7 @@ export interface RequestedLibraryItem {
   tmdbId?: number;
   tvdbId?: number;
   imdbId?: string;
+  addedBy?: MediaAddedBy;
   /**
    * Arr import hint: the arr has a file, but only Jellyfin can say whether the
    * title is playable. Used for scan-state and release-prefetch decisions, never

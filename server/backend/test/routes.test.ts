@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -904,8 +904,9 @@ describe("remove Jellyfin title", () => {
       kind: "movie",
       id: 7,
     });
-    const movieDelete = calls.find((call) => call.url.includes("/api/v3/movie/7"));
-    expect(movieDelete?.method).toBe("DELETE");
+    const movieDelete = calls.find(
+      (call) => call.url.includes("/api/v3/movie/7") && call.method === "DELETE",
+    );
     expect(movieDelete?.url).toContain("deleteFiles=true");
     expect(
       calls.some(
@@ -978,14 +979,68 @@ describe("cancel requested title", () => {
     expect(queueDelete?.url).toContain("removeFromClient=true");
     expect(queueDelete?.url).toContain("skipRedownload=true");
     expect(calls.some((call) => call.url.includes("/api/v3/queue/12"))).toBe(false);
-    const movieDelete = calls.find((call) => call.url.includes("/api/v3/movie/7"));
-    expect(movieDelete?.method).toBe("DELETE");
+    const movieDelete = calls.find(
+      (call) => call.url.includes("/api/v3/movie/7") && call.method === "DELETE",
+    );
     expect(movieDelete?.url).toContain("deleteFiles=true");
     expect(
       calls.some(
         (call) => call.url.includes("/Library/Refresh") && call.method === "POST",
       ),
     ).toBe(true);
+    await app.close();
+  });
+
+  it("removes the added-by tag when a title is cancelled", async () => {
+    const config = makeConfig();
+    mkdirSync(config.stateDir, { recursive: true });
+    const attributionPath = path.join(config.stateDir, "media-attribution.json");
+    writeFileSync(
+      attributionPath,
+      JSON.stringify({
+        version: 1,
+        entries: [
+          {
+            key: "movie:tmdb:438631",
+            addedBy: { id: "user-1", name: "Ada" },
+            addedAt: "2026-01-01T00:00:00.000Z",
+          },
+        ],
+      }),
+      "utf8",
+    );
+    installFetch((url, init) => {
+      if (url.includes("radarr.test") && url.includes("/api/v3/queue?")) {
+        return jsonResponse({ records: [] });
+      }
+      if (url.includes("radarr.test") && url.includes("/api/v3/movie/7")) {
+        if (init?.method === "DELETE") {
+          return new Response(null, { status: 200 });
+        }
+        return jsonResponse({
+          id: 7,
+          title: "Dune",
+          year: 2021,
+          tmdbId: 438631,
+        });
+      }
+      if (url.includes("jellyfin.test") && url.includes("/Library/Refresh")) {
+        return new Response(null, { status: 204 });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildAuthedServer(config);
+    const response = await app.inject({
+      method: "DELETE",
+      url: "/api/library/requested/radarr/7",
+    });
+    expect(response.statusCode).toBe(200);
+
+    const persisted = JSON.parse(readFileSync(attributionPath, "utf8")) as {
+      entries: unknown[];
+    };
+    expect(persisted.entries).toEqual([]);
     await app.close();
   });
 
@@ -1027,9 +1082,9 @@ describe("cancel requested title", () => {
       id: 42,
       queueRemoved: 2,
     });
-    expect(calls).toHaveLength(1);
-    expect(calls[0]?.method).toBe("DELETE");
-    expect(calls[0]?.url).toContain("deleteFiles=true");
+    const deletes = calls.filter((call) => call.method === "DELETE");
+    expect(deletes).toHaveLength(1);
+    expect(deletes[0]?.url).toContain("deleteFiles=true");
     await app.close();
   });
 
@@ -1692,6 +1747,96 @@ describe("create requests", () => {
     expect(command).toBeUndefined();
     expect(grabbed).toBeUndefined();
     expect(requestedUrls.some((url) => url.includes("/api/v3/release"))).toBe(false);
+    await app.close();
+  });
+
+  it("records the signed-in user as the title's adder", async () => {
+    let added = false;
+    installFetch((url, init) => {
+      if (url.includes("sonarr.test") && url.endsWith("/api/v3/series")) {
+        return jsonResponse([]);
+      }
+      if (url.includes("/movie/lookup")) return jsonResponse([movieLookup]);
+      if (url.endsWith("/api/v3/movie")) {
+        if (init?.method === "POST") {
+          added = true;
+          return jsonResponse({ ...movieLookup, id: 7 });
+        }
+        return jsonResponse(added ? [{ ...movieLookup, id: 7 }] : []);
+      }
+      if (url.endsWith("/api/v3/release") && init?.method === "POST") {
+        return jsonResponse({ id: 1 });
+      }
+      if (url.endsWith("/api/v3/command") && init?.method === "POST") {
+        return jsonResponse({ id: 1 });
+      }
+      if (url.includes("/qualityprofile")) return jsonResponse(profiles);
+      if (url.includes("/rootfolder")) return jsonResponse(rootFolders);
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildAuthedServer(makeConfig());
+    const addedResponse = await app.inject({
+      method: "POST",
+      url: "/api/requests",
+      payload: { kind: "movie", tmdbId: 438631 },
+    });
+    expect(addedResponse.statusCode).toBe(200);
+
+    const response = await app.inject({ method: "GET", url: "/api/library/requested" });
+    const body = response.json();
+    expect(body.items[0]).toMatchObject({
+      key: "movie:438631",
+      addedBy: { id: "test-user", name: "tester" },
+    });
+    await app.close();
+  });
+
+  it("does not claim an existing title that was already in the library", async () => {
+    const config = makeConfig();
+    mkdirSync(config.stateDir, { recursive: true });
+    writeFileSync(
+      path.join(config.stateDir, "media-attribution.json"),
+      JSON.stringify({
+        version: 1,
+        entries: [
+          {
+            key: "movie:tmdb:438631",
+            addedBy: { id: "original-user", name: "Original" },
+            addedAt: "2026-01-01T00:00:00.000Z",
+          },
+        ],
+      }),
+      "utf8",
+    );
+
+    installFetch((url, init) => {
+      if (url.includes("sonarr.test") && url.endsWith("/api/v3/series")) {
+        return jsonResponse([]);
+      }
+      if (url.includes("/movie/lookup")) return jsonResponse([movieLookup]);
+      if (url.endsWith("/api/v3/movie")) {
+        if (init?.method === "POST") throw new Error("must not add a duplicate");
+        return jsonResponse([{ ...movieLookup, id: 9 }]);
+      }
+      if (url.includes("/qualityprofile")) return jsonResponse(profiles);
+      if (url.includes("/rootfolder")) return jsonResponse(rootFolders);
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildAuthedServer(config);
+    const added = await app.inject({
+      method: "POST",
+      url: "/api/requests",
+      payload: { kind: "movie", tmdbId: 438631 },
+    });
+    expect(added.json()).toMatchObject({ status: "already_exists" });
+
+    const response = await app.inject({ method: "GET", url: "/api/library/requested" });
+    expect(response.json().items[0]).toMatchObject({
+      key: "movie:438631",
+      addedBy: { id: "original-user", name: "Original" },
+    });
     await app.close();
   });
 

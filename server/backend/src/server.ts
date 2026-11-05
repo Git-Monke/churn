@@ -14,6 +14,7 @@ import {
 import type { AppConfig } from "./config.js";
 import { ApiError, UpstreamError } from "./errors.js";
 import { createLibraryScanWatcher } from "./library-scan.js";
+import { createMediaAttributionStore } from "./media-attribution.js";
 import { createMediaCache } from "./media-cache.js";
 import { createReleaseSearchService } from "./release-search.js";
 import { createReleaseEventStore } from "./release-events.js";
@@ -51,6 +52,10 @@ export async function buildServer(
   const releaseEvents = createReleaseEventStore();
   const cacheDir = resolveReleaseCacheDir(config.serverDir);
   const mediaCache = createMediaCache({ cacheDir: path.join(cacheDir, "media") });
+  const mediaAttribution = createMediaAttributionStore({
+    stateDir: config.stateDir,
+    onWarning: (message) => app.log.warn(message),
+  });
   const releaseSearch = createReleaseSearchService(config, mediaCache, {
     cacheDir: path.join(cacheDir, "prowlarr"),
   });
@@ -150,12 +155,12 @@ export async function buildServer(
   registerProfileRoutes(app, config, { store: sessionStore });
   registerStatusRoutes(app, config);
   registerVpnRoutes(app, config);
-  registerLibraryRoutes(app, config, releaseSearch);
+  registerLibraryRoutes(app, config, releaseSearch, mediaAttribution);
   registerPlaybackRoutes(app, config);
-  registerRequestedLibraryRoutes(app, config, mediaCache, releaseSearch);
+  registerRequestedLibraryRoutes(app, config, mediaCache, releaseSearch, mediaAttribution);
   registerMovieRoutes(app, config, releaseSearch);
   registerSearchRoutes(app, config);
-  registerRequestRoutes(app, config, mediaCache, releaseSearch);
+  registerRequestRoutes(app, config, mediaCache, releaseSearch, mediaAttribution);
   registerActivityRoutes(app, config, releaseEvents);
   registerShowRoutes(app, config, releaseSearch);
   registerServiceRoutes(app, config);

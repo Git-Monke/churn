@@ -1,7 +1,19 @@
 import { useState } from "react";
-import { ChevronRightIcon, FilmIcon, LoaderCircleIcon, Trash2Icon, TvIcon } from "lucide-react";
+import {
+  ChevronRightIcon,
+  FilmIcon,
+  LoaderCircleIcon,
+  Trash2Icon,
+  TvIcon,
+  UserRoundIcon,
+} from "lucide-react";
 
-import type { ActivityItem, LibraryItem, RequestedLibraryItem } from "@/api/types";
+import type {
+  ActivityItem,
+  LibraryItem,
+  MediaAddedBy,
+  RequestedLibraryItem,
+} from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -118,7 +130,12 @@ function LibraryCard({ entry }: { entry: LibraryEntry }) {
           ) : null}
         </div>
 
-        <MetadataLine library={library} requested={requested} activity={activity} />
+        <MetadataLine
+          library={library}
+          requested={requested}
+          activity={activity}
+          addedBy={entry.addedBy}
+        />
 
         {activity ? (
           <div className="flex flex-col gap-1.5">
@@ -275,10 +292,12 @@ function MetadataLine({
   library,
   requested,
   activity,
+  addedBy,
 }: {
   library?: LibraryItem;
   requested?: RequestedLibraryItem;
   activity?: ActivityItem;
+  addedBy?: MediaAddedBy;
 }) {
   const rating = library?.rating ?? requested?.rating ?? activity?.rating;
   const officialRating = library?.officialRating;
@@ -292,6 +311,15 @@ function MetadataLine({
       {officialRating ? <span>{officialRating}</span> : null}
       {runtime !== undefined ? <span>{formatRuntime(runtime)}</span> : null}
       {network ? <span className="truncate">{network}</span> : null}
+      {addedBy ? (
+        <span
+          className="flex min-w-0 items-center gap-1"
+          title={`Added by ${addedBy.name}`}
+        >
+          <UserRoundIcon className="size-3 shrink-0" />
+          <span className="truncate">Added by {addedBy.name}</span>
+        </span>
+      ) : null}
     </div>
   );
 }

@@ -5,6 +5,7 @@ import {
   CircleAlertIcon,
   FilmIcon,
   SearchIcon,
+  UserRoundIcon,
   XIcon,
 } from "lucide-react";
 
@@ -31,6 +32,7 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useAuth } from "@/features/auth/AuthProvider";
 import { LibraryGrid, LibraryGridSkeleton } from "@/features/library/LibraryGrid";
 import { searchLibraryEntries } from "@/features/library/library-search";
 import { LibraryStateNotice } from "@/features/library/LibraryStateNotice";
@@ -44,8 +46,11 @@ type Filter = "all" | "Movie" | "Series";
 
 export function LibraryPage({ jellyfinUrl }: { jellyfinUrl?: string }) {
   const queryClient = useQueryClient();
+  const { session } = useAuth();
+  const currentUserId = session?.user?.id;
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
+  const [addedByMe, setAddedByMe] = useState(false);
   const [dismissedRepicks, setDismissedRepicks] = useState<number[]>([]);
   const [scanActive, setScanActive] = useState(false);
   const [activityActive, setActivityActive] = useState(false);
@@ -84,14 +89,23 @@ export function LibraryPage({ jellyfinUrl }: { jellyfinUrl?: string }) {
     () => searchLibraryEntries(displayEntries, query),
     [displayEntries, query],
   );
+  const mineActive = addedByMe && currentUserId !== undefined;
+  const scoped = useMemo(
+    () =>
+      mineActive
+        ? searched.filter((entry) => entry.addedBy?.id === currentUserId)
+        : searched,
+    [currentUserId, mineActive, searched],
+  );
   const filtered = useMemo(
     () =>
       filter === "all"
-        ? searched
-        : searched.filter((entry) => entry.type === filter),
-    [searched, filter],
+        ? scoped
+        : scoped.filter((entry) => entry.type === filter),
+    [filter, scoped],
   );
   const searching = query.trim().length > 0;
+  const narrowed = searching || mineActive;
   const activeCount = displayEntries.filter((entry) => entry.activity).length;
   const loading =
     (libraryQuery.isLoading || requestedQuery.isLoading || activityQuery.isLoading) &&
@@ -139,7 +153,7 @@ export function LibraryPage({ jellyfinUrl }: { jellyfinUrl?: string }) {
           <h2 className="font-heading text-xl font-semibold tracking-tight">Library</h2>
           {displayEntries.length > 0 ? (
             <span className="text-sm text-muted-foreground">
-              {searching ? `${searched.length} of ` : ""}
+              {narrowed ? `${scoped.length} of ` : ""}
               {displayEntries.length} {displayEntries.length === 1 ? "title" : "titles"}
             </span>
           ) : null}
@@ -155,34 +169,48 @@ export function LibraryPage({ jellyfinUrl }: { jellyfinUrl?: string }) {
       </div>
 
       {displayEntries.length > 0 ? (
-        <InputGroup className="w-full sm:max-w-xs">
-          <InputGroupAddon>
-            <SearchIcon />
-          </InputGroupAddon>
-          <InputGroupInput
-            type="search"
-            value={query}
-            aria-label="Search the library"
-            placeholder="Search titles, years, networks…"
-            onChange={(event) => setQuery(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Escape") {
-                setQuery("");
-              }
-            }}
-          />
-          {query ? (
-            <InputGroupAddon align="inline-end">
-              <InputGroupButton
-                size="icon-xs"
-                aria-label="Clear search"
-                onClick={() => setQuery("")}
-              >
-                <XIcon />
-              </InputGroupButton>
+        <div className="flex flex-wrap items-center gap-2">
+          <InputGroup className="w-full sm:max-w-xs">
+            <InputGroupAddon>
+              <SearchIcon />
             </InputGroupAddon>
+            <InputGroupInput
+              type="search"
+              value={query}
+              aria-label="Search the library"
+              placeholder="Search titles, years, networks…"
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  setQuery("");
+                }
+              }}
+            />
+            {query ? (
+              <InputGroupAddon align="inline-end">
+                <InputGroupButton
+                  size="icon-xs"
+                  aria-label="Clear search"
+                  onClick={() => setQuery("")}
+                >
+                  <XIcon />
+                </InputGroupButton>
+              </InputGroupAddon>
+            ) : null}
+          </InputGroup>
+          {currentUserId ? (
+            <Button
+              type="button"
+              size="sm"
+              variant={mineActive ? "default" : "outline"}
+              aria-pressed={mineActive}
+              onClick={() => setAddedByMe((value) => !value)}
+            >
+              <UserRoundIcon data-icon="inline-start" />
+              Added by me
+            </Button>
           ) : null}
-        </InputGroup>
+        </div>
       ) : null}
 
       {libraryQuery.error && !libraryQuery.data ? (
@@ -230,9 +258,9 @@ export function LibraryPage({ jellyfinUrl }: { jellyfinUrl?: string }) {
       {!loading && displayEntries.length > 0 ? (
         <Tabs value={filter} onValueChange={(value) => setLibraryFilter(value, setFilter)}>
           <TabsList>
-            <TabsTrigger value="all">All ({searched.length})</TabsTrigger>
-            <TabsTrigger value="Movie">{`Movies (${countType(searched, "Movie")})`}</TabsTrigger>
-            <TabsTrigger value="Series">{`Series (${countType(searched, "Series")})`}</TabsTrigger>
+            <TabsTrigger value="all">All ({scoped.length})</TabsTrigger>
+            <TabsTrigger value="Movie">{`Movies (${countType(scoped, "Movie")})`}</TabsTrigger>
+            <TabsTrigger value="Series">{`Series (${countType(scoped, "Series")})`}</TabsTrigger>
           </TabsList>
           <TabsContent value={filter}>
             {filtered.length > 0 ? (
@@ -244,17 +272,36 @@ export function LibraryPage({ jellyfinUrl }: { jellyfinUrl?: string }) {
                     <FilmIcon />
                   </EmptyMedia>
                   <EmptyTitle>
-                    {searching ? `No matches for “${query.trim()}”` : "Nothing here yet"}
+                    {searching
+                      ? `No matches for “${query.trim()}”`
+                      : mineActive
+                        ? "Nothing added by you"
+                        : "Nothing here yet"}
                   </EmptyTitle>
                   <EmptyDescription>
-                    No {filter === "Movie" ? "movies" : "series"} match
-                    {searching ? " your search" : " this view"}.
+                    {searching
+                      ? `No ${filter === "Movie" ? "movies" : "series"} match your search${
+                          mineActive ? " in your additions" : ""
+                        }.`
+                      : mineActive
+                        ? "Nothing in this view was added by you."
+                        : `No ${filter === "Movie" ? "movies" : "series"} match this view.`}
                   </EmptyDescription>
                 </EmptyHeader>
                 {searching ? (
                   <EmptyContent>
                     <Button variant="outline" size="sm" onClick={() => setQuery("")}>
                       Clear search
+                    </Button>
+                  </EmptyContent>
+                ) : mineActive ? (
+                  <EmptyContent>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setAddedByMe(false)}
+                    >
+                      Show everyone&apos;s library
                     </Button>
                   </EmptyContent>
                 ) : null}

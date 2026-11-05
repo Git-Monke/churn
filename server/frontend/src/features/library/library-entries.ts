@@ -1,4 +1,9 @@
-import type { ActivityItem, LibraryItem, RequestedLibraryItem } from "@/api/types";
+import type {
+  ActivityItem,
+  LibraryItem,
+  MediaAddedBy,
+  RequestedLibraryItem,
+} from "@/api/types";
 
 export type LibraryEntryStatus =
   | "available"
@@ -14,6 +19,7 @@ export interface LibraryEntry {
   library?: LibraryItem;
   requested?: RequestedLibraryItem;
   activity?: ActivityItem;
+  addedBy?: MediaAddedBy;
   status: LibraryEntryStatus;
 }
 
@@ -30,6 +36,7 @@ export function mergeLibraryEntries(
       key,
       type: item.type,
       library: item,
+      addedBy: item.addedBy,
       status: "available",
     });
   }
@@ -41,6 +48,9 @@ export function mergeLibraryEntries(
     const type = requested.kind === "movie" ? "Movie" : "Series";
     if (existing) {
       existing.requested = requested;
+      if (!existing.addedBy && requested.addedBy) {
+        existing.addedBy = requested.addedBy;
+      }
       entryStatus(existing);
       continue;
     }
@@ -48,6 +58,7 @@ export function mergeLibraryEntries(
       key: requested.key,
       type,
       requested,
+      addedBy: requested.addedBy,
       status: "requested",
     };
     entryStatus(entry);

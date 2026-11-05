@@ -3,6 +3,7 @@ import type { FastifyInstance } from "fastify";
 import { expireSession, requireAuth } from "../auth.js";
 import type { AppConfig } from "../config.js";
 import { ApiError, isUnauthorized, UpstreamError } from "../errors.js";
+import type { MediaAttributionStore } from "../media-attribution.js";
 import type { ReleaseSearchService } from "../release-search.js";
 import type {
   CancelJellyfinItemResponse,
@@ -26,6 +27,7 @@ export function registerLibraryRoutes(
   app: FastifyInstance,
   config: AppConfig,
   releaseSearch: ReleaseSearchService,
+  mediaAttribution: MediaAttributionStore,
 ): void {
   app.get("/api/library", async (request, reply) => {
     reply.header("cache-control", "no-store");
@@ -54,7 +56,8 @@ export function registerLibraryRoutes(
       const upstreamItems = await client.listLibrary(auth.user.id);
       const items = upstreamItems
         .map(mapJellyfinItem)
-        .filter((item): item is LibraryItem => item !== null);
+        .filter((item): item is LibraryItem => item !== null)
+        .map((item) => attachMediaAttribution(item, mediaAttribution));
       const response: LibraryResponse = {
         source: "jellyfin",
         state: "ok",
@@ -122,10 +125,21 @@ export function registerLibraryRoutes(
         providerIds,
       );
       if (arrMatch) {
-        return cancelRequestedTitle(config, arrMatch.service, arrMatch.arrId, releaseSearch);
+        return cancelRequestedTitle(
+          config,
+          arrMatch.service,
+          arrMatch.arrId,
+          releaseSearch,
+          mediaAttribution,
+        );
       }
 
       await client.deleteItem(itemId);
+      await mediaAttribution.remove({
+        kind,
+        tmdbId: providerIds.tmdbId,
+        tvdbId: providerIds.tvdbId,
+      });
       await removeQbittorrentForTitle(config, kind, title, item.ProductionYear);
 
       const response: CancelJellyfinItemResponse = {
@@ -184,6 +198,18 @@ export function registerLibraryRoutes(
       }
     },
   );
+}
+
+function attachMediaAttribution(
+  item: LibraryItem,
+  mediaAttribution: MediaAttributionStore,
+): LibraryItem {
+  const addedBy = mediaAttribution.get({
+    kind: item.type === "Movie" ? "movie" : "series",
+    tmdbId: item.tmdbId,
+    tvdbId: item.tvdbId,
+  });
+  return addedBy ? { ...item, addedBy } : item;
 }
 
 function parseJellyfinItemId(value: string): string {

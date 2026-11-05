@@ -5,6 +5,10 @@ import { movieMetadata, seriesMetadata } from "../activity.js";
 import { ApiError, isUpstreamNotFound } from "../errors.js";
 import { refreshJellyfinLibrary } from "../library-scan.js";
 import {
+  type MediaAttributionStore,
+  type MediaIdentity,
+} from "../media-attribution.js";
+import {
   movieMetadataEntry,
   seriesMetadataEntry,
   type MediaCache,
@@ -38,6 +42,7 @@ export function registerRequestedLibraryRoutes(
   config: AppConfig,
   mediaCache: MediaCache,
   releaseSearch: ReleaseSearchService,
+  mediaAttribution: MediaAttributionStore,
 ): void {
   app.get("/api/library/requested", async (_request, reply) => {
     reply.header("cache-control", "no-store");
@@ -47,12 +52,14 @@ export function registerRequestedLibraryRoutes(
         config.services.sonarr,
         config.requestTimeoutMs,
         mediaCache,
+        mediaAttribution,
       ),
       loadRequestedLibrary(
         "radarr",
         config.services.radarr,
         config.requestTimeoutMs,
         mediaCache,
+        mediaAttribution,
       ),
     ]);
     const items = [...sonarr.items, ...radarr.items];
@@ -72,7 +79,7 @@ export function registerRequestedLibraryRoutes(
       reply.header("cache-control", "no-store");
       const service = parseArrService(request.params.service);
       const id = parsePositiveId(request.params.id);
-      return cancelRequestedTitle(config, service, id, releaseSearch);
+      return cancelRequestedTitle(config, service, id, releaseSearch, mediaAttribution);
     },
   );
 }
@@ -82,6 +89,7 @@ export async function cancelRequestedTitle(
   service: ArrServiceId,
   id: number,
   releaseSearch: ReleaseSearchService,
+  mediaAttribution: MediaAttributionStore,
 ): Promise<CancelLibraryItemResponse> {
   const serviceConfig = config.services[service];
   if (!serviceConfig.apiKey) {
@@ -93,9 +101,10 @@ export async function cancelRequestedTitle(
   }
 
   const client = createArrClient(service, serviceConfig, config.requestTimeoutMs);
-  const qbittorrentHashes = await findQbittorrentHashes(config, client, service, id).catch(
-    () => [] as string[],
-  );
+  const [qbittorrentHashes, identity] = await Promise.all([
+    findQbittorrentHashes(config, client, service, id).catch(() => [] as string[]),
+    loadArrIdentity(client, service, id).catch(() => undefined),
+  ]);
   const queue = await client.getQueue();
   const records = queue.filter((record) =>
     service === "sonarr" ? record.seriesId === id : record.movieId === id,
@@ -129,6 +138,10 @@ export async function cancelRequestedTitle(
       throw new ApiError(404, "not_found", "Title was not found in " + service);
     }
     throw error;
+  }
+
+  if (identity) {
+    await mediaAttribution.remove(identity);
   }
 
   // The arr removes its queue entry and tracked files, but a torrent Sonarr no
@@ -393,6 +406,7 @@ async function loadRequestedLibrary(
   service: ServiceConfig,
   timeoutMs: number,
   mediaCache: MediaCache,
+  mediaAttribution: MediaAttributionStore,
 ): Promise<ServiceRequestedLibrary> {
   if (!service.apiKey) {
     return failedRequestedLibrary(id, "unconfigured", unconfiguredDetail(id));
@@ -405,7 +419,8 @@ async function loadRequestedLibrary(
       await cacheSeriesMetadata(series, mediaCache);
       const items = series
         .map(requestedSeriesItem)
-        .filter((item): item is RequestedLibraryItem => item !== null);
+        .filter((item): item is RequestedLibraryItem => item !== null)
+        .map((item) => attachRequestedAttribution(item, mediaAttribution));
       return { items, status: { id, state: "ok", count: items.length } };
     }
 
@@ -413,7 +428,8 @@ async function loadRequestedLibrary(
     await cacheMovieMetadata(movies, mediaCache);
     const items = movies
       .map(requestedMovieItem)
-      .filter((item): item is RequestedLibraryItem => item !== null);
+      .filter((item): item is RequestedLibraryItem => item !== null)
+      .map((item) => attachRequestedAttribution(item, mediaAttribution));
     return { items, status: { id, state: "ok", count: items.length } };
   } catch (error) {
     return failedRequestedLibrary(id, stateForError(error), errorMessage(error));
@@ -507,6 +523,31 @@ export function requestedMovieItem(movie: ServarrMovieResource): RequestedLibrar
     imdbId: metadata.imdbId,
     available: isMovieAvailable(movie),
   };
+}
+
+function attachRequestedAttribution(
+  item: RequestedLibraryItem,
+  mediaAttribution: MediaAttributionStore,
+): RequestedLibraryItem {
+  const addedBy = mediaAttribution.get({
+    kind: item.kind,
+    tmdbId: item.tmdbId,
+    tvdbId: item.tvdbId,
+  });
+  return addedBy ? { ...item, addedBy } : item;
+}
+
+async function loadArrIdentity(
+  client: ReturnType<typeof createArrClient>,
+  service: ArrServiceId,
+  id: number,
+): Promise<MediaIdentity> {
+  if (service === "sonarr") {
+    const metadata = seriesMetadata(await client.getSeries(id));
+    return { kind: "series", tvdbId: metadata.tvdbId, tmdbId: metadata.tmdbId };
+  }
+  const metadata = movieMetadata(await client.getMovie(id));
+  return { kind: "movie", tmdbId: metadata.tmdbId };
 }
 
 /**

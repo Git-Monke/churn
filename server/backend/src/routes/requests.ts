@@ -1,7 +1,12 @@
 import type { FastifyInstance } from "fastify";
 
+import { requireAuth } from "../auth.js";
 import type { AppConfig, ServiceConfig } from "../config.js";
 import { ApiError } from "../errors.js";
+import {
+  type MediaAttributionStore,
+  type MediaAddedBy,
+} from "../media-attribution.js";
 import { movieMetadataEntry, seriesMetadataEntry, type MediaCache } from "../media-cache.js";
 import type { ReleaseSearchService } from "../release-search.js";
 import {
@@ -32,6 +37,7 @@ export function registerRequestRoutes(
   config: AppConfig,
   mediaCache: MediaCache,
   releaseSearch: ReleaseSearchService,
+  mediaAttribution: MediaAttributionStore,
 ): void {
   app.get("/api/requests/options", async (_request, reply) => {
     reply.header("cache-control", "no-store");
@@ -50,6 +56,7 @@ export function registerRequestRoutes(
 
   app.post<{ Body: unknown }>("/api/requests", async (request, reply) => {
     reply.header("cache-control", "no-store");
+    const auth = requireAuth(request);
     const input = parseCreateRequest(request.body);
     const service: ArrServiceId = input.kind === "movie" ? "radarr" : "sonarr";
     const serviceConfig = config.services[service];
@@ -89,6 +96,8 @@ export function registerRequestRoutes(
           client,
           mediaCache,
           releaseSearch,
+          mediaAttribution,
+          { id: auth.user.id, name: auth.user.name },
           input,
           lookupResult.value as ServarrMovieResource[],
           libraryResult.value as ServarrMovieResource[],
@@ -99,6 +108,8 @@ export function registerRequestRoutes(
           client,
           mediaCache,
           releaseSearch,
+          mediaAttribution,
+          { id: auth.user.id, name: auth.user.name },
           input,
           lookupResult.value as ServarrSeriesResource[],
           libraryResult.value as ServarrSeriesResource[],
@@ -175,6 +186,8 @@ async function addMovieRequest(
   client: ReturnType<typeof createArrClient>,
   mediaCache: MediaCache,
   releaseSearch: ReleaseSearchService,
+  mediaAttribution: MediaAttributionStore,
+  addedBy: MediaAddedBy,
   input: CreateRequestInput,
   lookup: ServarrMovieResource[],
   library: ServarrMovieResource[],
@@ -220,6 +233,10 @@ async function addMovieRequest(
   if (entry) {
     await mediaCache.putMovie(entry);
   }
+  await mediaAttribution.record(
+    { kind: "movie", tmdbId: entry?.tmdbId ?? resource.tmdbId },
+    addedBy,
+  );
   if (added.id !== undefined) {
     void releaseSearch.warmMovie(added.id);
   }
@@ -239,6 +256,8 @@ async function addSeriesRequest(
   client: ReturnType<typeof createArrClient>,
   mediaCache: MediaCache,
   releaseSearch: ReleaseSearchService,
+  mediaAttribution: MediaAttributionStore,
+  addedBy: MediaAddedBy,
   input: CreateRequestInput,
   lookup: ServarrSeriesResource[],
   library: ServarrSeriesResource[],
@@ -305,6 +324,14 @@ async function addSeriesRequest(
       void releaseSearch.warmSeries(added.id, entry.seasons);
     }
   }
+  await mediaAttribution.record(
+    {
+      kind: "series",
+      tvdbId: added.tvdbId ?? resource.tvdbId,
+      tmdbId: entry?.tmdbId ?? resource.tmdbId,
+    },
+    addedBy,
+  );
 
   const mediaTitle = added.title ?? resource.title ?? "Unknown title";
   return {

@@ -127,6 +127,13 @@ export type LibraryState =
   | "unauthorized"
   | "unreachable";
 
+export interface MediaAddedBy {
+  /** Jellyfin user id. */
+  id: string;
+  /** Display name captured when the title was added. */
+  name: string;
+}
+
 export interface LibraryItem {
   id: string;
   name: string;
@@ -140,6 +147,7 @@ export interface LibraryItem {
   tmdbId?: number;
   tvdbId?: number;
   imdbId?: string;
+  addedBy?: MediaAddedBy;
 }
 
 export interface LibraryResponse {
@@ -166,6 +174,7 @@ export interface RequestedLibraryItem {
   tmdbId?: number;
   tvdbId?: number;
   imdbId?: string;
+  addedBy?: MediaAddedBy;
   /**
    * Arr import hint; Jellyfin alone determines playability. Used only for the
    * transitional Scanning state and release prefetching.

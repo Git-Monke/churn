@@ -58,7 +58,7 @@ survive a rerun.
 | `PROWLARR_URL` | `http://127.0.0.1:9696` | Prowlarr base URL for progressive release search |
 | `PROWLARR_API_KEY` | `torrent/config/prowlarr/config.xml` | Optional Prowlarr API-key override |
 | `CHURN_SESSION_TTL_MS` | `43200000` (12 hours) | Server-side idle session TTL; clamped to 5 minutes–30 days |
-| `CHURN_STATE_DIR` | `server/.churn-state` (`/app/state` in the container) | Persisted profiles and sessions |
+| `CHURN_STATE_DIR` | `server/.churn-state` (`/app/state` in the container) | Persisted profiles, sessions and added-by tags |
 | `CHURN_COOKIE_SECURE` | `auto` | `auto`, `true` or `false` for the session cookie's `Secure` flag |
 | `CHURN_SERVER_DIR` | module-relative | Override `server/` root |
 
@@ -97,10 +97,11 @@ and history.
 
 Sessions are a TTL map keyed by a SHA-256 hash of the cookie value, persisted
 atomically to `CHURN_STATE_DIR/auth-state.json` (mode 0600) with the profiles.
-The default idle TTL is 12 hours and slides on activity; dashboard restarts and
-`churn` reruns keep people signed in. `churn uninstall` removes the
-`churn-state` volume. Signing out clears the cookie, destroys the session and
-makes a best-effort Jellyfin logout call.
+Requests made through Churn also record who added each title in
+`CHURN_STATE_DIR/media-attribution.json`. The default idle TTL is 12 hours and
+slides on activity; dashboard restarts and `churn` reruns keep people signed in.
+`churn uninstall` removes the `churn-state` volume. Signing out clears the
+cookie, destroys the session and makes a best-effort Jellyfin logout call.
 
 Each session has a unique Jellyfin device id, so multiple people (and multiple
 browsers for the same person) can be signed in at once without revoking each
@@ -135,9 +136,9 @@ uses the signed-in user's Jellyfin session token rather than a static token in
 | `GET /api/auth/session` | Current session state (200 when signed out) |
 | `GET /api/status` | Service health, version and latency |
 | `GET /api/vpn` | On-demand VPN leak test from the torrent stack's protected namespace |
-| `GET /api/library` | Jellyfin movies and series with provider ids, scoped to the user's library views |
+| `GET /api/library` | Jellyfin movies and series with provider ids and `addedBy`, scoped to the user's library views |
 | `GET /api/library/images/:itemId` | Poster proxy |
-| `GET /api/library/requested` | Sonarr/Radarr library titles, including requested items not yet downloaded |
+| `GET /api/library/requested` | Sonarr/Radarr library titles with `addedBy`, including requested items not yet downloaded |
 | `DELETE /api/library/requested/:service/:id` | Cancel queue items, delete the title (and files) from the arr, remove matching qBittorrent torrents, refresh Jellyfin |
 | `DELETE /api/library/jellyfin/:itemId` | Delete a Jellyfin-only movie/show and its files, or use the matching arr title when one is found |
 | `GET /api/library/shows/:source/:id` | Show seasons, episodes and download overlays |
@@ -287,6 +288,13 @@ and any word can instead hit the year, network, content rating, score or
 overview, so `2021`, `hbo` or `spiders` work. Title hits are listed before
 metadata-only hits, the type tabs and their counts follow the search, and
 Escape or the clear button resets it.
+
+**Added by me** is a separate toolbar toggle that composes with the search and
+the type tabs. Requesting a title records the signed-in Jellyfin user as its
+adder, and each card shows a small `Added by <name>` line. The toggle shows only
+titles added by the current user; titles added directly in Sonarr, Radarr or
+Jellyfin stay untagged. Deleting a title clears its attribution, and the tag is
+stored by TMDB/TVDB id, so it is independent of the download client.
 
 Every card has a trash button. Sonarr/Radarr-backed cards call
 `DELETE /api/library/requested/:service/:id`, which removes the title's queue
