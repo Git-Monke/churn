@@ -1,4 +1,10 @@
 import { movieMetadata, queueRecordSeasons, seriesMetadata } from "./activity.js";
+import { parseMediaDownloadTag } from "./direct-grab.js";
+import {
+  isAwaitingMetadata,
+  metadataStatusMessage,
+  metadataWaitExpired,
+} from "./metadata-wait.js";
 import { formatDuration } from "./torrent-progress.js";
 import type { ActivityItem, ActivityStatus } from "./types.js";
 import {
@@ -21,6 +27,10 @@ const MOVIE_RELEASE_MARKER =
 export interface ActivityCatalog {
   series: ServarrSeriesResource[];
   movies: ServarrMovieResource[];
+}
+
+export interface QbittorrentActivityOptions {
+  now?: () => number;
 }
 
 interface SeriesMatch {
@@ -75,7 +85,9 @@ export function isActiveTorrent(torrent: QbittorrentTorrent): boolean {
 export function buildQbittorrentActivity(
   torrents: QbittorrentTorrent[],
   catalog: ActivityCatalog,
+  options: QbittorrentActivityOptions = {},
 ): ActivityItem[] {
+  const now = options.now?.() ?? Date.now();
   const buckets = new Map<string, ActivityBucket>();
 
   for (const torrent of torrents) {
@@ -87,20 +99,25 @@ export function buildQbittorrentActivity(
       continue;
     }
 
-    const match = matchCatalog(name, torrent.category, catalog);
-    const key = match?.key ?? genericKey(torrent, name);
+    const link = parseMediaDownloadTag(torrent.tags);
+    const match =
+      taggedCatalogMatch(link, catalog) ??
+      matchCatalog(name, torrent.category, catalog) ??
+      matchSavePathMovie(torrent, catalog);
+    const key = match?.key ?? (link ? mediaLinkKey(link) : genericKey(torrent, name));
     const existing = buckets.get(key);
     if (existing) {
       existing.torrents.push(torrent);
       continue;
     }
 
+    const fallbackTitle = displayTitle(mediaTitleFromTorrent(torrent) ?? name);
     if (match?.kind === "series") {
       buckets.set(key, {
         key,
         kind: "series",
         service: "sonarr",
-        title: match.resource.title?.trim() || displayTitle(name),
+        title: match.resource.title?.trim() || fallbackTitle,
         metadata: seriesMetadata(match.resource),
         arrId: match.resource.id,
         torrents: [torrent],
@@ -110,7 +127,7 @@ export function buildQbittorrentActivity(
         key,
         kind: "movie",
         service: "radarr",
-        title: match.resource.title?.trim() || displayTitle(name),
+        title: match.resource.title?.trim() || fallbackTitle,
         metadata: movieMetadata(match.resource),
         arrId: match.resource.id,
         torrents: [torrent],
@@ -118,14 +135,43 @@ export function buildQbittorrentActivity(
     } else {
       buckets.set(key, {
         key,
-        kind: looksLikeSeries(name) ? "series" : "movie",
-        title: displayTitle(name),
+        kind: link?.kind ?? (looksLikeSeries(name) ? "series" : "movie"),
+        ...(link
+          ? {
+              service: link.kind === "movie" ? ("radarr" as const) : ("sonarr" as const),
+              arrId: link.arrId,
+            }
+          : {}),
+        title: fallbackTitle,
         torrents: [torrent],
       });
     }
   }
 
-  return [...buckets.values()].map(buildActivityItem);
+  return [...buckets.values()].map((bucket) => buildActivityItem(bucket, now));
+}
+
+function taggedCatalogMatch(
+  link: ReturnType<typeof parseMediaDownloadTag>,
+  catalog: ActivityCatalog,
+): CatalogMatch | undefined {
+  if (!link) {
+    return undefined;
+  }
+  if (link.kind === "movie") {
+    const movie = catalog.movies.find((entry) => entry.id === link.arrId);
+    return movie
+      ? { kind: "movie", key: movieKey(movie), resource: movie, score: Number.MAX_SAFE_INTEGER }
+      : undefined;
+  }
+  const series = catalog.series.find((entry) => entry.id === link.arrId);
+  return series
+    ? { kind: "series", key: seriesKey(series), resource: series, score: Number.MAX_SAFE_INTEGER }
+    : undefined;
+}
+
+function mediaLinkKey(link: { kind: "movie" | "series"; arrId: number }): string {
+  return link.kind === "movie" ? `movie:radarr:${link.arrId}` : `series:sonarr:${link.arrId}`;
 }
 
 function matchCatalog(
@@ -194,15 +240,30 @@ function matchCatalog(
   return best;
 }
 
-/** Torrents that name this movie, including completed ones. */
+/** Torrents linked to or naming this movie, including completed ones. */
 export function matchMovieTorrents(
   torrents: QbittorrentTorrent[],
   movieTitle: string,
   year?: number,
+  radarrId?: number,
 ): QbittorrentTorrent[] {
   return torrents.filter((torrent) => {
+    if (radarrId !== undefined) {
+      const link = parseMediaDownloadTag(torrent.tags);
+      if (link?.kind === "movie" && link.arrId === radarrId) {
+        return true;
+      }
+    }
     const name = torrent.name?.trim();
-    return name !== undefined && movieTitleMatches(name, movieTitle, year);
+    if (name !== undefined && movieTitleMatches(name, movieTitle, year)) {
+      return true;
+    }
+    // Older/untagged arr magnets can still be matched by the movie folder
+    // qBittorrent saved them into while their display name is just the hash.
+    const saveTitle = isPlaceholderTorrentName(name)
+      ? savePathTitle(torrent.save_path)
+      : undefined;
+    return saveTitle !== undefined && movieTitleMatches(saveTitle, movieTitle, year);
   });
 }
 
@@ -213,16 +274,19 @@ export function matchMovieTorrents(
 export function movieTorrentActivity(
   torrents: QbittorrentTorrent[],
   movie: ServarrMovieResource,
+  options: QbittorrentActivityOptions = {},
 ): ActivityItem | undefined {
   const title = movie.title?.trim();
   if (!title) {
     return undefined;
   }
-  const active = matchMovieTorrents(torrents, title, movie.year).filter(isActiveTorrent);
+  const active = matchMovieTorrents(torrents, title, movie.year, movie.id).filter(
+    isActiveTorrent,
+  );
   if (active.length === 0) {
     return undefined;
   }
-  return buildQbittorrentActivity(active, { series: [], movies: [movie] })[0];
+  return buildQbittorrentActivity(active, { series: [], movies: [movie] }, options)[0];
 }
 
 /** Match a movie only when its full title is followed by a year or release tag. */
@@ -249,8 +313,8 @@ export function movieTitleMatches(
   return MOVIE_RELEASE_MARKER.test(next);
 }
 
-function buildActivityItem(bucket: ActivityBucket): ActivityItem {
-  const aggregate = aggregateTorrents(bucket.torrents);
+function buildActivityItem(bucket: ActivityBucket, now: number): ActivityItem {
+  const aggregate = aggregateTorrents(bucket.torrents, now);
   const metadata = bucket.metadata;
   const item: ActivityItem = {
     key: bucket.key,
@@ -299,7 +363,7 @@ function buildActivityItem(bucket: ActivityBucket): ActivityItem {
   return item;
 }
 
-function aggregateTorrents(torrents: QbittorrentTorrent[]): {
+function aggregateTorrents(torrents: QbittorrentTorrent[], now: number): {
   status: ActivityStatus;
   progress: number;
   sizeBytes?: number;
@@ -312,7 +376,7 @@ function aggregateTorrents(torrents: QbittorrentTorrent[]): {
   statusMessages?: string[];
   seasons?: number[];
 } {
-  const statuses = torrents.map(torrentStatus);
+  const statuses = torrents.map((torrent) => torrentStatus(torrent, now));
   const status: ActivityStatus = statuses.includes("warning")
     ? "warning"
     : statuses.includes("downloading")
@@ -367,7 +431,9 @@ function aggregateTorrents(torrents: QbittorrentTorrent[]): {
     .map((torrent) => qualityFromTitle(torrent.name ?? ""))
     .filter((quality): quality is string => Boolean(quality));
 
-  const messages = [...new Set(torrents.flatMap(torrentMessages))];
+  const messages = [
+    ...new Set(torrents.flatMap((torrent) => torrentMessages(torrent, now))),
+  ];
   const seasons = [
     ...new Set(torrents.flatMap(torrentSeasons)),
   ].sort((left, right) => left - right);
@@ -386,10 +452,13 @@ function aggregateTorrents(torrents: QbittorrentTorrent[]): {
   };
 }
 
-function torrentStatus(torrent: QbittorrentTorrent): ActivityStatus {
+function torrentStatus(torrent: QbittorrentTorrent, now: number): ActivityStatus {
   const state = (torrent.state ?? "").trim().toLowerCase();
   if (state === "error" || state === "missingfiles") {
     return "warning";
+  }
+  if (isAwaitingMetadata(torrent)) {
+    return metadataWaitExpired(torrent, now) ? "warning" : "queued";
   }
   if (/queued|paused|stopped|meta|allocating|checking/.test(state)) {
     return "queued";
@@ -397,10 +466,13 @@ function torrentStatus(torrent: QbittorrentTorrent): ActivityStatus {
   return "downloading";
 }
 
-function torrentMessages(torrent: QbittorrentTorrent): string[] {
+function torrentMessages(torrent: QbittorrentTorrent, now: number): string[] {
   const state = (torrent.state ?? "").trim().toLowerCase();
   if (state === "error" || state === "missingfiles") {
     return [`qBittorrent reports ${torrent.state}.`];
+  }
+  if (isAwaitingMetadata(torrent)) {
+    return [metadataStatusMessage(torrent, now)];
   }
   if (state === "stalleddl") {
     return ["qBittorrent is stalled and not receiving data."];
@@ -415,6 +487,60 @@ function torrentSeasons(torrent: QbittorrentTorrent): number[] {
   }
   const seasonNumber = seasonNumberFromTitle(name);
   return queueRecordSeasons({ title: name, seasonNumber });
+}
+
+function matchSavePathMovie(
+  torrent: QbittorrentTorrent,
+  catalog: ActivityCatalog,
+): MovieMatch | undefined {
+  if (!isPlaceholderTorrentName(torrent.name)) {
+    return undefined;
+  }
+  const title = savePathTitle(torrent.save_path);
+  if (!title) {
+    return undefined;
+  }
+  let best: MovieMatch | undefined;
+  for (const movie of catalog.movies) {
+    const movieTitle = movie.title?.trim();
+    if (!movieTitle || !movieTitleMatches(title, movieTitle, movie.year)) {
+      continue;
+    }
+    const match: MovieMatch = {
+      kind: "movie",
+      key: movieKey(movie),
+      resource: movie,
+      score: tokenize(movieTitle).length,
+    };
+    if (!best || match.score > best.score) {
+      best = match;
+    }
+  }
+  return best;
+}
+
+function isPlaceholderTorrentName(name: string | undefined): boolean {
+  const trimmed = name?.trim() ?? "";
+  return trimmed === "" || /^[a-f0-9]{40}$/i.test(trimmed);
+}
+
+function savePathTitle(savePath: string | undefined): string | undefined {
+  const segment = (savePath ?? "")
+    .replace(/\\/g, "/")
+    .split("/")
+    .filter(Boolean)
+    .pop()
+    ?.trim();
+  if (!segment || /^(?:data|media|movies?|tv|series)$/i.test(segment)) {
+    return undefined;
+  }
+  return segment;
+}
+
+function mediaTitleFromTorrent(torrent: QbittorrentTorrent): string | undefined {
+  return isPlaceholderTorrentName(torrent.name)
+    ? savePathTitle(torrent.save_path)
+    : undefined;
 }
 
 function genericKey(torrent: QbittorrentTorrent, name: string): string {

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildQbittorrentActivity,
   isActiveTorrent,
+  matchMovieTorrents,
   movieTitleMatches,
 } from "../src/qbittorrent-activity.js";
 import type { QbittorrentTorrent } from "../src/upstream/qbittorrent.js";
@@ -159,4 +160,84 @@ describe("qBittorrent activity", () => {
     expect(failed[0]?.status).toBe("warning");
     expect(failed[0]?.statusMessages).toEqual(["qBittorrent reports missingFiles."]);
   });
+  it("links a tagged hash-named magnet to its movie and warns when metadata never arrives", () => {
+    const now = 100_000;
+    const dead = torrent({
+      hash: "0c844bcadda6d636501067091afb86d85c969bde",
+      name: "0c844bcadda6d636501067091afb86d85c969bde",
+      category: "movies",
+      tags: "churn-direct,churn-movie-7",
+      state: "metaDL",
+      has_metadata: false,
+      added_on: 90,
+      progress: 0,
+      size: 0,
+      amount_left: 0,
+      num_seeds: 0,
+      num_complete: 0,
+      dlspeed: 0,
+    });
+
+    const warning = buildQbittorrentActivity([dead], catalog, { now: () => now });
+    expect(warning[0]).toMatchObject({
+      key: "movie:5678",
+      service: "radarr",
+      movieId: 7,
+      title: "Example Movie",
+      kind: "movie",
+      status: "warning",
+      progress: 0,
+      statusMessages: [expect.stringContaining("has not received torrent metadata")],
+    });
+
+    const fresh = buildQbittorrentActivity([{ ...dead, added_on: 97 }], catalog, {
+      now: () => now,
+    });
+    expect(fresh[0]).toMatchObject({
+      key: "movie:5678",
+      status: "queued",
+      statusMessages: ["Waiting for qBittorrent to fetch torrent metadata."],
+    });
+  });
+
+  it("falls back to the save-path movie title for an untagged hash-named magnet", () => {
+    const items = buildQbittorrentActivity(
+      [
+        torrent({
+          hash: "0c844bcadda6d636501067091afb86d85c969bde",
+          name: "0c844bcadda6d636501067091afb86d85c969bde",
+          save_path: "/data/media/movies/Example Movie (2022)",
+          category: "movies",
+          state: "metaDL",
+          has_metadata: false,
+          progress: 0,
+          size: 0,
+          added_on: 90,
+        }),
+      ],
+      catalog,
+      { now: () => 100_000 },
+    );
+
+    expect(items[0]).toMatchObject({
+      key: "movie:5678",
+      service: "radarr",
+      movieId: 7,
+      title: "Example Movie",
+      status: "warning",
+    });
+    expect(
+      matchMovieTorrents(
+        [
+          torrent({
+            name: "0c844bcadda6d636501067091afb86d85c969bde",
+            save_path: "/data/media/movies/Example Movie (2022)",
+          }),
+        ],
+        "Example Movie",
+        2022,
+      ),
+    ).toHaveLength(1);
+  });
+
 });

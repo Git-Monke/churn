@@ -13,6 +13,8 @@ import { errorMessage } from "./upstream/states.js";
 /** Applied to every download churn sends straight to qBittorrent. */
 export const DIRECT_DOWNLOAD_TAG = "churn-direct";
 
+const MEDIA_TAG_PATTERN = /^churn-(movie|series)-(\d+)$/;
+
 const DEFAULT_MEDIA_ROOT = "/data/media";
 
 export interface DirectReleaseSource {
@@ -49,10 +51,35 @@ export interface DirectGrabResult {
  * no HTTP fetch is needed. A bare HTTP GUID is only a landing page, not a file.
  */
 export function isDirectDownloadTorrent(torrent: QbittorrentTorrent): boolean {
-  return (torrent.tags ?? "")
+  return splitTags(torrent.tags).includes(DIRECT_DOWNLOAD_TAG);
+}
+
+/** Stable media link stored on the torrent so hash-named magnets stay attached. */
+export function mediaDownloadTag(kind: "movie" | "series", arrId: number): string {
+  return `churn-${kind}-${arrId}`;
+}
+
+export function parseMediaDownloadTag(
+  tags: string | undefined,
+): { kind: "movie" | "series"; arrId: number } | undefined {
+  for (const tag of splitTags(tags)) {
+    const match = MEDIA_TAG_PATTERN.exec(tag);
+    if (!match) {
+      continue;
+    }
+    const arrId = Number.parseInt(match[2] ?? "", 10);
+    if (Number.isSafeInteger(arrId) && arrId > 0) {
+      return { kind: match[1] === "movie" ? "movie" : "series", arrId };
+    }
+  }
+  return undefined;
+}
+
+function splitTags(tags: string | undefined): string[] {
+  return (tags ?? "")
     .split(",")
     .map((tag) => tag.trim())
-    .includes(DIRECT_DOWNLOAD_TAG);
+    .filter(Boolean);
 }
 
 export function directDownloadSource(release: DirectReleaseSource): string | undefined {
@@ -92,8 +119,10 @@ export async function grabTorrentDirect(
 
   const client = createQbittorrentClient(config.qbittorrent, config.requestTimeoutMs);
   const savePath = await resolveSavePath(config, target);
+  const mediaTag = mediaDownloadTag(target.kind, target.arrId);
   const existing = await findExistingTorrent(client, release, false);
   if (existing) {
+    await tagExistingTorrent(client, existing, mediaTag);
     return {
       title: release.title?.trim() || target.title,
       savePath,
@@ -106,7 +135,7 @@ export async function grabTorrentDirect(
       url,
       savePath,
       category: target.kind === "movie" ? "movies" : "tv",
-      tags: [DIRECT_DOWNLOAD_TAG],
+      tags: [DIRECT_DOWNLOAD_TAG, mediaTag],
       contentLayout: "NoSubfolder",
       autoTMM: false,
     });
@@ -115,6 +144,7 @@ export async function grabTorrentDirect(
     // failed add so a double click still behaves like the first click.
     const current = await findExistingTorrent(client, release, true);
     if (current) {
+      await tagExistingTorrent(client, current, mediaTag);
       return {
         title: release.title?.trim() || target.title,
         savePath,
@@ -235,4 +265,26 @@ async function findExistingTorrent(
 
 function normalizeTitle(value: string | undefined): string {
   return (value ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+async function tagExistingTorrent(
+  client: ReturnType<typeof createQbittorrentClient>,
+  torrent: QbittorrentTorrent,
+  mediaTag: string,
+): Promise<void> {
+  if (splitTags(torrent.tags).includes(mediaTag)) {
+    return;
+  }
+  const hash = [torrent.hash, torrent.infohash_v1, torrent.infohash_v2]
+    .map(normalizeInfoHash)
+    .find((value) => value !== "");
+  if (!hash) {
+    return;
+  }
+  try {
+    await client.addTags([hash], [mediaTag]);
+  } catch {
+    // The torrent already exists; a failed tag must not turn a duplicate grab
+    // into an error. The normal title matcher still works for named torrents.
+  }
 }

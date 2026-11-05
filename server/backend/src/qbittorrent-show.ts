@@ -1,5 +1,10 @@
 import { queueRecordSeasons } from "./activity.js";
 import { isDirectDownloadTorrent } from "./direct-grab.js";
+import {
+  isAwaitingMetadata,
+  metadataStatusMessage,
+  metadataWaitExpired,
+} from "./metadata-wait.js";
 import { formatDuration } from "./torrent-progress.js";
 import type { ShowDownload } from "./types.js";
 import type { QbittorrentTorrent } from "./upstream/qbittorrent.js";
@@ -8,6 +13,10 @@ interface ShowEpisodeIdentity {
   key: string;
   seasonNumber: number;
   episodeNumber: number;
+}
+
+export interface ShowTorrentMapOptions {
+  now?: () => number;
 }
 
 /**
@@ -20,7 +29,9 @@ export function mapShowTorrentDownloads(
   torrents: QbittorrentTorrent[],
   seriesTitle: string,
   episodes: ShowEpisodeIdentity[],
+  options: ShowTorrentMapOptions = {},
 ): Map<string, ShowDownload> {
+  const now = options.now?.() ?? Date.now();
   const downloads = new Map<string, ShowDownload>();
   const titleTokens = tokenize(seriesTitle);
   if (titleTokens.length === 0) {
@@ -43,7 +54,7 @@ export function mapShowTorrentDownloads(
       continue;
     }
 
-    const download = torrentDownload(torrent, name);
+    const download = torrentDownload(torrent, name, now);
     const covered = episodes.filter((episode) => {
       if (!seasons.includes(episode.seasonNumber)) {
         return false;
@@ -79,16 +90,31 @@ export function torrentBelongsToShow(name: string, titleTokens: string[]): boole
     .every((token) => /^(?:19|20)\d{2}$/.test(token) || /^(?:us|uk|au|ca)$/.test(token));
 }
 
-function torrentDownload(torrent: QbittorrentTorrent, name: string): ShowDownload {
+function torrentDownload(
+  torrent: QbittorrentTorrent,
+  name: string,
+  now: number,
+): ShowDownload {
   const progress = fraction(torrent.progress);
   const percent = progress === undefined ? 0 : Math.round(progress * 100);
   const state = (torrent.state ?? "").toLowerCase();
   const complete = progress !== undefined && progress >= 0.999;
   const failed = state === "error" || state === "missingfiles";
   const queued = isQueued(torrent);
+  const awaitingMetadata = isAwaitingMetadata(torrent);
 
   const download: ShowDownload = {
-    status: failed ? "warning" : complete ? "importing" : queued ? "queued" : "downloading",
+    status: failed
+      ? "warning"
+      : complete
+        ? "importing"
+        : awaitingMetadata
+          ? metadataWaitExpired(torrent, now)
+            ? "warning"
+            : "queued"
+          : queued
+            ? "queued"
+            : "downloading",
     progress: percent,
     downloadClient: "qBittorrent",
     protocol: "torrent",
@@ -131,14 +157,16 @@ function torrentDownload(torrent: QbittorrentTorrent, name: string): ShowDownloa
   if (episodeNumberFromTitle(name) === undefined) {
     download.seasonPack = true;
   }
-  if (complete) {
+  if (failed) {
+    download.statusMessages = [`qBittorrent reports ${torrent.state}.`];
+  } else if (awaitingMetadata) {
+    download.statusMessages = [metadataStatusMessage(torrent, now)];
+  } else if (complete) {
     download.statusMessages = [
       isDirectDownloadTorrent(torrent)
         ? "Download finished in qBittorrent. Jellyfin has not indexed it yet."
         : "Download finished in qBittorrent. Sonarr has not imported it yet.",
     ];
-  } else if (failed) {
-    download.statusMessages = [`qBittorrent reports ${torrent.state}.`];
   } else if (state === "stalleddl") {
     download.statusMessages = ["qBittorrent is stalled and not receiving data."];
   }

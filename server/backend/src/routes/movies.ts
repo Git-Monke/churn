@@ -55,6 +55,7 @@ export function registerMovieRoutes(
         downloads.rememberMovie(movieCacheKey(source, request.params.id), {
           title: detail.movie.title,
           ...(detail.movie.year !== undefined ? { year: detail.movie.year } : {}),
+          ...(detail.radarrId !== undefined ? { radarrId: detail.radarrId } : {}),
         });
       }
       return detail;
@@ -312,6 +313,7 @@ async function loadMovieDownload(
   const identity: MovieDownloadIdentity = {
     title,
     ...(movie.year !== undefined ? { year: movie.year } : {}),
+    ...(movie.id !== undefined ? { radarrId: movie.id } : {}),
   };
   try {
     return await movieLiveDownload(config, identity);
@@ -363,7 +365,7 @@ async function cancelMovieDownload(
 
   let downloadClientRemoved = 0;
   try {
-    downloadClientRemoved = await cancelMovieTorrents(config, title, year);
+    downloadClientRemoved = await cancelMovieTorrents(config, title, year, radarrId);
   } catch (error) {
     // Radarr already removed the download; a qBittorrent hiccup must not turn
     // that success into a failed cancel.
@@ -392,6 +394,7 @@ async function cancelMovieTorrents(
   config: AppConfig,
   title: string,
   year: number | undefined,
+  radarrId: number | undefined,
 ): Promise<number> {
   if (!config.qbittorrent.apiKey) {
     return 0;
@@ -401,7 +404,9 @@ async function cancelMovieTorrents(
     Math.min(config.requestTimeoutMs, 2_000),
   );
   const torrents = await client.getTorrents();
-  const matched = matchMovieTorrents(torrents, title, year).filter(isActiveTorrent);
+  const matched = matchMovieTorrents(torrents, title, year, radarrId).filter(
+    isActiveTorrent,
+  );
   const hashes = [
     ...new Set(
       matched

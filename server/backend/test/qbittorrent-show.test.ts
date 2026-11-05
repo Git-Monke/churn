@@ -154,4 +154,28 @@ describe("qBittorrent fallback for show downloads", () => {
     ]);
     expect(detail.seasons[0]?.downloadingCount).toBe(2);
   });
+  it("warns when a claimed download has no torrent metadata after five seconds", () => {
+    const episodes = [{ key: "s01e01", seasonNumber: 1, episodeNumber: 1 }];
+    const downloads = mapShowTorrentDownloads(
+      [
+        torrent({
+          name: "Parks.and.Recreation.S01E01.1080p.WEB-DL",
+          state: "metaDL",
+          has_metadata: false,
+          progress: 0,
+          size: 0,
+          added_on: 90,
+        }),
+      ],
+      "Parks and Recreation",
+      episodes,
+      { now: () => 100_000 },
+    );
+
+    expect(downloads.get("s01e01")).toMatchObject({
+      status: "warning",
+      statusMessages: [expect.stringContaining("has not received torrent metadata")],
+    });
+  });
+
 });

@@ -149,6 +149,11 @@ function LibraryCard({ entry }: { entry: LibraryEntry }) {
                 {seasonHint(activity.seasons)}
               </span>
             ) : null}
+            {activity.status === "warning" && activity.statusMessages?.length ? (
+              <span className="text-[11px] text-destructive">
+                {activity.statusMessages.join(" · ")}
+              </span>
+            ) : null}
           </div>
         ) : null}
       </CardContent>

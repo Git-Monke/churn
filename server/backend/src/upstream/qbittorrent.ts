@@ -26,10 +26,14 @@ export interface QbittorrentTorrent {
   num_complete?: number;
   num_leechs?: number;
   num_incomplete?: number;
+  /** False until a magnet's info dictionary has been fetched. */
+  has_metadata?: boolean;
   /** Unix timestamp qBittorrent added the torrent. */
   added_on?: number;
   /** Unix timestamp the torrent finished downloading, 0 if incomplete. */
   completion_on?: number;
+  /** Folder qBittorrent was told to download into. */
+  save_path?: string;
   /** Absolute path to the torrent's files on qBittorrent's filesystem. */
   content_path?: string;
   /** Comma-separated qBittorrent tags. */
@@ -172,6 +176,38 @@ export function createQbittorrentClient(config: QbittorrentConfig, timeoutMs: nu
         );
       }
       return { added, pending, failed, torrentIds };
+    },
+
+    /** Add tags to existing torrents without changing their download state. */
+    async addTags(hashes: string[], tags: string[]): Promise<void> {
+      const normalizedHashes = hashes
+        .map(normalizeInfoHash)
+        .filter((hash) => hash !== "");
+      const normalizedTags = tags.map((tag) => tag.trim()).filter((tag) => tag !== "");
+      if (normalizedHashes.length === 0 || normalizedTags.length === 0) {
+        return;
+      }
+      const body = new URLSearchParams({
+        hashes: normalizedHashes.join("|"),
+        tags: normalizedTags.join(","),
+      });
+      const response = await fetchWithTimeout(
+        "qbittorrent",
+        `${config.url}/api/v2/torrents/addTags`,
+        {
+          method: "POST",
+          headers: {
+            ...authHeaders(),
+            "content-type": "application/x-www-form-urlencoded",
+          },
+          body: body.toString(),
+        },
+        timeoutMs,
+      );
+      if (!response.ok) {
+        throw await upstreamResponseError("qbittorrent", response);
+      }
+      await response.arrayBuffer().catch(() => undefined);
     },
 
     /** Remove a torrent from qBittorrent while leaving its downloaded files on disk. */

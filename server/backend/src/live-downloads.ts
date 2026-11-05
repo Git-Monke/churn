@@ -7,6 +7,8 @@ import { createQbittorrentClient, type QbittorrentTorrent } from "./upstream/qbi
 export interface MovieDownloadIdentity {
   title: string;
   year?: number;
+  /** Radarr id when the movie is tracked, used to follow tagged magnets. */
+  radarrId?: number;
 }
 
 export interface ShowEpisodeIdentity {
@@ -106,7 +108,11 @@ export async function movieLiveDownload(
   identity: MovieDownloadIdentity,
 ): Promise<ActivityItem | undefined> {
   const torrents = await loadQbittorrentTorrents(config);
-  return movieTorrentActivity(torrents, identity);
+  return movieTorrentActivity(torrents, {
+    title: identity.title,
+    ...(identity.year !== undefined ? { year: identity.year } : {}),
+    ...(identity.radarrId !== undefined ? { id: identity.radarrId } : {}),
+  });
 }
 
 export async function showLiveDownloads(

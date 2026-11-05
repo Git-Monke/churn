@@ -1928,7 +1928,7 @@ describe("create requests", () => {
     );
     expect(qbittorrentAdd?.get("savepath")).toBe("/data/media/movies/Dune (2021)");
     expect(qbittorrentAdd?.get("category")).toBe("movies");
-    expect(qbittorrentAdd?.get("tags")).toBe("churn-direct");
+    expect(qbittorrentAdd?.get("tags")).toBe("churn-direct,churn-movie-7");
     expect(qbittorrentAdd?.get("contentLayout")).toBe("NoSubfolder");
     expect(radarrReleaseSearches).toHaveLength(0);
     expect(radarrGrab).toBeUndefined();
@@ -3111,6 +3111,79 @@ describe("movie detail", () => {
     await app.close();
   });
 
+  it("serves and cancels a tagged hash-named movie download", async () => {
+    const config = makeConfig();
+    config.qbittorrent.apiKey = "qbittorrent-key";
+    let deletedBody: string | undefined;
+    installFetch((url, init) => {
+      if (url.includes("radarr.test") && url.endsWith("/api/v3/movie/7")) {
+        return jsonResponse({ ...movieLookup, id: 7 });
+      }
+      if (url.includes("radarr.test") && url.includes("/api/v3/queue?")) {
+        return jsonResponse({ records: [] });
+      }
+      if (url === "http://qbittorrent.test:8080/api/v2/torrents/info") {
+        return jsonResponse([
+          {
+            hash: "dead-hash",
+            name: "0c844bcadda6d636501067091afb86d85c969bde",
+            category: "movies",
+            tags: "churn-direct,churn-movie-7",
+            state: "metaDL",
+            has_metadata: false,
+            added_on: Math.floor(Date.now() / 1_000) - 10,
+            progress: 0,
+            size: 0,
+            amount_left: 0,
+            num_seeds: 0,
+            num_complete: 0,
+            dlspeed: 0,
+            eta: 8_640_000,
+          },
+        ]);
+      }
+      if (url === "http://qbittorrent.test:8080/api/v2/torrents/delete") {
+        deletedBody = typeof init?.body === "string" ? init.body : undefined;
+        return new Response(null, { status: 200 });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildAuthedServer(config);
+    const detail = await app.inject({
+      method: "GET",
+      url: "/api/library/movies/radarr/7",
+    });
+    expect(detail.statusCode).toBe(200);
+
+    const live = await app.inject({
+      method: "GET",
+      url: "/api/library/movies/radarr/7/download",
+    });
+    expect(live.json()).toMatchObject({
+      ready: true,
+      download: {
+        movieId: 7,
+        title: "Dune",
+        status: "warning",
+        progress: 0,
+        statusMessages: [expect.stringContaining("has not received torrent metadata")],
+      },
+    });
+
+    const cancelled = await app.inject({
+      method: "DELETE",
+      url: "/api/library/movies/radarr/7/download",
+    });
+    expect(cancelled.statusCode).toBe(200);
+    expect(cancelled.json()).toMatchObject({
+      status: "cancelled",
+      downloadClientRemoved: 1,
+    });
+    expect(deletedBody).toContain("hashes=dead-hash");
+    await app.close();
+  });
+
   it("cancels the movie download without deleting the Radarr movie", async () => {
     const config = makeConfig();
     config.qbittorrent.apiKey = "qbittorrent-key";
@@ -3497,7 +3570,7 @@ describe("show releases", () => {
     expect(addBody?.get("urls")).toBe("https://prowlarr.test/2/download?link=pack");
     expect(addBody?.get("savepath")).toBe("/data/media/tv/Example Show");
     expect(addBody?.get("category")).toBe("tv");
-    expect(addBody?.get("tags")).toBe("churn-direct");
+    expect(addBody?.get("tags")).toBe("churn-direct,churn-series-42");
     expect(addBody?.get("contentLayout")).toBe("NoSubfolder");
     await app.close();
   });

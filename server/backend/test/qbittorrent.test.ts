@@ -170,4 +170,30 @@ describe("qBittorrent client", () => {
     await expect(client.getTorrents()).rejects.toBeInstanceOf(UpstreamError);
     await expect(client.getTorrents()).rejects.toMatchObject({ kind: "unauthorized" });
   });
+  it("adds a media tag to an existing torrent", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      expect(String(input)).toBe("http://qbittorrent.test:8080/api/v2/torrents/addTags");
+      expect(init?.method).toBe("POST");
+      expect(init?.headers).toMatchObject({
+        authorization: "Bearer qbt_test-key",
+        "content-type": "application/x-www-form-urlencoded",
+      });
+      const body = new URLSearchParams(String(init?.body));
+      expect(body.get("hashes")).toBe("abc123|def456");
+      expect(body.get("tags")).toBe("churn-movie-7");
+      return new Response(null, { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createQbittorrentClient(
+      { url: "http://qbittorrent.test:8080", apiKey: "qbt_test-key" },
+      500,
+    );
+
+    await expect(
+      client.addTags(["urn:btih:ABC123", "def456"], ["churn-movie-7"]),
+    ).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
 });
