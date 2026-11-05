@@ -135,26 +135,7 @@ impl Question {
     /// error, which makes a mistyped path impossible to correct.
     pub fn ask(self, stored: Option<&str>) -> io::Result<String> {
         match self {
-            Question::DataDir => {
-                let mut default = stored
-                    .map(normalize_path)
-                    .unwrap_or_else(|| "/data".to_string());
-                loop {
-                    let value: String = input(self.label())
-                        .placeholder("/data")
-                        .default_input(&default)
-                        .autocomplete(directory_suggestions)
-                        .interact()?;
-                    let normalized = normalize_path(&value);
-                    match validate_data_dir(&normalized) {
-                        Ok(()) => return Ok(normalized),
-                        Err(message) => {
-                            log::error(message)?;
-                            default = normalized;
-                        }
-                    }
-                }
-            }
+            Question::DataDir => ask_directory(self.label(), stored.or(Some("/data")), "/data"),
             Question::Port(port) => {
                 let default = stored
                     .and_then(|value| ports::validate_port(value).ok())
@@ -187,6 +168,32 @@ impl Question {
             | Question::WireguardAddresses => Err(io::Error::other(
                 "internal error: WireGuard credentials come from the config archive",
             )),
+        }
+    }
+}
+
+/// Ask for a writable directory with the same completion rules as the installer.
+///
+/// `stored` prefills the prompt; passing `None` leaves the placeholder as the
+/// only hint. Rejected answers get a fresh prompt instead of keeping cliclack's
+/// typed buffer, which makes a mistyped path impossible to correct.
+pub fn ask_directory(prompt: &str, stored: Option<&str>, placeholder: &str) -> io::Result<String> {
+    let mut default = stored.map(normalize_path);
+    loop {
+        let mut prompt = input(prompt)
+            .placeholder(placeholder)
+            .autocomplete(directory_suggestions);
+        if let Some(default) = &default {
+            prompt = prompt.default_input(default);
+        }
+        let value: String = prompt.interact()?;
+        let normalized = normalize_path(&value);
+        match validate_data_dir(&normalized) {
+            Ok(()) => return Ok(normalized),
+            Err(message) => {
+                log::error(message)?;
+                default = Some(normalized);
+            }
         }
     }
 }

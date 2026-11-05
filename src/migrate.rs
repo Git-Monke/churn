@@ -1,0 +1,990 @@
+//! Preflight, copy, verify and `.env` rewrite for `churn migrate`.
+//!
+//! Only the host `DATA_DIR` moves. Every container keeps mounting it at
+//! `/data`, so qBittorrent, Sonarr, Radarr and Jellyfin continue to use the
+//! same container paths and need no per-service reconfiguration. The old data
+//! is retained by default and only removed after a verified copy, a healthy
+//! restart and an explicit `--move`.
+
+use std::ffi::CString;
+use std::fs;
+use std::io;
+use std::os::unix::ffi::OsStrExt;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use serde::{Deserialize, Serialize};
+
+use crate::envfile;
+use crate::question;
+use crate::stack::Stack;
+use crate::system;
+
+/// Marker written into the destination while a copy is in progress. Its
+/// presence makes a later run resume instead of refusing a non-empty target.
+pub const MARKER: &str = ".churn-migrate.json";
+/// Backup of the pre-migration `.env`, kept for a one-command rollback.
+pub const ENV_BACKUP: &str = ".env.churn-migrate.bak";
+
+const NFS_SUPER_MAGIC: i64 = 0x6969;
+const SMB_SUPER_MAGIC: i64 = 0x517b;
+const SMB2_SUPER_MAGIC: i64 = 0xfe534d42;
+const CIFS_MAGIC_NUMBER: i64 = 0xff534d42;
+const FUSE_SUPER_MAGIC: i64 = 0x65735546;
+const AFS_SUPER_MAGIC: i64 = 0x5346414f;
+const NINE_P_SUPER_MAGIC: i64 = 0x01021997;
+const NETWORK_FILESYSTEMS: [i64; 7] = [
+    NFS_SUPER_MAGIC,
+    SMB_SUPER_MAGIC,
+    SMB2_SUPER_MAGIC,
+    CIFS_MAGIC_NUMBER,
+    FUSE_SUPER_MAGIC,
+    AFS_SUPER_MAGIC,
+    NINE_P_SUPER_MAGIC,
+];
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TreeStats {
+    pub bytes: u64,
+    pub files: u64,
+    pub directories: u64,
+    pub links: u64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct VerifyReport {
+    pub files: u64,
+    pub bytes: u64,
+    pub directories: u64,
+    pub links: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Plan {
+    pub source: PathBuf,
+    pub destination: PathBuf,
+    pub total_bytes: u64,
+    /// Bytes still to copy. Less than `total_bytes` when resuming.
+    pub remaining_bytes: u64,
+    pub available_bytes: u64,
+    pub resuming: bool,
+    pub network_filesystem: bool,
+    pub stacks: Vec<Stack>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EnvBackup {
+    pub path: PathBuf,
+    pub backup: PathBuf,
+    original: String,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct FilesystemStats {
+    available_bytes: u64,
+    read_only: bool,
+    fs_type: i64,
+}
+
+impl FilesystemStats {
+    fn is_network(self) -> bool {
+        NETWORK_FILESYSTEMS.contains(&self.fs_type)
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct Marker {
+    version: u32,
+    source: String,
+    destination: String,
+    started_unix: u64,
+}
+
+/// Stacks with generated state under `root`.
+pub fn installed_stacks(root: &Path) -> Vec<Stack> {
+    Stack::ALL
+        .into_iter()
+        .filter(|stack| {
+            env_path(root, *stack).is_file()
+                && root.join(stack.key()).join("docker-compose.yml").is_file()
+        })
+        .collect()
+}
+
+fn env_path(root: &Path, stack: Stack) -> PathBuf {
+    root.join(stack.key()).join(".env")
+}
+
+/// Read the current storage path from every installed stack.
+///
+/// A mismatch means a previous partial edit; refuse rather than pick one.
+pub fn current_data_dir(root: &Path, stacks: &[Stack]) -> io::Result<PathBuf> {
+    let mut found: Option<(Stack, PathBuf)> = None;
+    for stack in stacks {
+        let env = envfile::read(&env_path(root, *stack));
+        let Some(value) = env
+            .get("DATA_DIR")
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+        let path = PathBuf::from(question::normalize_path(value));
+        if let Some((other, existing)) = &found {
+            if existing != &path {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "the stacks disagree about DATA_DIR: {} has {}, {} has {}.\n\
+                         Fix both .env files before migrating.",
+                        other.key(),
+                        existing.display(),
+                        stack.key(),
+                        path.display()
+                    ),
+                ));
+            }
+        } else {
+            found = Some((*stack, path));
+        }
+    }
+    match found {
+        Some((_, path)) => Ok(path),
+        None => Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!(
+                "no DATA_DIR found in {}; run the installer first",
+                stacks
+                    .iter()
+                    .map(|stack| env_path(root, *stack).display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(" and ")
+            ),
+        )),
+    }
+}
+
+/// Validate the target and collect everything the confirmation screen shows.
+pub fn plan(
+    root: &Path,
+    stacks: &[Stack],
+    destination: &Path,
+    allow_network_filesystem: bool,
+) -> io::Result<Plan> {
+    let source = current_data_dir(root, stacks)?;
+    let source = fs::canonicalize(&source).map_err(|err| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            format!(
+                "cannot read the current data directory {}: {err}",
+                source.display()
+            ),
+        )
+    })?;
+
+    if destination.as_os_str().is_empty() || !destination.is_absolute() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "the destination must be an absolute path",
+        ));
+    }
+    if destination
+        .components()
+        .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "the destination must not contain '..' components",
+        ));
+    }
+    if let Err(message) = validate_target(destination) {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, message));
+    }
+
+    let destination = canonical_target(destination)?;
+    if source == destination {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{} is already the data directory", source.display()),
+        ));
+    }
+    if destination.starts_with(&source) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "{} is inside the current data directory {}",
+                destination.display(),
+                source.display()
+            ),
+        ));
+    }
+    if source.starts_with(&destination) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "the current data directory {} is inside {}",
+                source.display(),
+                destination.display()
+            ),
+        ));
+    }
+
+    let (resuming, copied_bytes) = inspect_destination(&source, &destination)?;
+    let filesystem = filesystem_stats(&nearest_existing(&destination))?;
+    if filesystem.read_only {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("{} is on a read-only filesystem", destination.display()),
+        ));
+    }
+    if filesystem.is_network() && !allow_network_filesystem {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!(
+                "{} is on a network filesystem; SQLite and interactive media use are unsafe there.\n\
+                 Pass --allow-network-fs to acknowledge the risk.",
+                destination.display()
+            ),
+        ));
+    }
+
+    let total = scan_tree(&source)?;
+    let remaining = if resuming {
+        total.bytes.saturating_sub(copied_bytes)
+    } else {
+        total.bytes
+    };
+    if remaining > filesystem.available_bytes {
+        return Err(io::Error::new(
+            io::ErrorKind::StorageFull,
+            format!(
+                "{} needs {} but only {} is free on {}",
+                if resuming {
+                    "the remaining copy"
+                } else {
+                    "the copy"
+                },
+                format_bytes(remaining),
+                format_bytes(filesystem.available_bytes),
+                destination.display()
+            ),
+        ));
+    }
+
+    Ok(Plan {
+        source,
+        destination,
+        total_bytes: total.bytes,
+        remaining_bytes: remaining,
+        available_bytes: filesystem.available_bytes,
+        resuming,
+        network_filesystem: filesystem.is_network(),
+        stacks: stacks.to_vec(),
+    })
+}
+
+/// Reuse the installer's absolute-path, existence and writability checks.
+fn validate_target(path: &Path) -> Result<(), String> {
+    question::validate_data_dir(&path.to_string_lossy())
+}
+
+/// The destination as an absolute path with symlinks in its existing ancestors
+/// resolved. Missing trailing components are appended unchanged.
+pub fn canonical_target(path: &Path) -> io::Result<PathBuf> {
+    let mut current = path.to_path_buf();
+    let mut missing = Vec::new();
+    loop {
+        match fs::canonicalize(&current) {
+            Ok(mut base) => {
+                for part in missing.iter().rev() {
+                    base.push(part);
+                }
+                return Ok(base);
+            }
+            Err(_) => {
+                let name = current.file_name().ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!("cannot resolve {}", path.display()),
+                    )
+                })?;
+                missing.push(name.to_os_string());
+                current = current
+                    .parent()
+                    .ok_or_else(|| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            format!("cannot resolve {}", path.display()),
+                        )
+                    })?
+                    .to_path_buf();
+            }
+        }
+    }
+}
+
+fn nearest_existing(path: &Path) -> PathBuf {
+    let mut current = path.to_path_buf();
+    while !current.exists() {
+        match current.parent() {
+            Some(parent) if parent != current => current = parent.to_path_buf(),
+            _ => break,
+        }
+    }
+    current
+}
+
+/// Whether an existing destination is empty/resumable, plus its current size.
+fn inspect_destination(source: &Path, destination: &Path) -> io::Result<(bool, u64)> {
+    if !destination.exists() {
+        return Ok((false, 0));
+    }
+    if !destination.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{} exists but is not a directory", destination.display()),
+        ));
+    }
+    let mut entries = fs::read_dir(destination)?;
+    if entries.next().is_none() {
+        return Ok((false, 0));
+    }
+
+    let marker_path = destination.join(MARKER);
+    if marker_path.is_file() {
+        let marker = read_marker(&marker_path)?;
+        if marker.source == source.to_string_lossy() {
+            let mut stats = scan_tree(destination)?;
+            if let Ok(metadata) = fs::metadata(&marker_path) {
+                stats.bytes = stats.bytes.saturating_sub(metadata.len());
+            }
+            return Ok((true, stats.bytes));
+        }
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            format!(
+                "{} contains a partial copy of {}; refusing to merge copies from different sources",
+                destination.display(),
+                marker.source
+            ),
+        ));
+    }
+
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        format!(
+            "{} is not empty; choose an empty directory or remove its contents first",
+            destination.display()
+        ),
+    ))
+}
+
+pub fn write_marker(source: &Path, destination: &Path) -> io::Result<()> {
+    fs::create_dir_all(destination)?;
+    let marker = Marker {
+        version: 1,
+        source: source.to_string_lossy().to_string(),
+        destination: destination.to_string_lossy().to_string(),
+        started_unix: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_secs())
+            .unwrap_or_default(),
+    };
+    let body = serde_json::to_string_pretty(&marker)
+        .map_err(|err| io::Error::other(format!("could not encode migration marker: {err}")))?;
+    envfile::write_atomic(&destination.join(MARKER), &body)
+}
+
+pub fn clear_marker(destination: &Path) {
+    let _ = fs::remove_file(destination.join(MARKER));
+}
+
+fn read_marker(path: &Path) -> io::Result<Marker> {
+    let body = fs::read_to_string(path)?;
+    serde_json::from_str(&body).map_err(|err| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "{} is not a valid churn migration marker: {err}",
+                path.display()
+            ),
+        )
+    })
+}
+
+/// Walk a tree without following symlinks.
+pub fn scan_tree(path: &Path) -> io::Result<TreeStats> {
+    let mut stats = TreeStats::default();
+    scan_into(path, &mut stats)?;
+    Ok(stats)
+}
+
+fn scan_into(path: &Path, stats: &mut TreeStats) -> io::Result<()> {
+    let mut entries: Vec<_> = fs::read_dir(path)?.collect::<Result<_, _>>()?;
+    entries.sort_by_key(|entry| entry.file_name());
+    for entry in entries {
+        let metadata = fs::symlink_metadata(entry.path())?;
+        let file_type = metadata.file_type();
+        if file_type.is_dir() {
+            stats.directories += 1;
+            scan_into(&entry.path(), stats)?;
+        } else if file_type.is_file() {
+            stats.files += 1;
+            stats.bytes = stats.bytes.saturating_add(metadata.len());
+        } else if file_type.is_symlink() {
+            stats.links += 1;
+        }
+    }
+    Ok(())
+}
+
+/// Verify that every source entry exists at the destination with the same size
+/// (and symlinks with the same target). This is the gate before `.env` changes.
+pub fn verify_tree(source: &Path, destination: &Path) -> io::Result<VerifyReport> {
+    if !destination.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("{} is missing after the copy", destination.display()),
+        ));
+    }
+    let mut report = VerifyReport::default();
+    verify_into(source, destination, &mut report)?;
+    Ok(report)
+}
+
+fn verify_into(source: &Path, destination: &Path, report: &mut VerifyReport) -> io::Result<()> {
+    let mut entries: Vec<_> = fs::read_dir(source)?.collect::<Result<_, _>>()?;
+    entries.sort_by_key(|entry| entry.file_name());
+    for entry in entries {
+        let source_path = entry.path();
+        let relative = source_path
+            .strip_prefix(source)
+            .unwrap_or(source_path.as_path());
+        let destination_path = destination.join(relative);
+        let source_meta = fs::symlink_metadata(&source_path)?;
+        let destination_meta = fs::symlink_metadata(&destination_path).map_err(|err| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                format!(
+                    "{} is missing after the copy: {err}",
+                    destination_path.display()
+                ),
+            )
+        })?;
+
+        if source_meta.file_type().is_dir() {
+            if !destination_meta.is_dir() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "{} is not a directory after the copy",
+                        destination_path.display()
+                    ),
+                ));
+            }
+            report.directories += 1;
+            verify_into(&source_path, &destination_path, report)?;
+        } else if source_meta.file_type().is_file() {
+            if !destination_meta.is_file() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "{} is not a file after the copy",
+                        destination_path.display()
+                    ),
+                ));
+            }
+            if source_meta.len() != destination_meta.len() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "{} has {} bytes, expected {}",
+                        destination_path.display(),
+                        destination_meta.len(),
+                        source_meta.len()
+                    ),
+                ));
+            }
+            report.files += 1;
+            report.bytes = report.bytes.saturating_add(source_meta.len());
+        } else if source_meta.file_type().is_symlink() {
+            if fs::read_link(&source_path)? != fs::read_link(&destination_path)? {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "{} points at a different target after the copy",
+                        destination_path.display()
+                    ),
+                ));
+            }
+            report.links += 1;
+        }
+    }
+    Ok(())
+}
+
+/// Copy the contents of `source` into `destination`.
+///
+/// rsync is preferred because `--partial` makes an interrupted run resumable.
+/// A plain `cp -a` fallback preserves ownership and permissions but restarts
+/// the affected file.
+pub fn copy(source: &Path, destination: &Path, on_line: &mut dyn FnMut(&str)) -> io::Result<()> {
+    fs::create_dir_all(destination)?;
+
+    let command = if system::which("rsync") {
+        let mut command = Command::new("rsync");
+        command
+            .args([
+                "-aH",
+                "--numeric-ids",
+                "--partial",
+                "--info=progress2",
+                "--delete",
+                "--exclude",
+                MARKER,
+            ])
+            .arg(with_trailing_slash(source))
+            .arg(with_trailing_slash(destination));
+        command
+    } else {
+        let mut command = Command::new("cp");
+        command.arg("-a").arg(source.join(".")).arg(destination);
+        command
+    };
+
+    let output = system::run_streaming(command, on_line)?;
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let detail = output.tail.join("\n");
+    let mut message = format!(
+        "copy from {} to {} failed ({})",
+        source.display(),
+        destination.display(),
+        output.status
+    );
+    if !detail.is_empty() {
+        message.push('\n');
+        message.push_str(&detail);
+    }
+    if let Some(explanation) = copy_failure_explanation(output.status.code(), &output.tail) {
+        message.push_str("\n\n");
+        message.push_str(&explanation);
+    }
+    Err(io::Error::other(message))
+}
+
+/// Explain the common "files look complete but rsync still failed" case.
+///
+/// With `--partial`, rsync can leave a destination file at its final path even
+/// after its post-transfer verification fails. The size can therefore match the
+/// source while the contents are not trustworthy, so do not let a size-only
+/// resume estimate imply the copy is valid.
+fn copy_failure_explanation(code: Option<i32>, tail: &[String]) -> Option<String> {
+    let detail = tail.join("\n").to_ascii_lowercase();
+    let read_errors = detail.contains("read errors")
+        || detail.contains("input/output error")
+        || detail.contains("failed verification");
+    if !read_errors && code != Some(23) {
+        return None;
+    }
+
+    if read_errors {
+        return Some(
+            "rsync could not read every source file, or its post-transfer verification failed.\n\
+             This usually means the source disk, filesystem or mount returned bad data\n\
+             (corruption, bad sectors, a failing cable or a dropped network/removable volume).\n\n\
+             Such a file can exist in the destination with the same size as the source and\n\
+             still be incomplete or corrupt; matching sizes do not prove a valid copy.\n\n\
+             The old .env is unchanged, so the stacks are still using the original data.\n\
+             The destination and its marker were kept for resuming, but fix or restore the\n\
+             unreadable source files before re-running the same command."
+                .to_string(),
+        );
+    }
+
+    Some(
+        "rsync exited with code 23: some files or attributes were not transferred.\n\
+         See the rsync log above for the affected paths. This is not necessarily\n\
+         corruption (permissions and vanished files also produce code 23), but it is\n\
+         not a clean copy either.\n\n\
+         The old .env is unchanged, so the stacks are still using the original data.\n\
+         The destination and its marker were kept for resuming; fix the reported\n\
+         problem before re-running the same command."
+            .to_string(),
+    )
+}
+
+fn with_trailing_slash(path: &Path) -> PathBuf {
+    let mut path = path.to_path_buf();
+    path.push("");
+    path
+}
+
+/// Existing `PUID`/`PGID` win so copied files keep the ownership the services
+/// already use. A fresh destination falls back to its own owner.
+pub fn storage_owner(root: &Path, stacks: &[Stack], destination: &Path) -> (u32, u32) {
+    let mut uid = None;
+    let mut gid = None;
+    for stack in stacks {
+        let env = envfile::read(&env_path(root, *stack));
+        if uid.is_none() {
+            uid = env.get("PUID").and_then(|value| value.trim().parse().ok());
+        }
+        if gid.is_none() {
+            gid = env.get("PGID").and_then(|value| value.trim().parse().ok());
+        }
+    }
+    match (uid, gid) {
+        (Some(uid), Some(gid)) => (uid, gid),
+        _ => envfile::owner(destination),
+    }
+}
+
+/// Give the destination root the owner the containers expect, so they can
+/// create new media folders there.
+pub fn set_owner(path: &Path, uid: u32, gid: u32) -> io::Result<()> {
+    let path = CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "path contains a NUL byte"))?;
+    if unsafe { libc::chown(path.as_ptr(), uid, gid) } == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+/// Update `DATA_DIR`, `PUID` and `PGID` in every stack's `.env`.
+///
+/// A backup is written first, and a failure part-way through restores the
+/// files already changed so the installation never points at a half-written
+/// configuration.
+pub fn write_envs(
+    root: &Path,
+    stacks: &[Stack],
+    destination: &Path,
+    uid: u32,
+    gid: u32,
+) -> io::Result<Vec<EnvBackup>> {
+    let destination = destination.to_string_lossy().to_string();
+    let uid = uid.to_string();
+    let gid = gid.to_string();
+    let values: [(&str, &str); 3] = [
+        ("DATA_DIR", destination.as_str()),
+        ("PUID", uid.as_str()),
+        ("PGID", gid.as_str()),
+    ];
+
+    let mut backups: Vec<EnvBackup> = Vec::new();
+    for stack in stacks {
+        let path = env_path(root, *stack);
+        if !path.is_file() {
+            continue;
+        }
+        let original = fs::read_to_string(&path)?;
+        let backup = path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(ENV_BACKUP);
+        if let Err(err) = envfile::write_atomic(&backup, &original) {
+            let _ = restore_envs(&backups);
+            return Err(err);
+        }
+        if let Ok(metadata) = std::fs::metadata(&path) {
+            let _ = std::fs::set_permissions(&backup, metadata.permissions());
+        }
+        backups.push(EnvBackup {
+            path: path.clone(),
+            backup,
+            original,
+        });
+        if let Err(err) = envfile::upsert_many(&path, &values) {
+            let _ = restore_envs(&backups);
+            return Err(err);
+        }
+    }
+    Ok(backups)
+}
+
+/// Restore every `.env` from its pre-migration backup.
+pub fn restore_envs(backups: &[EnvBackup]) -> io::Result<()> {
+    for entry in backups {
+        envfile::write_atomic(&entry.path, &entry.original)?;
+    }
+    Ok(())
+}
+
+/// Remove the contents of the old data directory, keeping the directory itself
+/// so the old mount point still exists.
+pub fn remove_old_data(source: &Path) -> io::Result<()> {
+    for entry in fs::read_dir(source)? {
+        let path = entry?.path();
+        let metadata = fs::symlink_metadata(&path)?;
+        if metadata.is_dir() {
+            fs::remove_dir_all(&path)?;
+        } else {
+            fs::remove_file(&path)?;
+        }
+    }
+    Ok(())
+}
+
+impl Plan {
+    /// Multi-line rollback instructions for the environment files.
+    pub fn rollback_hint(&self, root: &Path) -> String {
+        let mut lines = String::new();
+        for stack in &self.stacks {
+            lines.push_str(&format!(
+                "  cp '{}' '{}'\n",
+                env_path(root, *stack).with_file_name(ENV_BACKUP).display(),
+                env_path(root, *stack).display()
+            ));
+        }
+        lines.push_str("then restart the stacks with `docker compose up -d`.");
+        lines
+    }
+}
+
+pub fn format_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit + 1 < UNITS.len() {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
+    }
+}
+
+fn filesystem_stats(path: &Path) -> io::Result<FilesystemStats> {
+    let c_path = CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "path contains a NUL byte"))?;
+
+    let mut vfs: libc::statvfs = unsafe { std::mem::zeroed() };
+    if unsafe { libc::statvfs(c_path.as_ptr(), &mut vfs) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+
+    let mut sfs: libc::statfs = unsafe { std::mem::zeroed() };
+    let fs_type = if unsafe { libc::statfs(c_path.as_ptr(), &mut sfs) } == 0 {
+        sfs.f_type as i64
+    } else {
+        0
+    };
+
+    let block_size = vfs.f_frsize.max(vfs.f_bsize).max(1) as u64;
+    Ok(FilesystemStats {
+        available_bytes: vfs.f_bavail as u64 * block_size,
+        read_only: vfs.f_flag & libc::ST_RDONLY != 0,
+        fs_type,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::symlink;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    static COUNTER: AtomicU32 = AtomicU32::new(0);
+
+    fn temp_dir(label: &str) -> PathBuf {
+        let id = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let dir =
+            std::env::temp_dir().join(format!("churn-migrate-{}-{label}-{id}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn fixture(label: &str) -> (PathBuf, PathBuf, PathBuf) {
+        let root = temp_dir(label);
+        let source = root.join("old");
+        let destination = root.join("new");
+        fs::create_dir_all(source.join("media/movies")).unwrap();
+        fs::write(source.join("media/movies/film.mkv"), b"123456").unwrap();
+        fs::create_dir_all(source.join("incomplete")).unwrap();
+        for stack in Stack::ALL {
+            let dir = root.join(stack.key());
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join("docker-compose.yml"), "").unwrap();
+            fs::write(
+                dir.join(".env"),
+                format!(
+                    "DATA_DIR={}\nPUID=1000\nPGID=1000\nKEEP=yes\n",
+                    source.display()
+                ),
+            )
+            .unwrap();
+        }
+        (root, source, destination)
+    }
+
+    #[test]
+    fn current_data_dir_is_shared_and_rejects_a_mismatch() {
+        let (root, source, _) = fixture("current");
+        let stacks = installed_stacks(&root);
+        assert_eq!(stacks, vec![Stack::Server, Stack::Torrent]);
+        assert_eq!(current_data_dir(&root, &stacks).unwrap(), source);
+
+        fs::write(
+            root.join("torrent/.env"),
+            format!("DATA_DIR={}\n", root.join("other").display()),
+        )
+        .unwrap();
+        assert!(current_data_dir(&root, &stacks).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn plan_rejects_nested_and_non_empty_destinations() {
+        let (root, source, destination) = fixture("nesting");
+        let stacks = installed_stacks(&root);
+
+        assert!(plan(&root, &stacks, &source.join("nested"), false).is_err());
+        assert!(plan(&root, &stacks, &source.parent().unwrap().join("old"), false).is_err());
+        assert!(plan(&root, &stacks, &source, false).is_err());
+
+        fs::create_dir_all(&destination).unwrap();
+        fs::write(destination.join("keep.txt"), b"keep").unwrap();
+        assert!(plan(&root, &stacks, &destination, false).is_err());
+        fs::remove_dir_all(&destination).unwrap();
+
+        let plan = plan(&root, &stacks, &destination, false).unwrap();
+        assert_eq!(plan.total_bytes, 6);
+        assert!(!plan.resuming);
+        assert_eq!(plan.stacks, stacks);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_marker_allows_resuming_the_same_source() {
+        let (root, source, destination) = fixture("resume");
+        let stacks = installed_stacks(&root);
+        fs::create_dir_all(&destination).unwrap();
+        write_marker(&source, &destination).unwrap();
+        fs::write(destination.join("partial.bin"), b"12").unwrap();
+
+        let plan = plan(&root, &stacks, &destination, false).unwrap();
+        assert!(plan.resuming);
+        assert_eq!(plan.remaining_bytes, 4);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn writing_a_marker_creates_a_missing_destination() {
+        let (root, source, destination) = fixture("marker-create");
+        assert!(!destination.exists());
+        write_marker(&source, &destination).unwrap();
+        assert!(destination.join(MARKER).is_file());
+        assert!(
+            plan(&root, &installed_stacks(&root), &destination, false)
+                .unwrap()
+                .resuming
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn copy_verify_and_remove_old_data_preserve_a_complete_tree() {
+        let (root, source, destination) = fixture("copy");
+        symlink("media/movies/film.mkv", source.join("link")).unwrap();
+
+        copy(&source, &destination, &mut |_| {}).unwrap();
+        let report = verify_tree(&source, &destination).unwrap();
+        assert_eq!(report.files, 1);
+        assert_eq!(report.bytes, 6);
+        assert_eq!(report.links, 1);
+        assert!(destination.join("media/movies/film.mkv").exists());
+
+        remove_old_data(&source).unwrap();
+        assert!(source.exists());
+        assert_eq!(source.read_dir().unwrap().count(), 0);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn scan_counts_files_directories_and_symlinks() {
+        let (root, source, _) = fixture("scan");
+        symlink("media/movies/film.mkv", source.join("link")).unwrap();
+        let stats = scan_tree(&source).unwrap();
+        assert_eq!(stats.files, 1);
+        assert_eq!(stats.directories, 3);
+        assert_eq!(stats.links, 1);
+        assert_eq!(stats.bytes, 6);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn verify_rejects_a_truncated_file() {
+        let (root, source, destination) = fixture("truncated");
+        copy(&source, &destination, &mut |_| {}).unwrap();
+        fs::write(destination.join("media/movies/film.mkv"), b"1").unwrap();
+        assert!(verify_tree(&source, &destination).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn env_update_keeps_other_keys_and_can_be_restored() {
+        let (root, _, destination) = fixture("envs");
+        let stacks = installed_stacks(&root);
+        let backups = write_envs(&root, &stacks, &destination, 1001, 1002).unwrap();
+
+        for stack in &stacks {
+            let env = envfile::read(&env_path(&root, *stack));
+            assert_eq!(
+                env.get("DATA_DIR").map(String::as_str),
+                Some(destination.to_string_lossy().as_ref())
+            );
+            assert_eq!(env.get("PUID").map(String::as_str), Some("1001"));
+            assert_eq!(env.get("PGID").map(String::as_str), Some("1002"));
+            assert_eq!(env.get("KEEP").map(String::as_str), Some("yes"));
+            assert!(env_path(&root, *stack).with_file_name(ENV_BACKUP).is_file());
+        }
+
+        restore_envs(&backups).unwrap();
+        for stack in &stacks {
+            let env = envfile::read(&env_path(&root, *stack));
+            assert_eq!(env.get("PUID").map(String::as_str), Some("1000"));
+            assert_eq!(env.get("KEEP").map(String::as_str), Some("yes"));
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn copy_failures_from_read_errors_explain_corruption() {
+        let tail = vec![
+            "rsync: [sender] read errors mapping \"/data/a.mkv\": Input/output error (5)"
+                .to_string(),
+            "ERROR: a.mkv failed verification -- update discarded.".to_string(),
+            "rsync error: some files/attrs were not transferred (see previous errors) (code 23)"
+                .to_string(),
+        ];
+        let message = copy_failure_explanation(Some(23), &tail).unwrap();
+        assert!(message.contains("bad data"));
+        assert!(message.contains("matching sizes do not prove"));
+        assert!(message.contains("old .env is unchanged"));
+    }
+
+    #[test]
+    fn copy_failures_without_read_errors_stay_generic() {
+        let tail = vec!["rsync: permission denied".to_string()];
+        let message = copy_failure_explanation(Some(23), &tail).unwrap();
+        assert!(message.contains("code 23"));
+        assert!(message.contains("not necessarily"));
+        assert!(copy_failure_explanation(Some(1), &tail).is_none());
+    }
+
+    #[test]
+    fn human_sizes_are_readable() {
+        assert_eq!(format_bytes(0), "0 B");
+        assert_eq!(format_bytes(1023), "1023 B");
+        assert_eq!(format_bytes(1024), "1.0 KiB");
+        assert_eq!(format_bytes(1024 * 1024 * 3 / 2), "1.5 MiB");
+    }
+}

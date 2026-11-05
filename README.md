@@ -142,6 +142,44 @@ sudo ./target/release/churn --uninstall --stacks torrent
 sudo ./target/release/churn --uninstall --yes        # no confirmation
 ```
 
+## Migrating storage
+
+`churn migrate` moves an existing `DATA_DIR` to a new host path without
+reinstalling. It detects the current path from the `.env` files, validates the
+destination, stops the installed stacks, copies and verifies the data, rewrites
+both `.env` files and restarts the services. The old copy is kept by default so
+playback and imports can be checked before deleting it:
+
+```bash
+sudo churn migrate --to /mnt/media --dry-run   # show the plan, change nothing
+sudo churn migrate --to /mnt/media             # copy, verify, restart; keep old
+sudo churn migrate --to /mnt/media --move      # delete the old copy afterwards
+sudo churn migrate                             # prompt for the destination
+```
+
+The path prompt uses the same autocomplete and validation as the installer.
+Only the host `DATA_DIR` changes: every container still mounts it at `/data`,
+so qBittorrent, Sonarr, Radarr and Jellyfin keep the same container paths and
+need no per-service reconfiguration.
+
+Before copying, churn refuses a destination that is inside the current data
+directory (or vice versa), is not writable, is on a read-only filesystem, is on
+a network filesystem (override only with `--allow-network-fs`), or does not have
+enough free space. Nested and unwritable targets fail before any container is
+stopped.
+
+The whole installed stack is stopped for the copy, because SQLite databases and
+in-flight downloads must not change underneath it. rsync is used when available
+so an interrupted copy can be resumed by running the same command again; without
+rsync the copy restarts the affected file with `cp -a`. A marker in the
+destination records the source, and `.env` is only switched after every file has
+been verified by size and symlink target. Each stack's previous `.env` is saved
+as `.env.churn-migrate.bak`; the command prints the exact `cp` commands to roll
+back. `--dry-run` stops nothing and writes nothing.
+
+Split media/download locations are a separate follow-up; once that lands,
+`migrate` will cover each location independently.
+
 ## What it writes
 
 `.env` files only; the compose files are static and committed. churn then runs

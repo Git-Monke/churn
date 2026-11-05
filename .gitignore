@@ -10,3 +10,7 @@ dist/
 *.tsbuildinfo
 .churn-cache/
 .churn-state/
+
+# Pre-migration backups created by `churn migrate`
+.env.churn-migrate.json
+.env.churn-migrate.bak

@@ -5,6 +5,7 @@ pub mod compose;
 pub mod envfile;
 pub mod jellyfin;
 pub mod live;
+pub mod migrate;
 pub mod mullvad;
 pub mod ports;
 pub mod question;

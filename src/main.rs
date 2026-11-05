@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::io;
+use std::net::{SocketAddr, TcpStream};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
@@ -21,8 +22,10 @@ use churn::assets;
 use churn::envfile;
 use churn::jellyfin::{self, Credentials, Jellyfin};
 use churn::live::LiveLog;
+use churn::migrate;
 use churn::mullvad;
 use churn::ports::{self, Port};
+use churn::question;
 use churn::question::{Question, Section};
 use churn::stack::{
     self, Answers, DASHBOARD_IMAGE_ENV, DASHBOARD_IMAGE_REPO, DASHBOARD_SERVICE, Stack,
@@ -43,21 +46,34 @@ USAGE:
     churn [OPTIONS]
     churn show [--stacks <LIST>]
     churn update [OPTIONS]
+    churn migrate [--to <PATH>] [OPTIONS]
 
 COMMANDS:
     show              print the URLs for the installed services; does not need
                       root and does not start or change anything
     update            update the churn binary and/or the server dashboard to the
                       latest release; see update options below
+    migrate           copy DATA_DIR to a new host path, verify the copy, rewrite
+                      both .env files and restart the stacks; the old copy is
+                      kept unless --move is given
 
 OPTIONS:
     --stacks <LIST>   comma separated: server,torrent (skips the menu; with
-                      --uninstall or show, limits what is handled)
+                      --uninstall, show or migrate, limits what is handled)
     --uninstall       stop and remove the stack containers, then delete their
                       generated config, cache and .env files; DATA_DIR is kept
-    --dry-run         show the plan; write, remove and start nothing
+    --dry-run         show the plan; write, remove, copy and start nothing
     -y, --yes         skip the final confirmation
     -h, --help        show this help
+
+MIGRATE OPTIONS:
+    --to <PATH>       destination directory; prompted when omitted
+    --move            delete the old copy after the new one is verified and the
+                      stacks restart (alias: --delete-old)
+    --keep-old        keep the old copy (default; alias: --copy)
+    --allow-network-fs
+                      allow a network filesystem as the destination, which is
+                      unsafe for SQLite and interactive media use
 
 UPDATE OPTIONS:
     --check           print installed and latest versions; change nothing
@@ -79,6 +95,10 @@ struct Args {
     dashboard_only: bool,
     force: bool,
     uninstall: bool,
+    migrate: bool,
+    move_old: bool,
+    keep_old: bool,
+    allow_network_fs: bool,
     dry_run: bool,
     yes: bool,
     help: bool,
@@ -95,9 +115,10 @@ fn parse_args() -> Result<Args, String> {
             }
             "show" => args.show = true,
             "update" => args.update = true,
+            "migrate" => args.migrate = true,
             "--check" => args.check = true,
             "--to" => {
-                let value = raw.next().ok_or("--to needs a version")?;
+                let value = raw.next().ok_or("--to needs a path or version")?;
                 args.to = Some(value);
             }
             "--image" => {
@@ -108,6 +129,9 @@ fn parse_args() -> Result<Args, String> {
             "--dashboard-only" => args.dashboard_only = true,
             "--force" => args.force = true,
             "--uninstall" => args.uninstall = true,
+            "--move" | "--delete-old" => args.move_old = true,
+            "--keep-old" | "--copy" => args.keep_old = true,
+            "--allow-network-fs" => args.allow_network_fs = true,
             "--dry-run" => args.dry_run = true,
             "-y" | "--yes" => args.yes = true,
             "-h" | "--help" => args.help = true,
@@ -128,19 +152,30 @@ fn parse_args() -> Result<Args, String> {
 }
 
 fn validate_args(args: &Args) -> Result<(), String> {
-    let update_option = args.check
-        || args.to.is_some()
-        || args.image.is_some()
-        || args.binary_only
-        || args.dashboard_only
-        || args.force;
+    let commands = [args.show, args.update, args.uninstall, args.migrate]
+        .into_iter()
+        .filter(|chosen| *chosen)
+        .count();
+    if commands > 1 {
+        return Err("'show', 'update', '--uninstall' and 'migrate' cannot be combined".to_string());
+    }
+
+    let update_option =
+        args.check || args.image.is_some() || args.binary_only || args.dashboard_only || args.force;
     if !args.update && update_option {
         return Err("update options require the 'update' command".to_string());
     }
+    if args.to.is_some() && !args.update && !args.migrate {
+        return Err("--to requires the 'update' or 'migrate' command".to_string());
+    }
+    if (args.move_old || args.keep_old || args.allow_network_fs) && !args.migrate {
+        return Err("migrate options require the 'migrate' command".to_string());
+    }
+    if args.move_old && args.keep_old {
+        return Err("--move and --keep-old are mutually exclusive".to_string());
+    }
+
     if args.update {
-        if args.show || args.uninstall {
-            return Err("'update' cannot be combined with 'show' or '--uninstall'".to_string());
-        }
         if args.binary_only && args.dashboard_only {
             return Err("--binary-only and --dashboard-only are mutually exclusive".to_string());
         }
@@ -874,6 +909,369 @@ fn uninstall(args: Args) -> io::Result<bool> {
     Ok(true)
 }
 
+// ---------------------------------------------------------------- migrate
+
+fn show_migration_plan(plan: &migrate::Plan, args: &Args) -> io::Result<()> {
+    let mut lines = String::new();
+    lines.push_str(&format!("{:<14} {}\n", "from", plan.source.display()));
+    lines.push_str(&format!("{:<14} {}\n", "to", plan.destination.display()));
+    lines.push_str(&format!(
+        "{:<14} {}\n",
+        "size",
+        migrate::format_bytes(plan.total_bytes)
+    ));
+    if plan.resuming {
+        lines.push_str(&format!(
+            "{:<14} {} (resuming a partial copy)\n",
+            "still to copy",
+            migrate::format_bytes(plan.remaining_bytes)
+        ));
+    }
+    lines.push_str(&format!(
+        "{:<14} {}\n",
+        "free space",
+        migrate::format_bytes(plan.available_bytes)
+    ));
+    lines.push_str(&format!(
+        "{:<14} {}\n",
+        "stacks",
+        plan.stacks
+            .iter()
+            .map(|stack| stack.key())
+            .collect::<Vec<_>>()
+            .join(", ")
+    ));
+    lines.push_str(&format!(
+        "{:<14} {}\n",
+        "old data",
+        if args.move_old {
+            "deleted after verification and a healthy restart"
+        } else {
+            "kept (rollback stays possible)"
+        }
+    ));
+    if plan.network_filesystem {
+        lines.push_str("\nThe destination is a network filesystem. SQLite databases and\ninteractive media playback can misbehave on network storage.\n");
+    }
+    if plan.resuming && plan.remaining_bytes == 0 {
+        lines.push_str(
+            "\nThe destination already contains at least the source's total bytes. This is\n             a size-only estimate: it does not prove every file is present or valid. rsync\n             re-checks the tree and churn verifies it again before changing .env, but a\n             previous read error can leave a same-size file that is still corrupt.\n",
+        );
+    }
+    note("About to migrate", lines.trim_end().to_string())
+}
+
+fn configured_port(stack: Stack, port: Port) -> u16 {
+    envfile::read(&stack.env_path())
+        .get(port.env_key())
+        .and_then(|value| ports::validate_port(value).ok())
+        .unwrap_or_else(|| port.default_port())
+}
+
+fn wait_for_tcp(port: u16, timeout: Duration) -> io::Result<()> {
+    let address = SocketAddr::from(([127, 0, 0, 1], port));
+    let deadline = Instant::now() + timeout;
+    loop {
+        if TcpStream::connect_timeout(&address, Duration::from_secs(2)).is_ok() {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err(io::Error::other(format!(
+                "{address} did not accept connections within {}s",
+                timeout.as_secs()
+            )));
+        }
+        std::thread::sleep(Duration::from_secs(1));
+    }
+}
+
+fn stop_stacks(stacks: &[Stack]) -> io::Result<()> {
+    for (index, stack) in stacks.iter().enumerate() {
+        let header = format!("[{}/{}] stopping {}", index + 1, stacks.len(), stack.key());
+        let mut live = LiveLog::start(header);
+        match system::compose_stop(&stack.dir(), &mut |line| live.push(line)) {
+            Ok(()) => live.success(format!("stopped {}", stack.key())),
+            Err(err) => {
+                live.error(format!("failed to stop {}", stack.key()));
+                return Err(err);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn with_restart(error: io::Error, restart: io::Result<()>) -> io::Error {
+    match restart {
+        Ok(()) => io::Error::new(
+            error.kind(),
+            format!(
+                "{error}\nThe original stacks were restarted on the old data.\n\
+                 The partial copy and its marker were kept; re-run the same command to resume."
+            ),
+        ),
+        Err(restart_error) => io::Error::new(
+            error.kind(),
+            format!(
+                "{error}\nRestarting the original stacks also failed: {restart_error}\n\
+                 Fix the stack with `docker compose up -d` in each stack directory."
+            ),
+        ),
+    }
+}
+
+fn migrate_storage(args: &Args) -> io::Result<bool> {
+    intro("churn · data migration")?;
+
+    if !ensure_root()? {
+        return Ok(false);
+    }
+
+    let root = envfile::root();
+    let installed = migrate::installed_stacks(&root);
+    if installed.is_empty() {
+        outro_note(
+            "Nothing to migrate",
+            format!(
+                "No installed stacks were found under {}.\nRun `sudo churn` first.",
+                root.display()
+            ),
+        )?;
+        return Ok(false);
+    }
+
+    if let Some(explicit) = &args.stacks {
+        if let Some(missing) = installed.iter().find(|stack| !explicit.contains(stack)) {
+            outro_note(
+                "Both stacks share DATA_DIR",
+                format!(
+                    "The {} stack is installed and uses the same data directory.\n\
+                     Migrate both stacks together so they do not point at different copies.",
+                    missing.key()
+                ),
+            )?;
+            return Ok(false);
+        }
+        if let Some(extra) = explicit.iter().find(|stack| !installed.contains(stack)) {
+            outro_note(
+                "Stack not installed",
+                format!(
+                    "The {} stack has no generated .env under {}.",
+                    extra.key(),
+                    root.display()
+                ),
+            )?;
+            return Ok(false);
+        }
+    }
+    let stacks = installed;
+
+    if !args.dry_run && !system::docker_ready() {
+        outro_note(
+            "Docker is required",
+            "Docker with the compose plugin must be running to stop and restart the stacks.",
+        )?;
+        return Ok(false);
+    }
+
+    let source = match migrate::current_data_dir(&root, &stacks) {
+        Ok(source) => source,
+        Err(err) => {
+            outro_cancel(format!("cannot migrate: {err}"))?;
+            return Ok(false);
+        }
+    };
+    let destination_value = match &args.to {
+        Some(value) => question::normalize_path(value),
+        None => question::ask_directory(
+            &format!("Old location: {}\nNew location", source.display()),
+            None,
+            "/mnt/media",
+        )?,
+    };
+    let plan = match migrate::plan(
+        &root,
+        &stacks,
+        Path::new(&destination_value),
+        args.allow_network_fs,
+    ) {
+        Ok(plan) => plan,
+        Err(err) => {
+            outro_cancel(format!("cannot migrate: {err}"))?;
+            return Ok(false);
+        }
+    };
+
+    show_migration_plan(&plan, args)?;
+
+    if !args.yes {
+        let prompt = if args.dry_run {
+            "Show this migration plan?"
+        } else if args.move_old {
+            "Stop the stacks, copy the data, and delete the old copy once verified?"
+        } else {
+            "Stop the stacks, copy the data, and keep the old copy?"
+        };
+        if !confirm(prompt).initial_value(true).interact()? {
+            outro_cancel("cancelled — nothing stopped and nothing copied")?;
+            return Ok(true);
+        }
+    }
+
+    if args.dry_run {
+        outro("dry run complete — nothing stopped, copied or changed")?;
+        return Ok(true);
+    }
+
+    if let Err(err) = migrate::write_marker(&plan.source, &plan.destination) {
+        outro_cancel(format!("could not write the migration marker: {err}"))?;
+        return Ok(false);
+    }
+
+    if let Err(err) = stop_stacks(&stacks) {
+        // The marker is kept even here: the destination may be empty, and a
+        // rerun can resume by creating the copy from scratch.
+        let restart = start_stacks(&stacks, false);
+        return Err(with_restart(err, restart));
+    }
+
+    let mut live = LiveLog::start(format!(
+        "copying {} to {}",
+        plan.source.display(),
+        plan.destination.display()
+    ));
+    let copied = migrate::copy(&plan.source, &plan.destination, &mut |line| live.push(line));
+    if let Err(err) = copied {
+        live.error("copy failed; the old data is untouched");
+        let restart = start_stacks(&stacks, false);
+        return Err(with_restart(err, restart));
+    }
+    live.success(format!(
+        "copied {}",
+        migrate::format_bytes(plan.total_bytes)
+    ));
+
+    let (uid, gid) = migrate::storage_owner(&root, &stacks, &plan.destination);
+    if let Err(err) = migrate::set_owner(&plan.destination, uid, gid) {
+        log::warning(format!(
+            "could not set {} ownership to {uid}:{gid}: {err}",
+            plan.destination.display()
+        ))?;
+    }
+
+    let progress = spinner();
+    progress.start("verifying the copy");
+    match migrate::verify_tree(&plan.source, &plan.destination) {
+        Ok(report) => progress.stop(format!(
+            "verified {} files ({})",
+            report.files,
+            migrate::format_bytes(report.bytes)
+        )),
+        Err(err) => {
+            progress.stop("copy verification failed");
+            let restart = start_stacks(&stacks, false);
+            return Err(with_restart(err, restart));
+        }
+    }
+
+    let backups = match migrate::write_envs(&root, &stacks, &plan.destination, uid, gid) {
+        Ok(backups) => backups,
+        Err(err) => {
+            let restart = start_stacks(&stacks, false);
+            return Err(with_restart(err, restart));
+        }
+    };
+
+    if let Err(err) = start_stacks(&stacks, false) {
+        let restored = migrate::restore_envs(&backups);
+        let restart = start_stacks(&stacks, false);
+        return Err(io::Error::other(format!(
+            "the stacks did not start with the new location: {err}\n{}\n\
+             The destination and its marker were kept; re-run the same command to retry.",
+            match (restored, restart) {
+                (Ok(()), Ok(())) => {
+                    "the .env files were rolled back and the original stacks were restarted."
+                        .to_string()
+                }
+                (Ok(()), Err(restart)) => format!(
+                    ".env files were rolled back, but restarting the original stacks failed: {restart}"
+                ),
+                (Err(restore), _) => format!(
+                    "restoring the .env files also failed: {restore}\n{}",
+                    plan.rollback_hint(&root)
+                ),
+            }
+        )));
+    }
+
+    // The data is verified and `.env` now points at it, so the resume marker has
+    // done its job. Health checks below do not need it.
+    migrate::clear_marker(&plan.destination);
+
+    if stacks.contains(&Stack::Server)
+        && let Err(err) = setup_jellyfin(false)
+    {
+        return Err(io::Error::other(format!(
+            "the data is in {} and the stacks are running, but the Jellyfin health check failed: {err}\n\
+             Roll back with:\n{}",
+            plan.destination.display(),
+            plan.rollback_hint(&root)
+        )));
+    }
+
+    if stacks.contains(&Stack::Torrent) {
+        for port in [Port::Qbittorrent, Port::Prowlarr] {
+            let number = configured_port(Stack::Torrent, port);
+            let progress = spinner();
+            progress.start(format!("waiting for {}", port.service_name()));
+            match wait_for_tcp(number, Duration::from_secs(120)) {
+                Ok(()) => progress.stop(format!("{} is answering", port.service_name())),
+                Err(err) => {
+                    progress.stop(format!("{} did not become healthy", port.service_name()));
+                    return Err(io::Error::other(format!(
+                        "the data is in {} and the stacks are running, but the torrent health check failed: {err}\n\
+                         Roll back with:\n{}",
+                        plan.destination.display(),
+                        plan.rollback_hint(&root)
+                    )));
+                }
+            }
+        }
+    }
+
+    if args.move_old {
+        let progress = spinner();
+        progress.start(format!(
+            "removing the old data in {}",
+            plan.source.display()
+        ));
+        match migrate::remove_old_data(&plan.source) {
+            Ok(()) => progress.stop(format!(
+                "removed the old data from {}",
+                plan.source.display()
+            )),
+            Err(err) => progress.stop(format!("could not remove the old data: {err}")),
+        }
+    }
+    migrate::clear_marker(&plan.destination);
+
+    let mut details = format!("data now lives at {}\n", plan.destination.display());
+    if args.move_old {
+        details.push_str(&format!(
+            "the old copy under {} was removed; rollback is no longer possible\n",
+            plan.source.display()
+        ));
+    } else {
+        details.push_str(&format!(
+            "the old copy is still at {}\n",
+            plan.source.display()
+        ));
+        details.push_str("\nRoll back with:\n");
+        details.push_str(&plan.rollback_hint(&root));
+    }
+    outro_note("Migration complete", details)?;
+    Ok(true)
+}
+
 // ---------------------------------------------------------------- update
 
 fn server_installed() -> bool {
@@ -1468,6 +1866,21 @@ fn main() -> ExitCode {
             Ok(()) => ExitCode::SUCCESS,
             Err(err) => {
                 eprintln!("churn: {err}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+
+    if args.migrate {
+        return match migrate_storage(&args) {
+            Ok(true) => ExitCode::SUCCESS,
+            Ok(false) => ExitCode::FAILURE,
+            Err(err) if err.kind() == io::ErrorKind::Interrupted => {
+                let _ = outro_cancel("cancelled — nothing copied");
+                ExitCode::from(130)
+            }
+            Err(err) => {
+                let _ = outro_cancel(format!("failed: {err}"));
                 ExitCode::FAILURE
             }
         };

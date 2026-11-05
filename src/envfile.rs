@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fs;
 use std::io;
-use std::os::unix::fs::MetadataExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 pub type EnvMap = BTreeMap<String, String>;
@@ -92,29 +92,63 @@ pub fn write_merged(path: &Path, managed: &[(&str, String)]) -> io::Result<()> {
 /// Used after installation for values that only exist once a container has
 /// started, such as Jellyfin's generated API key.
 pub fn upsert(path: &Path, key: &str, value: &str) -> io::Result<()> {
+    upsert_many(path, &[(key, value)])
+}
+
+/// Set several keys in one atomic rewrite, preserving everything else.
+///
+/// The temporary file lives beside the target so the rename never crosses a
+/// filesystem boundary, and the existing mode is carried over so secrets do not
+/// become world-readable during a migration.
+pub fn upsert_many(path: &Path, values: &[(&str, &str)]) -> io::Result<()> {
     let existing = fs::read_to_string(path).unwrap_or_default();
-    let prefix = format!("{key}=");
-    let mut out = String::with_capacity(existing.len() + key.len() + value.len() + 8);
-    let mut found = false;
+    let mut out = String::with_capacity(existing.len() + 64 * values.len());
+    let mut found: Vec<bool> = vec![false; values.len()];
 
     for line in existing.lines() {
-        if line.trim_start().starts_with(&prefix) {
-            out.push_str(&format!("{key}={value}"));
-            found = true;
+        let name = line.split_once('=').map(|(name, _)| name.trim());
+        if let Some(index) = name.and_then(|name| values.iter().position(|(key, _)| *key == name)) {
+            out.push_str(&format!("{}={}", values[index].0, values[index].1));
+            found[index] = true;
         } else {
             out.push_str(line);
         }
         out.push('\n');
     }
 
-    if !found {
-        out.push_str(&format!("{key}={value}\n"));
+    for (index, (key, value)) in values.iter().enumerate() {
+        if !found[index] {
+            out.push_str(&format!("{key}={value}\n"));
+        }
     }
 
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
+    write_atomic(path, &out)
+}
+
+/// Replace a file without exposing a partially written version to a reader.
+pub fn write_atomic(path: &Path, contents: &str) -> io::Result<()> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent)?;
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .ok_or_else(|| io::Error::other(format!("{} has no file name", path.display())))?;
+    let temporary = parent.join(format!(".{name}.{}.tmp", std::process::id()));
+
+    let mode = fs::metadata(path)
+        .ok()
+        .map(|meta| meta.permissions().mode());
+    let result = (|| {
+        fs::write(&temporary, contents)?;
+        if let Some(mode) = mode {
+            fs::set_permissions(&temporary, fs::Permissions::from_mode(mode & 0o7777))?;
+        }
+        fs::rename(&temporary, path)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
     }
-    fs::write(path, out)
+    result
 }
 
 /// Owning uid/gid of the data directory, so containers can write to it.

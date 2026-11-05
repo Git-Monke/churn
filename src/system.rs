@@ -394,10 +394,19 @@ pub fn compose_logs(dir: &Path, service: &str, tail: usize) -> io::Result<String
     Ok(text)
 }
 
-/// Stop and remove the project's containers, networks and named volumes.
+/// Stop the project's containers without removing them or their networks.
 ///
-/// Both stacks only declare bind mounts for media/config; the server stack's
-/// `churn-cache` is the disposable dashboard search cache.
+/// A migration stops the whole stack because every service either reads or
+/// writes the shared data directory, and SQLite databases must not be copied
+/// while a container is still writing to them.
+pub fn compose_stop(dir: &Path, on_event: &mut dyn FnMut(&str)) -> io::Result<()> {
+    compose_run(dir, "stop", &["stop"], on_event)
+}
+
+/// Stop the project's containers, remove them, and remove named volumes.
+///
+/// Both stacks only bind-mount the data directory and their own config, so
+/// `down --volumes` only discards runtime state such as the dashboard cache.
 pub fn compose_down(dir: &Path, on_event: &mut dyn FnMut(&str)) -> io::Result<()> {
     compose_run(
         dir,
@@ -446,9 +455,9 @@ fn compose_run(
 /// How many normalised output lines to retain for error reporting.
 const TAIL_LIMIT: usize = 200;
 
-struct StreamedCommand {
-    status: ExitStatus,
-    tail: Vec<String>,
+pub struct StreamedCommand {
+    pub status: ExitStatus,
+    pub tail: Vec<String>,
 }
 
 /// Run `command` with piped stdout/stderr, emitting each line as it appears.
@@ -456,7 +465,7 @@ struct StreamedCommand {
 /// Both pipes are drained on their own threads so a chatty stderr cannot block
 /// stdout (or vice versa). Lines are reassembled on the calling thread, which
 /// keeps the callback single-threaded and in a stable order.
-fn run_streaming(
+pub fn run_streaming(
     mut command: Command,
     on_line: &mut dyn FnMut(&str),
 ) -> io::Result<StreamedCommand> {
