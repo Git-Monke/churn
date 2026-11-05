@@ -65,6 +65,8 @@ export function registerShowRoutes(
             key: episode.key,
             seasonNumber: episode.seasonNumber,
             episodeNumber: episode.episodeNumber,
+            availability: episode.availability,
+            ...(episode.imported === true ? { imported: true } : {}),
           })),
         });
       }

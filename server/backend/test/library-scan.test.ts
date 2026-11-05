@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AppConfig } from "../src/config.js";
-import { createLibraryScanWatcher, type ImportEvent } from "../src/library-scan.js";
+import {
+  createLibraryScanWatcher,
+  isDirectDownloadIndexed,
+  type ImportEvent,
+} from "../src/library-scan.js";
 import type { QbittorrentTorrent } from "../src/upstream/qbittorrent.js";
 
 function makeConfig(
@@ -77,28 +81,43 @@ function watcherFor(
     refresh?: () => Promise<void>;
     resolve?: (pending: ImportEvent[]) => Promise<ImportEvent[]>;
     getTorrents?: () => Promise<QbittorrentTorrent[]>;
+    resolveDirect?: (torrent: QbittorrentTorrent) => Promise<boolean>;
     now?: () => number;
     sleep?: (ms: number) => Promise<void>;
     resolveTimeoutMs?: number;
+    directRefreshMs?: number;
+    directRetryWindowMs?: number;
     config?: AppConfig;
   } = {},
 ) {
   const refresh = vi.fn(overrides.refresh ?? (async () => undefined));
   const resolve = vi.fn(overrides.resolve ?? (async () => []));
+  const resolveDirect = vi.fn(overrides.resolveDirect ?? (async () => false));
   const watcher = createLibraryScanWatcher(overrides.config ?? makeConfig(), {
     getImports: async () => imports,
     getTorrents: overrides.getTorrents ?? (async () => []),
     refresh,
     resolve,
+    resolveDirect,
     now: overrides.now,
     sleep: overrides.sleep,
     resolveTimeoutMs: overrides.resolveTimeoutMs,
+    directRefreshMs: overrides.directRefreshMs,
+    directRetryWindowMs: overrides.directRetryWindowMs,
   });
-  return { watcher, refresh, resolve };
+  return { watcher, refresh, resolve, resolveDirect };
+}
+
+function jsonResponse(body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
 }
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 describe("library scan watcher", () => {
@@ -219,7 +238,7 @@ describe("library scan watcher", () => {
     expect(getImports).not.toHaveBeenCalled();
   });
 
-  it("refreshes Jellyfin once when a churn-direct torrent finishes", async () => {
+  it("requests a scan for a finished churn-direct torrent", async () => {
     const nowMs = 1_000_000_000_000;
     const torrent = {
       hash: "direct-hash",
@@ -236,9 +255,78 @@ describe("library scan watcher", () => {
     await watcher.pollOnce();
     expect(refresh).toHaveBeenCalledTimes(1);
 
-    // The same completed torrent must not trigger a scan on every poll.
+    // The refresh throttle keeps the same torrent from scanning every poll.
     await watcher.pollOnce();
     expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries a direct download until Jellyfin exposes it", async () => {
+    let clock = 1_000_000_000_000;
+    let visible = false;
+    const torrent = {
+      hash: "direct-hash",
+      name: "Parks.and.Recreation.S02.1080p",
+      progress: 1,
+      completion_on: clock / 1_000 - 5,
+      tags: "churn-direct",
+    };
+    const { watcher, refresh, resolveDirect } = watcherFor([], {
+      now: () => clock,
+      getTorrents: async () => [torrent],
+      resolveDirect: async () => visible,
+      directRefreshMs: 15_000,
+    });
+
+    await watcher.pollOnce();
+    expect(refresh).toHaveBeenCalledTimes(1);
+
+    // Not due yet: verify, but do not scan again.
+    clock += 14_000;
+    await watcher.pollOnce();
+    expect(refresh).toHaveBeenCalledTimes(1);
+
+    clock += 1_000;
+    await watcher.pollOnce();
+    expect(refresh).toHaveBeenCalledTimes(2);
+
+    visible = true;
+    clock += 15_000;
+    await watcher.pollOnce();
+    expect(resolveDirect).toHaveBeenLastCalledWith(torrent);
+    expect(refresh).toHaveBeenCalledTimes(2);
+
+    // Resolved downloads are forgotten, so later polls do not keep checking.
+    const calls = resolveDirect.mock.calls.length;
+    clock += 15_000;
+    await watcher.pollOnce();
+    expect(resolveDirect).toHaveBeenCalledTimes(calls);
+    expect(refresh).toHaveBeenCalledTimes(2);
+  });
+
+  it("stops retrying a direct download after the retry window", async () => {
+    let clock = 1_000_000_000_000;
+    const torrent = {
+      hash: "direct-hash",
+      name: "Parks.and.Recreation.S02.1080p",
+      progress: 1,
+      completion_on: clock / 1_000 - 5,
+      tags: "churn-direct",
+    };
+    const { watcher, refresh } = watcherFor([], {
+      now: () => clock,
+      getTorrents: async () => [torrent],
+      resolveDirect: async () => false,
+      directRefreshMs: 15_000,
+      directRetryWindowMs: 50_000,
+    });
+
+    for (let elapsed = 0; elapsed <= 40_000; elapsed += 10_000) {
+      await watcher.pollOnce();
+      clock += 10_000;
+    }
+
+    // Refreshes at 0, 30 and 40 seconds. At 50 seconds the window closes.
+    expect(refresh).toHaveBeenCalledTimes(3);
   });
 
   it("ignores incomplete, non-direct, and old direct torrents", async () => {
@@ -269,6 +357,122 @@ describe("library scan watcher", () => {
 
     await watcher.pollOnce();
     expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("recognises a Jellyfin series with episodes for the torrent season", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = String(input);
+        if (url.includes("IncludeItemTypes=Series")) {
+          return jsonResponse({
+            Items: [
+              {
+                Id: "series-1",
+                Name: "Parks and Recreation",
+                Type: "Series",
+                Path: "/data/media/tv/Parks and Recreation",
+              },
+            ],
+          });
+        }
+        if (url.includes("IncludeItemTypes=Movie")) {
+          return jsonResponse({ Items: [] });
+        }
+        if (url.includes("/Shows/series-1/Episodes")) {
+          return jsonResponse({
+            Items: [
+              { Id: "episode-1", ParentIndexNumber: 2, IndexNumber: 1 },
+              { Id: "episode-2", ParentIndexNumber: 2, IndexNumber: 2 },
+            ],
+          });
+        }
+        throw new Error(`unexpected URL ${url}`);
+      }),
+    );
+
+    const config = makeConfig();
+    await expect(
+      isDirectDownloadIndexed(config, {
+        name: "Parks.and.Recreation.S02.1080p",
+        content_path: "/data/media/tv/Parks and Recreation/Season 2",
+        progress: 1,
+        tags: "churn-direct",
+      }),
+    ).resolves.toBe(true);
+  });
+
+  it("does not count a series until the torrent's season has episodes", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = String(input);
+        if (url.includes("IncludeItemTypes=Series")) {
+          return jsonResponse({
+            Items: [
+              {
+                Id: "series-1",
+                Name: "Parks and Recreation",
+                Type: "Series",
+                Path: "/data/media/tv/Parks and Recreation",
+              },
+            ],
+          });
+        }
+        if (url.includes("IncludeItemTypes=Movie")) {
+          return jsonResponse({ Items: [] });
+        }
+        if (url.includes("/Shows/series-1/Episodes")) {
+          return jsonResponse({
+            Items: [{ Id: "episode-1", ParentIndexNumber: 1, IndexNumber: 1 }],
+          });
+        }
+        throw new Error(`unexpected URL ${url}`);
+      }),
+    );
+
+    await expect(
+      isDirectDownloadIndexed(makeConfig(), {
+        name: "Parks.and.Recreation.S02.1080p",
+        content_path: "/data/media/tv/Parks and Recreation/Season 2",
+        progress: 1,
+        tags: "churn-direct",
+      }),
+    ).resolves.toBe(false);
+  });
+
+  it("recognises a Jellyfin movie whose file is inside the download path", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = String(input);
+        if (url.includes("IncludeItemTypes=Series")) {
+          return jsonResponse({ Items: [] });
+        }
+        if (url.includes("IncludeItemTypes=Movie")) {
+          return jsonResponse({
+            Items: [
+              {
+                Id: "movie-1",
+                Name: "Example Movie",
+                Type: "Movie",
+                Path: "/data/media/movies/Example Movie (2022)/Example.Movie.2022.mkv",
+              },
+            ],
+          });
+        }
+        throw new Error(`unexpected URL ${url}`);
+      }),
+    );
+
+    await expect(
+      isDirectDownloadIndexed(makeConfig(), {
+        name: "Example.Movie.2022.1080p",
+        content_path: "/data/media/movies/Example Movie (2022)",
+        progress: 1,
+        tags: "churn-direct",
+      }),
+    ).resolves.toBe(true);
   });
 
   it("stops polling after stop()", async () => {

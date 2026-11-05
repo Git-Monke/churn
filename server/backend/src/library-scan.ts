@@ -1,3 +1,4 @@
+import { seasonRangeFromTitle } from "./activity.js";
 import type { AppConfig } from "./config.js";
 import { isDirectDownloadTorrent } from "./direct-grab.js";
 import { isCompletedTorrent } from "./download-import.js";
@@ -6,6 +7,7 @@ import {
   providerString,
   type JellyfinItem,
 } from "./upstream/jellyfin.js";
+import { seasonNumberFromTitle } from "./qbittorrent-show.js";
 import { createQbittorrentClient, type QbittorrentTorrent } from "./upstream/qbittorrent.js";
 import {
   createArrClient,
@@ -21,6 +23,10 @@ export const DEFAULT_RECENT_IMPORT_MS = 10 * 60_000;
 export const DEFAULT_RESOLVE_TIMEOUT_MS = 90_000;
 /** How often the resolution check looks at Jellyfin while it scans. */
 export const DEFAULT_RESOLVE_POLL_MS = 5_000;
+/** How often a completed direct download asks Jellyfin to scan again. */
+export const DEFAULT_DIRECT_REFRESH_MS = 15_000;
+/** How long a completed direct download keeps asking Jellyfin to scan. */
+export const DEFAULT_DIRECT_RETRY_WINDOW_MS = 10 * 60_000;
 /**
  * `history/since` returns rows newer than the timestamp, so asking again from
  * exactly the newest row would drop imports that share its second. Re-ask from
@@ -51,10 +57,14 @@ export interface LibraryScanWatcherOptions {
   getTorrents?: () => Promise<QbittorrentTorrent[]>;
   /** Returns the imports that are not visible in Jellyfin yet. */
   resolve?: (imports: ImportEvent[]) => Promise<ImportEvent[]>;
+  /** True once Jellyfin exposes a completed direct download. */
+  resolveDirect?: (torrent: QbittorrentTorrent) => Promise<boolean>;
   intervalMs?: number;
   recentImportMs?: number;
   resolveTimeoutMs?: number;
   resolvePollMs?: number;
+  directRefreshMs?: number;
+  directRetryWindowMs?: number;
 }
 
 export interface LibraryScanWatcher {
@@ -84,8 +94,8 @@ export async function refreshJellyfinLibrary(config: AppConfig): Promise<void> {
  *
  * churn-direct downloads never reach an arr, so for those qBittorrent's
  * completion state is the signal: the files were saved straight into the
- * library path and only need a Jellyfin scan. They are tracked separately and
- * refreshed once per completed torrent.
+ * library path and only need a Jellyfin scan. They are tracked until Jellyfin
+ * exposes them, with a refresh requested every 15 seconds for up to 10 minutes.
  *
  * The watcher runs independently of the dashboard so an import is not missed
  * when no browser is open.
@@ -102,6 +112,9 @@ export function createLibraryScanWatcher(
   const recentImportMs = options.recentImportMs ?? DEFAULT_RECENT_IMPORT_MS;
   const resolveTimeoutMs = options.resolveTimeoutMs ?? DEFAULT_RESOLVE_TIMEOUT_MS;
   const resolvePollMs = options.resolvePollMs ?? DEFAULT_RESOLVE_POLL_MS;
+  const directRefreshMs = options.directRefreshMs ?? DEFAULT_DIRECT_REFRESH_MS;
+  const directRetryWindowMs =
+    options.directRetryWindowMs ?? DEFAULT_DIRECT_RETRY_WINDOW_MS;
   const refresh = options.refresh ?? (() => refreshJellyfinLibrary(config));
   const getImports = options.getImports ?? ((since: string) => fetchImports(config, since));
   const getTorrents =
@@ -109,6 +122,8 @@ export function createLibraryScanWatcher(
     (() => createQbittorrentClient(config.qbittorrent, config.requestTimeoutMs).getTorrents());
   const resolve =
     options.resolve ?? ((imports: ImportEvent[]) => findUnresolved(config, imports));
+  const resolveDirect =
+    options.resolveDirect ?? ((torrent: QbittorrentTorrent) => isDirectDownloadIndexed(config, torrent));
 
   const jellyfinEnabled = Boolean(config.services.jellyfin.apiKey);
   const directEnabled = jellyfinEnabled && Boolean(config.qbittorrent.apiKey);
@@ -122,7 +137,9 @@ export function createLibraryScanWatcher(
 
   let since = new Date(now() - recentImportMs).toISOString();
   const seen = new Map<string, number>();
-  const seenDirect = new Set<string>();
+  const pendingDirect = new Map<string, DirectPending>();
+  /** Direct torrents that were indexed or exhausted their retry window. */
+  const finishedDirect = new Map<string, number>();
   let timer: NodeJS.Timeout | undefined;
   let polling = false;
 
@@ -134,27 +151,20 @@ export function createLibraryScanWatcher(
     try {
       // Direct downloads never reach Sonarr/Radarr, so their imports do not
       // appear in arr history. A finished churn-direct torrent is already in
-      // the library path; ask Jellyfin to index it once.
-      const directCompleted = await pollDirectCompletions();
+      // the library path; keep asking Jellyfin to index it until it appears.
+      await pollDirectCompletions();
 
       let imports: ImportEvent[];
       try {
         imports = await getImports(since);
       } catch {
-        // Both arrs may be restarting. Keep the old cursor and try next poll,
-        // but still scan for a direct download that finished meanwhile.
-        if (directCompleted) {
-          await tryRefresh();
-        }
+        // Both arrs may be restarting. Keep the old cursor and try next poll.
         return;
       }
 
       advanceCursor(imports);
       const fresh = imports.filter((event) => !seen.has(importKey(event)));
       if (fresh.length === 0) {
-        if (directCompleted) {
-          await tryRefresh();
-        }
         pruneSeen(seen, now());
         return;
       }
@@ -170,36 +180,84 @@ export function createLibraryScanWatcher(
     }
   }
 
-  /** True when a direct torrent finished recently and needs a Jellyfin scan. */
-  async function pollDirectCompletions(): Promise<boolean> {
+  /**
+   * Track finished direct downloads and keep asking Jellyfin to scan until it
+   * exposes the media, or until the retry window runs out.
+   */
+  async function pollDirectCompletions(): Promise<void> {
     if (!directEnabled) {
-      return false;
+      return;
     }
     let torrents: QbittorrentTorrent[];
     try {
       torrents = await getTorrents();
     } catch {
       // qBittorrent may be restarting; the next poll can still catch the import.
-      return false;
+      return;
     }
 
-    const cutoff = now() - recentImportMs;
-    let completed = false;
+    const current = now();
+    const cutoff = current - recentImportMs;
     for (const torrent of torrents) {
       if (!isDirectDownloadTorrent(torrent) || !isCompletedTorrent(torrent)) {
         continue;
       }
       const completedAt = (torrent.completion_on ?? torrent.added_on ?? 0) * 1_000;
-      const key = `${torrent.hash ?? torrent.infohash_v1 ?? torrent.name ?? ""}:${completedAt}`;
-      if (seenDirect.has(key)) {
+      if (completedAt < cutoff) {
         continue;
       }
-      seenDirect.add(key);
-      if (completedAt >= cutoff) {
-        completed = true;
+      const key = `${torrent.hash ?? torrent.infohash_v1 ?? torrent.name ?? ""}:${completedAt}`;
+      if (finishedDirect.has(key)) {
+        continue;
+      }
+      const pending = pendingDirect.get(key);
+      if (pending) {
+        pending.torrent = torrent;
+      } else {
+        pendingDirect.set(key, { torrent, firstSeenAt: current });
       }
     }
-    return completed;
+
+    let needsRefresh = false;
+    for (const [key, pending] of pendingDirect) {
+      if (current - pending.firstSeenAt >= directRetryWindowMs) {
+        pendingDirect.delete(key);
+        finishedDirect.set(key, current);
+        continue;
+      }
+
+      let visible: boolean;
+      try {
+        visible = await resolveDirect(pending.torrent);
+      } catch {
+        // Jellyfin is temporarily unreachable; do not rescan blindly.
+        continue;
+      }
+      if (visible) {
+        pendingDirect.delete(key);
+        finishedDirect.set(key, current);
+        continue;
+      }
+
+      if (
+        pending.lastRefreshAt !== undefined &&
+        current - pending.lastRefreshAt < directRefreshMs
+      ) {
+        continue;
+      }
+      pending.lastRefreshAt = current;
+      needsRefresh = true;
+    }
+
+    for (const [key, finishedAt] of finishedDirect) {
+      if (current - finishedAt >= recentImportMs) {
+        finishedDirect.delete(key);
+      }
+    }
+
+    if (needsRefresh) {
+      await tryRefresh();
+    }
   }
 
   /** Refresh, then give Jellyfin a chance to index; retry the refresh once. */
@@ -324,6 +382,112 @@ function toImportEvent(service: ArrServiceId, record: ServarrHistoryRecord): Imp
     event.title = record.sourceTitle;
   }
   return [event];
+}
+
+interface DirectPending {
+  torrent: QbittorrentTorrent;
+  firstSeenAt: number;
+  lastRefreshAt?: number;
+}
+
+/**
+ * True when Jellyfin exposes a completed direct download. Use the same Jellyfin
+ * series/episode and movie data the show and movie pages use; the item path only
+ * locates the item inside the library.
+ */
+export async function isDirectDownloadIndexed(
+  config: AppConfig,
+  torrent: QbittorrentTorrent,
+): Promise<boolean> {
+  const contentPath = torrent.content_path?.trim();
+  if (!contentPath) {
+    return false;
+  }
+  const jellyfin = createJellyfinClient(config.services.jellyfin, config.requestTimeoutMs);
+  const [seriesResult, moviesResult] = await Promise.allSettled([
+    jellyfin.listItemsByType("Series"),
+    jellyfin.listItemsByType("Movie"),
+  ]);
+  if (seriesResult.status === "rejected" && moviesResult.status === "rejected") {
+    throw seriesResult.reason;
+  }
+  const items = [
+    ...(seriesResult.status === "fulfilled" ? seriesResult.value : []),
+    ...(moviesResult.status === "fulfilled" ? moviesResult.value : []),
+  ];
+  const item = findItemForContentPath(items, contentPath);
+  if (!item?.Id) {
+    return false;
+  }
+  if (item.Type === "Movie") {
+    return Boolean(item.Path);
+  }
+  if (item.Type !== "Series") {
+    return false;
+  }
+
+  const episodes = await jellyfin.getEpisodes(item.Id);
+  const seasons = directDownloadSeasons(torrent);
+  if (seasons.length === 0) {
+    return episodes.length > 0;
+  }
+  return episodes.some(
+    (episode) =>
+      typeof episode.ParentIndexNumber === "number" &&
+      seasons.includes(episode.ParentIndexNumber),
+  );
+}
+
+function directDownloadSeasons(torrent: QbittorrentTorrent): number[] {
+  const name = torrent.name?.trim() ?? "";
+  const fromName = seasonRangeFromTitle(name);
+  if (fromName.length > 0) {
+    return fromName;
+  }
+  const single = seasonNumberFromTitle(name);
+  if (single !== undefined) {
+    return [single];
+  }
+  const fromPath = torrent.content_path?.match(
+    /(?:^|\/)Season[ ._-]*0*(\d{1,3})(?:\/|$)/i,
+  );
+  if (!fromPath) {
+    return [];
+  }
+  const season = Number.parseInt(fromPath[1] ?? "", 10);
+  return Number.isInteger(season) ? [season] : [];
+}
+
+function findItemForContentPath(
+  items: JellyfinItem[],
+  contentPath: string,
+): JellyfinItem | undefined {
+  let best: JellyfinItem | undefined;
+  let bestLength = -1;
+  for (const item of items) {
+    const itemPath = item.Path?.trim();
+    if (!itemPath || !pathsOverlap(itemPath, contentPath)) {
+      continue;
+    }
+    if (itemPath.length > bestLength) {
+      best = item;
+      bestLength = itemPath.length;
+    }
+  }
+  return best;
+}
+
+function pathsOverlap(left: string, right: string): boolean {
+  const normalizedLeft = left.replace(/\/+$/, "");
+  const normalizedRight = right.replace(/\/+$/, "");
+  if (!normalizedLeft || !normalizedRight) {
+    return false;
+  }
+  return (
+    normalizedLeft === normalizedRight ||
+    normalizedLeft.startsWith(`${normalizedRight}/`) ||
+    normalizedRight.startsWith(`${normalizedLeft}/`)
+  );
 }
 
 /**

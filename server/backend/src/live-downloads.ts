@@ -1,7 +1,7 @@
 import type { AppConfig } from "./config.js";
 import { movieTorrentActivity } from "./qbittorrent-activity.js";
 import { mapShowTorrentDownloads } from "./qbittorrent-show.js";
-import type { ActivityItem, ShowDownload } from "./types.js";
+import type { ActivityItem, ShowAvailability, ShowDownload } from "./types.js";
 import { createQbittorrentClient, type QbittorrentTorrent } from "./upstream/qbittorrent.js";
 
 export interface MovieDownloadIdentity {
@@ -13,6 +13,8 @@ export interface ShowEpisodeIdentity {
   key: string;
   seasonNumber: number;
   episodeNumber: number;
+  availability: ShowAvailability;
+  imported?: boolean;
 }
 
 export interface ShowDownloadIdentity {
@@ -112,7 +114,20 @@ export async function showLiveDownloads(
   identity: ShowDownloadIdentity,
 ): Promise<Record<string, ShowDownload>> {
   const torrents = await loadQbittorrentTorrents(config);
-  return Object.fromEntries(
-    mapShowTorrentDownloads(torrents, identity.title, identity.episodes),
-  );
+  const mapped = mapShowTorrentDownloads(torrents, identity.title, identity.episodes);
+  const episodes = new Map(identity.episodes.map((episode) => [episode.key, episode]));
+  const downloads: Record<string, ShowDownload> = {};
+  for (const [key, download] of mapped) {
+    const episode = episodes.get(key);
+    // Mirror the full detail route: a finished torrent that is still seeding is
+    // not worth showing once Jellyfin has the episode. Keep active upgrades.
+    const staleImport =
+      download.status === "importing" &&
+      episode !== undefined &&
+      (episode.availability === "jellyfin" || episode.imported === true);
+    if (!staleImport) {
+      downloads[key] = download;
+    }
+  }
+  return downloads;
 }

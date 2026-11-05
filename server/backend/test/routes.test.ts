@@ -2274,6 +2274,86 @@ describe("show detail", () => {
     await app.close();
   });
 
+  it("hides finished direct downloads from live downloads once Jellyfin has the episodes", async () => {
+    installFetch((url) => {
+      if (url.includes("jellyfin.test") && url.includes("/Items/series-1?")) {
+        return jsonResponse({
+          Id: "series-1",
+          Name: "Parks and Recreation",
+          Type: "Series",
+          ProductionYear: 2009,
+          ProviderIds: { Tvdb: "85998" },
+        });
+      }
+      if (url.includes("jellyfin.test") && url.includes("/Shows/series-1/Seasons")) {
+        return jsonResponse({
+          Items: [{ Id: "season-2", Name: "Season 2", IndexNumber: 2 }],
+        });
+      }
+      if (url.includes("jellyfin.test") && url.includes("/Shows/series-1/Episodes")) {
+        return jsonResponse({
+          Items: [
+            { Id: "episode-1", Name: "Pawnee Zoo", ParentIndexNumber: 2, IndexNumber: 1 },
+            { Id: "episode-2", Name: "The Stakeout", ParentIndexNumber: 2, IndexNumber: 2 },
+          ],
+        });
+      }
+      if (url.includes("sonarr.test") && url.endsWith("/api/v3/series")) {
+        return jsonResponse([
+          {
+            id: 42,
+            title: "Parks and Recreation",
+            year: 2009,
+            tvdbId: 85998,
+            images: [],
+          },
+        ]);
+      }
+      if (url.includes("sonarr.test") && url.includes("/api/v3/episode?seriesId=42")) {
+        return jsonResponse([]);
+      }
+      if (url === "http://qbittorrent.test:8080/api/v2/torrents/info") {
+        return jsonResponse([
+          {
+            hash: "direct-season-hash",
+            name: "Parks.and.Recreation.S02.1080p",
+            category: "tv",
+            tags: "churn-direct",
+            progress: 1,
+            size: 10_000,
+            amount_left: 0,
+            state: "uploading",
+            completion_on: Math.floor(Date.now() / 1_000) - 5,
+          },
+        ]);
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const config = jellyfinConfig;
+    config.qbittorrent.apiKey = "qbt-test-key";
+    const app = await buildAuthedServer(config);
+
+    const detail = await app.inject({
+      method: "GET",
+      url: "/api/library/shows/jellyfin/series-1",
+    });
+    expect(detail.statusCode).toBe(200);
+    expect(detail.json().episodes).toMatchObject([
+      { key: "s02e01", availability: "jellyfin" },
+      { key: "s02e02", availability: "jellyfin" },
+    ]);
+    expect(detail.json().episodes[0].download).toBeUndefined();
+
+    const live = await app.inject({
+      method: "GET",
+      url: "/api/library/shows/jellyfin/series-1/downloads",
+    });
+    expect(live.statusCode).toBe(200);
+    expect(live.json()).toMatchObject({ ready: true, downloads: {} });
+    await app.close();
+  });
+
   it("returns 404 for a missing Jellyfin show", async () => {
     installFetch(() => jsonResponse({ error: "not found" }, 400));
 
