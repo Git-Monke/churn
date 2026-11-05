@@ -6,3 +6,6 @@
 - Leave completed changes in the working tree for review.
 - Run tests, formatting, and builds as usual, but stop before `git commit`.
 - Only create, amend, or squash commits after the user approves the changes.
+
+**IMPORTANT**: before you do anything else, run the `beans prime` command and heed its output.
+
