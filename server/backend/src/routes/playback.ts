@@ -4,6 +4,7 @@ import { expireSession, requireAuth } from "../auth.js";
 import { jellyfinPublicUrlForRequest, type AppConfig } from "../config.js";
 import { ApiError, isUnauthorized, UpstreamError } from "../errors.js";
 import {
+  availablePlaybackQualities,
   buildJellyfinHlsUrl,
   buildJellyfinStreamUrl,
   canBrowserDirectPlay,
@@ -11,12 +12,14 @@ import {
   parsePlaybackQuality,
   parsePlaybackReport,
   pickMediaSource,
+  pickNextEpisode,
   playbackHlsPath,
   playbackReportBodies,
   playbackStreamPath,
   type PlaybackItemResponse,
 } from "../playback.js";
 import type { IntroDbService } from "../introdb-warm.js";
+import { createNextEpisodeLookup } from "../next-episode.js";
 import { createJellyfinClient, providerString } from "../upstream/jellyfin.js";
 import { errorMessage } from "../upstream/states.js";
 
@@ -48,6 +51,7 @@ export function registerPlaybackRoutes(
     string,
     { imdbId?: string; fetchedAt: number }
   >();
+  const getSeriesEpisodes = createNextEpisodeLookup();
   app.get<{ Params: PlaybackParams; Querystring: ItemQuery }>(
     "/api/playback/items/:itemId",
     async (request, reply): Promise<PlaybackItemResponse> => {
@@ -85,9 +89,15 @@ export function registerPlaybackRoutes(
       }
 
       const picked = pickMediaSource(playbackInfo);
+      // A remembered tier may not exist for this source. Fall back to Max for
+      // this item without changing the caller's stored preference.
+      const qualities = availablePlaybackQualities(picked.source);
+      const appliedQuality = qualities.some((option) => option.id === quality)
+        ? quality
+        : "max";
       // Any explicit tier has to be transcoded; only `max` may direct-play.
       const directPlay =
-        quality === "max" &&
+        appliedQuality === "max" &&
         picked.directPlay &&
         canBrowserDirectPlay(picked.source);
       const streamUrl = directPlay
@@ -96,7 +106,7 @@ export function registerPlaybackRoutes(
             itemId,
             picked.source?.Id,
             picked.playSessionId,
-            quality,
+            appliedQuality,
           );
       const mapped = mapPlaybackItem(
         item,
@@ -104,7 +114,7 @@ export function registerPlaybackRoutes(
         picked.playSessionId,
         streamUrl,
         directPlay,
-        quality,
+        appliedQuality,
       );
       if (!mapped) {
         throw new ApiError(
@@ -114,26 +124,44 @@ export function registerPlaybackRoutes(
         );
       }
 
-      // Segment timestamps are warmed when the episode/season is grabbed;
-      // playback only reads the cache. Any lookup problem simply means the
-      // player gets no skip affordance.
-      if (
+      const episodeContext =
         mapped.type === "Episode" &&
         mapped.seriesId &&
         mapped.seasonNumber !== undefined &&
         mapped.episodeNumber !== undefined
-      ) {
+          ? {
+              seriesId: mapped.seriesId,
+              seasonNumber: mapped.seasonNumber,
+              episodeNumber: mapped.episodeNumber,
+            }
+          : undefined;
+
+      // Next-episode and segment lookups are best effort and independent, so
+      // run them together. A failure only omits that optional data.
+      const nextEpisodePromise = episodeContext
+        ? getSeriesEpisodes(client, episodeContext.seriesId).then((episodes) =>
+            episodes
+              ? pickNextEpisode(episodes, {
+                  id: mapped.id,
+                  seasonNumber: episodeContext.seasonNumber,
+                  episodeNumber: episodeContext.episodeNumber,
+                })
+              : undefined,
+          )
+        : Promise.resolve(undefined);
+
+      if (episodeContext) {
         try {
           const imdbId = await resolveSeriesImdb(
             client,
-            mapped.seriesId,
+            episodeContext.seriesId,
             seriesImdbCache,
           );
           const segments = imdbId
             ? await introDb.segmentsFor(
                 imdbId,
-                mapped.seasonNumber,
-                mapped.episodeNumber,
+                episodeContext.seasonNumber,
+                episodeContext.episodeNumber,
               )
             : undefined;
           if (segments) {
@@ -142,6 +170,11 @@ export function registerPlaybackRoutes(
         } catch {
           // IntroDB data is optional; playback must not depend on it.
         }
+      }
+
+      const nextEpisode = await nextEpisodePromise;
+      if (nextEpisode) {
+        mapped.nextEpisode = nextEpisode;
       }
 
       return { state: "ok", item: mapped };
@@ -196,13 +229,18 @@ export function registerPlaybackRoutes(
         );
       }
 
+      const hlsQuality = availablePlaybackQualities(source).some(
+        (option) => option.id === quality,
+      )
+        ? quality
+        : "max";
       const hlsUrl = buildJellyfinHlsUrl(
         jellyfinPublicUrlForRequest(config, request.headers),
         itemId,
         source,
         playSessionId,
         auth.accessToken,
-        quality,
+        hlsQuality,
       );
       return reply.redirect(hlsUrl, 302);
     },

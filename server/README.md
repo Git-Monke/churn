@@ -237,7 +237,7 @@ are per Jellyfin user; no static playback token is stored in `.env`.
 | `POST /api/library/shows/:source/:id/releases/refresh?season=N` | Start a fresh per-indexer Prowlarr search |
 | `POST /api/library/shows/:source/:id/releases/grab` | Send the chosen season or episode torrent directly to qBittorrent |
 | `DELETE /api/library/shows/sonarr/:id/episodes/:season/:episode/download` | Cancel that episode's active download, blocklist the release and keep imported files |
-| `GET /api/playback/items/:itemId` | Playable item metadata, resume position, media source, same-origin stream URL and cached episode segments |
+| `GET /api/playback/items/:itemId` | Playable item metadata, resume position, quality presets, media source, same-origin stream URL, cached episode segments and next episode |
 | `GET /api/playback/items/:itemId/stream` | Redirect the media element to Jellyfin's direct stream URL for this session |
 | `GET /api/playback/items/:itemId/hls.m3u8` | Redirect to a Jellyfin HLS transcode (H.264/AAC) when the source is not browser-compatible |
 | `POST /api/playback/items/:itemId/start` | Report playback start to Jellyfin |
@@ -392,9 +392,11 @@ Sonarr still opens a Sonarr-backed detail page.
 ## Playback
 
 Movies in Library and episodes in show detail open `#/play/<itemId>`, an HTML5
-`<video>` page backed by Jellyfin. Playback is per Jellyfin user: the item's
-resume position comes from Jellyfin `UserData`, and start/progress/stop reports
-keep Jellyfin's Continue Watching and watched state in sync.
+`<video>` page backed by Jellyfin. Playback starts automatically when the source
+is ready and resumes at the Jellyfin position. Playback is per Jellyfin user:
+the item's resume position comes from Jellyfin `UserData`, and
+start/progress/stop reports keep Jellyfin's Continue Watching and watched state
+in sync.
 
 Video bytes are not proxied through Churn. Playback is codec-aware:
 
@@ -437,6 +439,22 @@ JSON for the episode and exposes `segments` (`intro`, `recap`, `outro`,
 a failed lookup simply means no segments are returned; playback and the grab
 response are unaffected. IntroDB only receives the series IMDb id and
 season/episode numbers, never the Jellyfin session or a user identity.
+
+### Next episode and quality preference
+
+For an `Episode`, `GET /api/playback/items/:itemId` also resolves
+`nextEpisode` from Jellyfin's series episode list (cached in-process for 60
+seconds, best effort). Ordering is `(season, episode)`; season 0 specials stay
+in season 0 and the series finale has no next episode. The player uses
+`segments.outro.startSec` to show a three-second **Next episode** countdown when
+the credits begin, advancing three seconds later. Without outro data it falls
+back to the video's `ended` event. The autoplay
+switch and the selected quality tier are stored in browser `localStorage`; the
+next episode starts at the same tier. Autoplay only arms when playback reaches
+the countdown naturally, so seeking into the credits shows a static Play next
+prompt instead of advancing automatically. If a file cannot offer that tier,
+playback falls back to `max` for that file without changing the stored
+preference.
 
 By default the browser-facing Jellyfin URL follows the hostname used to reach
 Churn. A loopback host or a single-label container name in `JELLYFIN_URL`

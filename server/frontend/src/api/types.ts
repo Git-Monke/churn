@@ -633,11 +633,20 @@ export interface PlaybackItem {
   quality: PlaybackQuality;
   /** Selectable presets for this source; always contains `max`. */
   qualities: PlaybackQualityOption[];
+  /** The next episode in Jellyfin's list, when this item is an episode. */
+  nextEpisode?: PlaybackNextEpisode;
   /**
    * Intro/recap/credits ranges warmed from IntroDB when the season or episode
    * was grabbed. Absent when there is no cached data for this episode.
    */
   segments?: PlaybackSegments;
+}
+
+export interface PlaybackNextEpisode {
+  id: string;
+  name: string;
+  seasonNumber: number;
+  episodeNumber: number;
 }
 
 export interface PlaybackSegment {

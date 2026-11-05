@@ -154,7 +154,7 @@ uses the signed-in user's Jellyfin session token rather than a static token in
 | `POST /api/library/shows/:source/:id/releases/refresh?season=N` | Start a fresh Prowlarr search |
 | `POST /api/library/shows/:source/:id/releases/grab` | Send the chosen torrent or magnet directly to qBittorrent |
 | `DELETE /api/library/shows/sonarr/:id/episodes/:season/:episode/download` | Cancel one episode's active download and blocklist the release |
-| `GET /api/playback/items/:itemId` | Playable item metadata, resume position, quality presets and same-origin stream URL; `?quality=max\|high\|medium\|low` |
+| `GET /api/playback/items/:itemId` | Playable item metadata, resume position, quality presets, cached segments, next episode and same-origin stream URL; `?quality=max\|high\|medium\|low` |
 | `GET /api/playback/items/:itemId/stream` | Redirect the media element to Jellyfin's direct stream URL for this session |
 | `GET /api/playback/items/:itemId/hls.m3u8` | Redirect to a Jellyfin HLS transcode (H.264/AAC) when the source is not browser-compatible; honours `?quality=` |
 | `POST /api/playback/items/:itemId/start` | Report playback start to Jellyfin |
@@ -380,9 +380,9 @@ exists only in Sonarr still opens a Sonarr-backed detail page.
 ## Playback
 
 Movies in Library and episodes in show detail open `#/play/<itemId>`. The player
-uses Jellyfin's per-user `UserData` to resume where you stopped, then sends
-playback start/progress/stop reports so Jellyfin apps see the same position and
-watched state.
+starts playback automatically once the source is ready (or resumes at the
+Jellyfin position), then sends playback start/progress/stop reports so Jellyfin
+apps see the same position and watched state.
 
 Episode metadata also carries intro, recap and credits ranges from
 [IntroDB](https://introdb.app). They are fetched in the background when a season
@@ -393,6 +393,21 @@ seconds) when the cache has data. IntroDB receives only the IMDb id and
 season/episode number; no session, account or viewing progress is sent. While
 playback is inside the intro range, the player shows a **Skip intro** button
 that jumps to the end of the intro.
+
+For episodes, the playback response also includes `nextEpisode` (`id`, `name`,
+`seasonNumber`, `episodeNumber`) resolved from Jellyfin's episode list. The next
+episode is the first entry after the current `(season, episode)`; specials stay
+in season 0 and do not roll into season 1. At the credits marker
+(`segments.outro.startSec`) the player shows a small **Next episode in 3 → 2 →
+1** prompt. The countdown starts when the credits begin and advances three
+seconds later, so the first few seconds of credits play unless **Cancel** is
+chosen. Without outro data the prompt appears after the video ends instead.
+**Cancel** dismisses the prompt for that episode; during the credits path
+playback continues normally. An **Autoplay next episode** switch beside the
+quality picker is remembered per browser in `localStorage`; with autoplay off
+the prompt still offers **Play next** but does not count down. Autoplay only arms
+when playback reaches the countdown naturally; seeking into the credits shows a
+static **Play next** prompt instead of jumping to the next episode.
 
 Playback is codec-aware. Browser-compatible sources use a same-origin
 `/api/playback/items/:itemId/stream` URL; the backend validates the session and
@@ -413,7 +428,11 @@ above the source bitrate are not offered at all (a file below 2 Mbps shows no
 picker). The HLS route accepts the same `quality` parameter.
 
 The response advertises the applied `quality` and the selectable `qualities`,
-so the UI needs no preset table of its own. Switching quality mid-playback asks
+so the UI needs no preset table of its own. The chosen preset is remembered per
+browser (`localStorage["churn:play:quality"]`) and reused for the next episode.
+If a file cannot offer that tier, the backend falls back to `max` for that item
+without erasing the preference, so a later high-bitrate episode uses the saved
+tier again. Switching quality mid-playback asks
 for a new item (fresh `PlaySessionId`, because Jellyfin keys transcoding jobs by
 session), rebuilds the HLS pipeline at the current position, stops the old
 Jellyfin session and reports the new one; playback continues without a page

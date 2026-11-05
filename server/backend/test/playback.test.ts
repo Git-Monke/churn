@@ -12,6 +12,7 @@ import {
   playbackReportBodies,
   playbackStreamPath,
   pickMediaSource,
+  pickNextEpisode,
 } from "../src/playback.js";
 import { ApiError } from "../src/errors.js";
 import type { JellyfinItem } from "../src/upstream/jellyfin.js";
@@ -248,6 +249,78 @@ describe("playback report parsing", () => {
       PositionTicks: 500,
       Failed: false,
     });
+  });
+});
+
+describe("next episode resolution", () => {
+  function episode(
+    id: string,
+    season: number,
+    number: number,
+    overrides: Partial<JellyfinItem> = {},
+  ): JellyfinItem {
+    return {
+      Id: id,
+      Name: `Episode ${id}`,
+      Type: "Episode",
+      ParentIndexNumber: season,
+      IndexNumber: number,
+      ...overrides,
+    };
+  }
+
+  it("finds the next episode in the same season", () => {
+    const episodes = [
+      episode("e3", 1, 3),
+      episode("e1", 1, 1),
+      episode("e2", 1, 2),
+    ];
+    expect(pickNextEpisode(episodes, { seasonNumber: 1, episodeNumber: 2 })).toEqual({
+      id: "e3",
+      name: "Episode e3",
+      seasonNumber: 1,
+      episodeNumber: 3,
+    });
+  });
+
+  it("rolls into the next season and stops at the series finale", () => {
+    const episodes = [episode("s1e2", 1, 2), episode("s2e1", 2, 1)];
+    expect(pickNextEpisode(episodes, { seasonNumber: 1, episodeNumber: 2 })).toMatchObject({
+      id: "s2e1",
+      seasonNumber: 2,
+      episodeNumber: 1,
+    });
+    expect(
+      pickNextEpisode(episodes, { seasonNumber: 2, episodeNumber: 1 }),
+    ).toBeUndefined();
+  });
+
+  it("keeps specials in season 0 and keeps them out of season 1", () => {
+    const episodes = [episode("s0e1", 0, 1), episode("s0e2", 0, 2), episode("s1e1", 1, 1)];
+    expect(pickNextEpisode(episodes, { seasonNumber: 0, episodeNumber: 1 })).toMatchObject({
+      id: "s0e2",
+    });
+    expect(
+      pickNextEpisode(episodes, { seasonNumber: 0, episodeNumber: 2 }),
+    ).toBeUndefined();
+    expect(
+      pickNextEpisode(episodes, { seasonNumber: 1, episodeNumber: 1 }),
+    ).toBeUndefined();
+  });
+
+  it("ignores duplicates, malformed rows and missing current indices", () => {
+    const episodes = [
+      episode("e1", 1, 1),
+      episode("e1-duplicate", 1, 1),
+      episode("e2", 1, 2),
+      { Id: "bad", Name: "No indices", Type: "Episode" },
+      { Id: "movie", Name: "Film", Type: "Movie" },
+      episode("missing-name", 1, 3, { Name: undefined }),
+    ];
+    expect(pickNextEpisode(episodes, { seasonNumber: 1, episodeNumber: 1 })).toMatchObject({
+      id: "e2",
+    });
+    expect(pickNextEpisode(episodes, { seasonNumber: 1 })).toBeUndefined();
   });
 });
 

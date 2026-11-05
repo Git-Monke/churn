@@ -296,9 +296,11 @@ matched Sonarr series.
 Movies and Jellyfin episodes also open an in-app player:
 video streams from Jellyfin, transcoding to HLS when the browser cannot decode
 the source, resume positions come from the signed-in user, and progress is
-reported back to Jellyfin. Playback follows the hostname used to open the
-dashboard, so the same install works through a LAN IP, a Tailscale IP or a
-MagicDNS name without extra configuration. See `server/README.md` for
+reported back to Jellyfin. Episodes show a three-second next-episode countdown
+when the credits start (IntroDB outro data, or the end of the file as a
+fallback), and the chosen quality is remembered for the next episode. Playback follows the hostname
+used to open the dashboard, so the same install works through a LAN IP, a
+Tailscale IP or a MagicDNS name without extra configuration. See `server/README.md` for
 configuration, `JELLYFIN_PUBLIC_URL` and container notes. Development is
 planned in this order: library/status dashboard, search and media requests
 (done), active downloads in Library (done), Jellyfin login and per-user sessions

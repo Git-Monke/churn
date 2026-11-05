@@ -4071,6 +4071,34 @@ describe("playback", () => {
     });
   }
 
+  function installEpisodeFetch(
+    current: Record<string, unknown>,
+    episodes: Array<Record<string, unknown>> | "fail",
+  ): ReturnType<typeof vi.fn> {
+    return installFetch((url) => {
+      if (url.includes("/PlaybackInfo?")) {
+        return jsonResponse(playbackInfo);
+      }
+      if (/\/Items\/item-1\?/.test(url)) {
+        return jsonResponse(current);
+      }
+      if (/\/Items\/series-1\?/.test(url)) {
+        return jsonResponse({
+          Id: "series-1",
+          Type: "Series",
+          ProviderIds: {},
+        });
+      }
+      if (url.includes("/Shows/series-1/Episodes?")) {
+        if (episodes === "fail") {
+          return jsonResponse({ error: "unavailable" }, 500);
+        }
+        return jsonResponse({ Items: episodes });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+  }
+
   it("returns playable metadata with a same-origin stream URL", async () => {
     installPlaybackFetch();
     const app = await buildAuthedServer(makeConfig());
@@ -4101,6 +4129,96 @@ describe("playback", () => {
     });
     expect(body.item.segments).toBeUndefined();
     expect(JSON.stringify(body)).not.toContain("test-user-token");
+    await app.close();
+  });
+
+  it("adds the next episode from Jellyfin's series list", async () => {
+    installEpisodeFetch(
+      {
+        ...playbackItem,
+        Type: "Episode",
+        Name: "Episode Two",
+        SeriesId: "series-1",
+        ParentIndexNumber: 1,
+        IndexNumber: 2,
+      },
+      [
+        {
+          Id: "episode-3",
+          Name: "Episode Three",
+          Type: "Episode",
+          ParentIndexNumber: 1,
+          IndexNumber: 3,
+        },
+        {
+          Id: "episode-2",
+          Name: "Episode Two",
+          Type: "Episode",
+          ParentIndexNumber: 1,
+          IndexNumber: 2,
+        },
+        {
+          Id: "episode-4",
+          Name: "Episode Four",
+          Type: "Episode",
+          ParentIndexNumber: 1,
+          IndexNumber: 4,
+        },
+      ],
+    );
+
+    const app = await buildAuthedServer(makeConfig());
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/playback/items/item-1",
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().item.nextEpisode).toEqual({
+      id: "episode-3",
+      name: "Episode Three",
+      seasonNumber: 1,
+      episodeNumber: 3,
+    });
+    await app.close();
+  });
+
+  it("omits the next episode at the end of the series or when Jellyfin fails", async () => {
+    const lastEpisode = {
+      ...playbackItem,
+      Type: "Episode",
+      Name: "Finale",
+      SeriesId: "series-1",
+      ParentIndexNumber: 2,
+      IndexNumber: 4,
+    };
+    installEpisodeFetch(lastEpisode, [
+      {
+        Id: "episode-1",
+        Name: "Finale",
+        Type: "Episode",
+        ParentIndexNumber: 2,
+        IndexNumber: 4,
+      },
+    ]);
+    let app = await buildAuthedServer(makeConfig());
+    let response = await app.inject({
+      method: "GET",
+      url: "/api/playback/items/item-1",
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().item.nextEpisode).toBeUndefined();
+    await app.close();
+
+    installEpisodeFetch(lastEpisode, "fail");
+    app = await buildAuthedServer(makeConfig());
+    response = await app.inject({
+      method: "GET",
+      url: "/api/playback/items/item-1",
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().state).toBe("ok");
+    expect(response.json().item.nextEpisode).toBeUndefined();
     await app.close();
   });
 
@@ -4324,6 +4442,59 @@ describe("playback", () => {
     const location = String(manifest.headers.location);
     expect(location).toContain("MaxHeight=720");
     expect(location).toContain("VideoBitrate=5000000");
+    await app.close();
+  });
+
+  it("falls back to max when the source cannot offer the remembered tier", async () => {
+    installFetch((url) => {
+      if (url.includes("/PlaybackInfo?")) {
+        return jsonResponse({
+          PlaySessionId: "session-1",
+          MediaSources: [
+            {
+              Id: "source-1",
+              Container: "mp4",
+              Bitrate: 1_500_000,
+              SupportsDirectPlay: true,
+              MediaStreams: [
+                { Type: "Video", Codec: "h264", Height: 1080 },
+                { Type: "Audio", Codec: "aac", Channels: 2 },
+              ],
+            },
+          ],
+        });
+      }
+      if (/\/Items\/item-1\?/.test(url)) {
+        return jsonResponse(playbackItem);
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildAuthedServer(makeConfig());
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/playback/items/item-1?quality=medium",
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.item).toMatchObject({
+      quality: "max",
+      directPlay: true,
+      playbackMethod: "direct",
+      streamUrl:
+        "/api/playback/items/item-1/stream?mediaSourceId=source-1&playSessionId=session-1",
+    });
+    expect(body.item.qualities.map((option: { id: string }) => option.id)).toEqual([
+      "max",
+    ]);
+
+    const manifest = await app.inject({
+      method: "GET",
+      url: "/api/playback/items/item-1/hls.m3u8?mediaSourceId=source-1&playSessionId=session-1&quality=medium",
+    });
+    expect(manifest.statusCode).toBe(302);
+    expect(String(manifest.headers.location)).toContain("MaxHeight=1080");
     await app.close();
   });
 

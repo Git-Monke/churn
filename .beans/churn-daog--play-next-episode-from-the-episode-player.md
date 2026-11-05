@@ -1,16 +1,14 @@
 ---
 # churn-daog
 title: Play next episode from the episode player
-status: todo
+status: completed
 type: feature
 priority: normal
 tags:
     - playback
     - shows
 created_at: 2026-11-05T17:21:57Z
-updated_at: 2026-11-05T18:29:15Z
-blocked_by:
-    - churn-bhfb
+updated_at: 2026-11-05T19:34:24Z
 ---
 
 ## Goal
@@ -44,11 +42,12 @@ after the current episode.
 
 ## Todos
 
-- [ ] Backend: resolve the next episode (same season, then next season) for playback items
-- [ ] Extend the playback API type and frontend `PlaybackItem`
-- [ ] Add the "Up next" button and autoplay countdown to `PlayPage`
-- [ ] Stop/start Jellyfin sessions cleanly when advancing
-- [ ] Tests: next-episode resolution (last of season, last of series, missing file) and UI behaviour
+- [x] Backend: resolve the next episode (same season, then next season) for playback items
+- [x] Extend the playback API type and frontend `PlaybackItem`
+- [x] Add the floating three-second credits countdown and autoplay toggle to `PlayPage`
+- [x] Persist the selected quality across episodes with a Max fallback
+- [x] Stop/start Jellyfin sessions cleanly when advancing
+- [x] Tests: next-episode resolution, route attachment/failure, cache and quality fallback
 
 
 ## Plan
@@ -57,14 +56,46 @@ Implementation plan: `plans/play-next-episode.md`.
 
 Decisions recorded there: the backend resolves the next episode from Jellyfin's
 series episode list; season 0 specials do not roll into season 1; the lookup is
-best effort and cached per series; the player gets a persistent Up next card and
-a 10-second end overlay with a persisted autoplay toggle; advancing uses
-`replaceHash` so Back returns to the show/season. Credits-based countdown timing
-is owned by `churn-bhfb`.
+best effort and cached per series; there is no persistent Up next card, just a
+small floating **Next episode in 3 → 2 → 1** prompt at the credits. The
+countdown starts when `segments.outro.startSec` begins and advances three seconds
+later (falling back to `ended`). Cancel dismisses the prompt and lets the credits
+play. Autoplay and
+the selected quality persist per browser in localStorage; a tier the source
+cannot offer falls back to Max without erasing the preference. Advancing uses
+`replaceHash` so Back returns to the show/season.
 
 
 ## Sequencing
 
-Do `churn-bhfb` (IntroDB segments) first; this bean is blocked-by it. The
-credits trigger uses `item.segments.outro.startSec` from that bean, falling back
-to `<video>` `ended` when no outro data exists. Plan: `plans/play-next-episode.md`.
+`churn-bhfb` now exposes `item.segments.outro.startSec`; the soft dependency is
+satisfied and this bean can start. The credits trigger uses that range, falling
+back to `<video>` `ended` when no outro data exists. Plan:
+`plans/play-next-episode.md`.
+
+
+## Summary of Changes
+
+- Playback metadata now resolves `nextEpisode` from Jellyfin's series episode list,
+  using a 60-second in-process cache and coalesced lookups. Movies, the series
+  finale and failed lookups omit it.
+- The item and HLS routes normalize a remembered quality tier to the source's
+  available presets, falling back to `max` without changing the stored
+  preference.
+- `PlayPage` shows a small floating **Next episode in 3 → 2 → 1** prompt starting
+  when `segments.outro.startSec` begins and advances three seconds later. Without
+  outro data it falls back to `ended` with a three-second wall-clock countdown.
+  Play now and Cancel are available; cancelling during credits lets playback
+  continue.
+- Autoplay is persisted per browser (`churn:play:autoplay`) and the selected
+  quality is persisted per browser (`churn:play:quality`) for the next episode.
+- Added backend tests for next-episode ordering, route attachment/failure,
+  cache TTL/coalescing and quality fallback, plus README/web-ui docs.
+
+- Autoplay is only armed by natural playback reaching the countdown. Seeking
+  into the credits or scrubbing during the countdown leaves a static Play next
+  prompt and never auto-advances.
+
+
+- Timing tuned after user testing: the credits prompt now appears when the
+  outro starts and counts three seconds (`3 → 2 → 1`) before advancing.

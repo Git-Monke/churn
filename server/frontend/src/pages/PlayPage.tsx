@@ -34,12 +34,29 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { showHash, type ShowReturnContext } from "@/hooks/use-hash-route";
+import { Switch } from "@/components/ui/switch";
+import {
+  playHash,
+  replaceHash,
+  showHash,
+  type ShowReturnContext,
+} from "@/hooks/use-hash-route";
+import {
+  readAutoplay,
+  readPlaybackQuality,
+  writeAutoplay,
+  writePlaybackQuality,
+} from "@/lib/playback-preferences";
 import { isInsideSegment } from "@/lib/playback-segments";
 
 const TICKS_PER_SECOND = 10_000_000;
 const REPORT_INTERVAL_MS = 10_000;
 const RESUME_END_MARGIN_SECONDS = 30;
+const NEXT_EPISODE_COUNTDOWN_SECONDS = 3;
+// A timeupdate gap larger than this means the user jumped rather than played
+// through the trigger naturally. Autoplay only arms on natural playback.
+const NEXT_EPISODE_NATURAL_GAP_SECONDS = 2;
+const NEXT_EPISODE_SEEK_GRACE_MS = 1_500;
 // Advance further each time so the new segment request makes Jellyfin restart
 // its transcode past a damaged section instead of on the same bad keyframe.
 const RECOVERY_SKIP_SECONDS = [5, 15, 30];
@@ -48,9 +65,16 @@ const RECOVERY_FATAL_GRACE_MS = 1_500;
 
 type MediaIssue = "codec" | "stream";
 
+interface NextPromptState {
+  remaining: number;
+  auto: boolean;
+  deadline?: number;
+}
+
 export function PlayPage({ id, from }: { id: string; from?: ShowReturnContext }) {
   const queryClient = useQueryClient();
-  const [quality, setQuality] = useState<PlaybackQuality>("max");
+  const [quality, setQuality] = useState<PlaybackQuality>(readPlaybackQuality);
+  const [autoplay, setAutoplay] = useState(readAutoplay);
   const playbackQuery = useQuery({
     queryKey: ["playback", id, quality],
     queryFn: () => fetchPlayback(id, quality),
@@ -78,6 +102,7 @@ export function PlayPage({ id, from }: { id: string; from?: ShowReturnContext })
   const [switchingQuality, setSwitchingQuality] = useState(false);
   const [resumed, setResumed] = useState(false);
   const [showSkipIntro, setShowSkipIntro] = useState(false);
+  const [nextPrompt, setNextPrompt] = useState<NextPromptState | null>(null);
   const [mediaIssue, setMediaIssue] = useState<MediaIssue | null>(null);
   const [recovering, setRecovering] = useState(false);
   const [recovery, setRecovery] = useState<{
@@ -89,8 +114,18 @@ export function PlayPage({ id, from }: { id: string; from?: ShowReturnContext })
   const recoveringRef = useRef(false);
   const recoveryStartedAtRef = useRef(0);
   const recoveryTimerRef = useRef<number | null>(null);
+  const promptShownRef = useRef(false);
+  const promptDismissedRef = useRef(false);
+  const advancingRef = useRef(false);
+  const autoArmedRef = useRef(false);
+  const lastTimeRef = useRef(0);
+  const seekingRef = useRef(false);
+  const seekedRef = useRef(false);
+  const lastSeekAtRef = useRef(0);
+  const playNextRef = useRef<() => void>(() => {});
 
   itemRef.current = item;
+  playNextRef.current = playNext;
 
   // Finish a quality switch once the backend answers with the new stream: the
   // previous Jellyfin play session is stopped and the new one starts at the
@@ -131,10 +166,49 @@ export function PlayPage({ id, from }: { id: string; from?: ShowReturnContext })
     qualitySwitchRef.current = null;
     setSwitchingQuality(false);
     setQuality(item.quality);
+    writePlaybackQuality(item.quality);
     toast.error("Could not switch quality", {
       description: playbackQuery.error.message,
     });
   }, [playbackQuery.error, item?.quality]);
+
+  // A remembered tier may not be available for this file. Keep the preference,
+  // but show the tier the backend actually applied.
+  useEffect(() => {
+    if (!item || qualitySwitchRef.current) {
+      return;
+    }
+    if (!item.qualities.some((option) => option.id === quality)) {
+      setQuality(item.quality);
+    }
+  }, [item?.quality, item?.qualities, quality]);
+
+  // The end-of-file fallback has no media clock left, so count down on wall
+  // time. The credits path is driven by timeupdate instead.
+  useEffect(() => {
+    if (!nextPrompt?.auto || nextPrompt.deadline === undefined) {
+      return;
+    }
+    const deadline = nextPrompt.deadline;
+    const tick = () => {
+      const remaining = Math.max(
+        0,
+        Math.ceil((deadline - Date.now()) / 1000),
+      );
+      if (remaining <= 0) {
+        playNextRef.current();
+        return;
+      }
+      setNextPrompt((previous) =>
+        previous?.deadline === deadline && previous.remaining !== remaining
+          ? { ...previous, remaining }
+          : previous,
+      );
+    };
+    tick();
+    const interval = window.setInterval(tick, 250);
+    return () => window.clearInterval(interval);
+  }, [nextPrompt?.auto, nextPrompt?.deadline]);
 
   const reportProgress = useCallback((isPaused: boolean) => {
     const current = itemRef.current;
@@ -186,6 +260,15 @@ export function PlayPage({ id, from }: { id: string; from?: ShowReturnContext })
     setRecovering(false);
     setMediaIssue(null);
     setShowSkipIntro(false);
+    setNextPrompt(null);
+    promptShownRef.current = false;
+    promptDismissedRef.current = false;
+    advancingRef.current = false;
+    autoArmedRef.current = false;
+    lastTimeRef.current = 0;
+    seekingRef.current = false;
+    seekedRef.current = false;
+    lastSeekAtRef.current = 0;
     return () => clearRecoveryTimer();
   }, [item?.id]);
 
@@ -298,13 +381,15 @@ export function PlayPage({ id, from }: { id: string; from?: ShowReturnContext })
       video.src = item.streamUrl;
       let disposed = false;
       const seekAndPlay = () => {
-        if (disposed || targetSeconds === undefined) {
+        if (disposed) {
           return;
         }
-        try {
-          video.currentTime = targetSeconds;
-        } catch {
-          // Not seekable until metadata is ready.
+        if (targetSeconds !== undefined) {
+          try {
+            video.currentTime = targetSeconds;
+          } catch {
+            // Not seekable until metadata is ready.
+          }
         }
         if (autoplay) {
           void video.play().catch(() => {
@@ -348,7 +433,7 @@ export function PlayPage({ id, from }: { id: string; from?: ShowReturnContext })
         hlsRef.current = hls;
         hls.loadSource(item.streamUrl);
         hls.attachMedia(video);
-        if (targetSeconds !== undefined && autoplay) {
+        if (autoplay) {
           hls.on(HlsConstructor.Events.MANIFEST_PARSED, () => {
             void video.play().catch(() => {
               // The element may still be waiting for the first fragment.
@@ -466,18 +551,21 @@ export function PlayPage({ id, from }: { id: string; from?: ShowReturnContext })
     }
     resumeAppliedRef.current = true;
     const resumeSeconds = (item.positionTicks ?? 0) / TICKS_PER_SECOND;
-    if (resumeSeconds <= 0 || item.played) {
-      return;
+    if (resumeSeconds > 0 && !item.played) {
+      const duration = video.duration;
+      const nearEnd =
+        Number.isFinite(duration) &&
+        resumeSeconds >= duration - RESUME_END_MARGIN_SECONDS;
+      if (!nearEnd) {
+        video.currentTime = resumeSeconds;
+        positionRef.current = Math.round(resumeSeconds * TICKS_PER_SECOND);
+        setResumed(true);
+      }
     }
-    const duration = video.duration;
-    const nearEnd =
-      Number.isFinite(duration) &&
-      resumeSeconds >= duration - RESUME_END_MARGIN_SECONDS;
-    if (!nearEnd) {
-      video.currentTime = resumeSeconds;
-      positionRef.current = Math.round(resumeSeconds * TICKS_PER_SECOND);
-      setResumed(true);
-    }
+    // The user already chose this item; start it as soon as the source is
+    // ready. Browsers may still reject this if their autoplay policy requires
+    // another gesture, in which case the native controls remain available.
+    void video.play().catch(() => {});
   }
 
   function handleQualityChange(value: string) {
@@ -499,6 +587,41 @@ export function PlayPage({ id, from }: { id: string; from?: ShowReturnContext })
     setMediaIssue(null);
     setSwitchingQuality(true);
     setQuality(next);
+    writePlaybackQuality(next);
+  }
+
+  function handleAutoplayChange(enabled: boolean) {
+    setAutoplay(enabled);
+    writeAutoplay(enabled);
+    if (!enabled) {
+      // Turning autoplay off cancels the current countdown; re-enabling must
+      // not resurrect it. Play next remains available.
+      autoArmedRef.current = false;
+    }
+    setNextPrompt((previous) => {
+      if (!previous) {
+        return previous;
+      }
+      if (!enabled) {
+        return { ...previous, auto: false, remaining: 0, deadline: undefined };
+      }
+      return previous;
+    });
+  }
+
+  function handleSeeking() {
+    seekingRef.current = true;
+    seekedRef.current = false;
+    lastSeekAtRef.current = Date.now();
+    autoArmedRef.current = false;
+    setNextPrompt((previous) =>
+      previous ? { ...previous, auto: false, remaining: 0, deadline: undefined } : previous,
+    );
+  }
+
+  function handleSeeked() {
+    seekingRef.current = false;
+    seekedRef.current = true;
   }
 
   function handlePlay() {
@@ -517,8 +640,10 @@ export function PlayPage({ id, from }: { id: string; from?: ShowReturnContext })
   function handleTimeUpdate() {
     const video = videoRef.current;
     if (video) {
+      const previousTime = lastTimeRef.current;
       positionRef.current = Math.round(video.currentTime * TICKS_PER_SECOND);
-      const intro = itemRef.current?.segments?.intro;
+      const current = itemRef.current;
+      const intro = current?.segments?.intro;
       setShowSkipIntro(
         !video.ended &&
           !recoveringRef.current &&
@@ -526,6 +651,56 @@ export function PlayPage({ id, from }: { id: string; from?: ShowReturnContext })
           intro !== undefined &&
           isInsideSegment(intro, video.currentTime),
       );
+
+      const outro = current?.segments?.outro;
+      if (
+        current?.nextEpisode &&
+        outro &&
+        !video.ended &&
+        !recoveringRef.current &&
+        !mediaIssue &&
+        !switchingQuality &&
+        !promptDismissedRef.current &&
+        !advancingRef.current
+      ) {
+        const triggerAt = Math.max(0, outro.startSec);
+        const advanceAt = triggerAt + NEXT_EPISODE_COUNTDOWN_SECONDS;
+        if (video.currentTime >= triggerAt) {
+          if (!promptShownRef.current) {
+            promptShownRef.current = true;
+            // Only count down when playback reached the trigger naturally.
+            // Scrubbing into the credits shows a static Play next prompt.
+            autoArmedRef.current =
+              !seekingRef.current &&
+              !seekedRef.current &&
+              previousTime < triggerAt &&
+              video.currentTime - previousTime <=
+                NEXT_EPISODE_NATURAL_GAP_SECONDS;
+          }
+          const auto = autoArmedRef.current && autoplay;
+          if (auto && video.currentTime >= advanceAt) {
+            playNext();
+          } else {
+            const remaining = auto
+              ? Math.max(1, Math.ceil(advanceAt - video.currentTime))
+              : 0;
+            setNextPrompt((previous) =>
+              previous?.remaining === remaining && previous.auto === auto
+                ? previous
+                : { remaining, auto },
+            );
+          }
+        } else if (promptShownRef.current) {
+          // Seeking back before the credits re-arms the prompt.
+          promptShownRef.current = false;
+          autoArmedRef.current = false;
+          setNextPrompt(null);
+        }
+      }
+
+      lastTimeRef.current = video.currentTime;
+      seekedRef.current = false;
+
       if (
         !recoveringRef.current &&
         recoveryRef.current.attempts > 0 &&
@@ -545,6 +720,43 @@ export function PlayPage({ id, from }: { id: string; from?: ShowReturnContext })
       positionRef.current = Math.round(video.currentTime * TICKS_PER_SECOND);
       reportProgress(true);
     }
+  }
+
+  function playNext() {
+    const current = itemRef.current;
+    const next = current?.nextEpisode;
+    if (!current || !next || advancingRef.current) {
+      return;
+    }
+    advancingRef.current = true;
+    promptDismissedRef.current = true;
+    promptShownRef.current = true;
+    setNextPrompt(null);
+
+    const video = videoRef.current;
+    const durationTicks =
+      video && Number.isFinite(video.duration) && video.duration > 0
+        ? Math.round(video.duration * TICKS_PER_SECOND)
+        : (current.runtimeTicks ?? positionRef.current);
+    // Advancing at the credits marker must still report the full duration so
+    // Jellyfin marks the episode played.
+    stopPlayback(durationTicks);
+
+    const nextFrom = from
+      ? { ...from, season: next.seasonNumber }
+      : current.seriesId
+        ? {
+            source: "jellyfin" as const,
+            id: current.seriesId,
+            season: next.seasonNumber,
+          }
+        : undefined;
+    replaceHash(playHash(next.id, nextFrom));
+  }
+
+  function dismissNextPrompt() {
+    promptDismissedRef.current = true;
+    setNextPrompt(null);
   }
 
   function skipIntro() {
@@ -618,6 +830,34 @@ export function PlayPage({ id, from }: { id: string; from?: ShowReturnContext })
         ? Math.round(duration * TICKS_PER_SECOND)
         : positionRef.current;
     stopPlayback(durationTicks);
+
+    const current = itemRef.current;
+    if (
+      !current?.nextEpisode ||
+      promptDismissedRef.current ||
+      advancingRef.current
+    ) {
+      return;
+    }
+    if (promptShownRef.current) {
+      if (autoplay && autoArmedRef.current) {
+        playNext();
+      }
+      return;
+    }
+
+    const recentlySeeked =
+      Date.now() - lastSeekAtRef.current < NEXT_EPISODE_SEEK_GRACE_MS;
+    const auto = autoplay && !recentlySeeked;
+    autoArmedRef.current = auto;
+    promptShownRef.current = true;
+    setNextPrompt({
+      remaining: auto ? NEXT_EPISODE_COUNTDOWN_SECONDS : 0,
+      auto,
+      ...(auto
+        ? { deadline: Date.now() + NEXT_EPISODE_COUNTDOWN_SECONDS * 1000 }
+        : {}),
+    });
   }
 
   // Return to the season the episode came from instead of dumping the user in
@@ -791,6 +1031,8 @@ export function PlayPage({ id, from }: { id: string; from?: ShowReturnContext })
           onLoadedMetadata={handleLoadedMetadata}
           onPlay={handlePlay}
           onPause={handlePause}
+          onSeeking={handleSeeking}
+          onSeeked={handleSeeked}
           onTimeUpdate={handleTimeUpdate}
           onEnded={handleEnded}
           onPlaying={handlePlaying}
@@ -810,39 +1052,83 @@ export function PlayPage({ id, from }: { id: string; from?: ShowReturnContext })
             Skip intro
           </Button>
         ) : null}
+        {nextPrompt && item.nextEpisode ? (
+          <div className="absolute bottom-16 right-4 z-10 flex flex-wrap items-center gap-3 rounded-lg border bg-background/95 px-3 py-2 shadow-lg backdrop-blur">
+            <div className="flex flex-col">
+              <span className="text-sm font-medium">
+                {nextPrompt.auto
+                  ? `Next episode in ${Math.max(1, nextPrompt.remaining)}`
+                  : "Next episode"}
+              </span>
+              <span className="font-mono text-[11px] text-muted-foreground">
+                {episodeCode(
+                  item.nextEpisode.seasonNumber,
+                  item.nextEpisode.episodeNumber,
+                )}{" "}
+                — {item.nextEpisode.name}
+              </span>
+            </div>
+            <div className="flex items-center gap-1">
+              <Button type="button" size="sm" onClick={playNext}>
+                {nextPrompt.auto ? "Play now" : "Play next"}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={dismissNextPrompt}
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        ) : null}
       </Card>
 
-      {item.qualities.length > 1 ? (
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm text-muted-foreground">Quality</span>
-          <Select value={quality} onValueChange={handleQualityChange}>
-            <SelectTrigger
+      <div className="flex flex-wrap items-center gap-3">
+        {item.qualities.length > 1 ? (
+          <>
+            <span className="text-sm text-muted-foreground">Quality</span>
+            <Select value={quality} onValueChange={handleQualityChange}>
+              <SelectTrigger
+                size="sm"
+                className="w-48"
+                aria-label="Playback quality"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {item.qualities.map((option) => (
+                  <SelectItem key={option.id} value={option.id}>
+                    {option.label} — {option.detail}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {switchingQuality ? (
+              <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                <LoaderCircleIcon className="size-3.5 animate-spin" />
+                Switching quality…
+              </span>
+            ) : appliedQuality && item.quality !== "max" ? (
+              <span className="text-sm text-muted-foreground">
+                Streaming at {appliedQuality.label} — {appliedQuality.detail}
+              </span>
+            ) : null}
+          </>
+        ) : null}
+        {item.nextEpisode ? (
+          <label className="ml-auto flex items-center gap-2 text-sm text-muted-foreground">
+            <Switch
+              checked={autoplay}
+              onCheckedChange={handleAutoplayChange}
               size="sm"
-              className="w-48"
-              aria-label="Playback quality"
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {item.qualities.map((option) => (
-                <SelectItem key={option.id} value={option.id}>
-                  {option.label} — {option.detail}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {switchingQuality ? (
-            <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
-              <LoaderCircleIcon className="size-3.5 animate-spin" />
-              Switching quality…
-            </span>
-          ) : appliedQuality && item.quality !== "max" ? (
-            <span className="text-sm text-muted-foreground">
-              Streaming at {appliedQuality.label} — {appliedQuality.detail}
-            </span>
-          ) : null}
-        </div>
-      ) : null}
+              aria-label="Autoplay next episode"
+            />
+            Autoplay next episode
+          </label>
+        ) : null}
+      </div>
 
       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
         <PlayIcon className="size-3.5" />

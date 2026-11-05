@@ -77,11 +77,20 @@ export interface PlaybackItem {
   quality: PlaybackQuality;
   /** Selectable presets for this source; always contains `max`. */
   qualities: PlaybackQualityOption[];
+  /** The next episode in Jellyfin's list, when this item is an episode. */
+  nextEpisode?: PlaybackNextEpisode;
   /**
    * Intro/recap/credits ranges warmed from IntroDB when the season or episode
    * was grabbed. Absent when there is no cached data for this episode.
    */
   segments?: IntroDbSegments;
+}
+
+export interface PlaybackNextEpisode {
+  id: string;
+  name: string;
+  seasonNumber: number;
+  episodeNumber: number;
 }
 
 export interface PlaybackItemResponse {
@@ -255,6 +264,69 @@ function formatQualityDetail(caps: QualityTranscodeCaps): string {
   const mbps = caps.bitrate / 1_000_000;
   const bitrate = Number.isInteger(mbps) ? String(mbps) : mbps.toFixed(1);
   return `${caps.height}p · ${bitrate} Mbps`;
+}
+
+/**
+ * Pick the first episode after the current `(season, episode)`. Season 0
+ * specials stay in their own season; a special never rolls into season 1.
+ */
+export function pickNextEpisode(
+  episodes: JellyfinItem[],
+  current: { id?: string; seasonNumber?: number; episodeNumber?: number },
+): PlaybackNextEpisode | undefined {
+  const currentSeason = current.seasonNumber;
+  const currentEpisode = current.episodeNumber;
+  if (
+    currentSeason === undefined ||
+    currentEpisode === undefined ||
+    !Number.isInteger(currentSeason) ||
+    !Number.isInteger(currentEpisode)
+  ) {
+    return undefined;
+  }
+
+  const specialsOnly = currentSeason === 0;
+  const byCode = new Map<string, PlaybackNextEpisode>();
+  for (const episode of episodes) {
+    if (episode.Type !== undefined && episode.Type !== "Episode") {
+      continue;
+    }
+    if (!episode.Id || !episode.Name) {
+      continue;
+    }
+    const season = episode.ParentIndexNumber;
+    const number = episode.IndexNumber;
+    if (
+      season === undefined ||
+      number === undefined ||
+      !Number.isInteger(season) ||
+      !Number.isInteger(number)
+    ) {
+      continue;
+    }
+    if (specialsOnly ? season !== 0 : season === 0) {
+      continue;
+    }
+    const key = `${season}:${number}`;
+    if (!byCode.has(key)) {
+      byCode.set(key, {
+        id: episode.Id,
+        name: episode.Name,
+        seasonNumber: season,
+        episodeNumber: number,
+      });
+    }
+  }
+
+  const ordered = [...byCode.values()].sort(
+    (a, b) => a.seasonNumber - b.seasonNumber || a.episodeNumber - b.episodeNumber,
+  );
+  return ordered.find(
+    (episode) =>
+      episode.seasonNumber > currentSeason ||
+      (episode.seasonNumber === currentSeason &&
+        episode.episodeNumber > currentEpisode),
+  );
 }
 
 /**
