@@ -423,12 +423,21 @@ function ReleaseRow({
   );
 }
 
+/**
+ * Tiers the chooser auto-selects, best first: 1080p, then step down to 720p and
+ * 480p, and only fall back to 2160p when nothing at or below 1080p exists. 4K is
+ * never the default while a lower tier is available.
+ */
+const DEFAULT_TIER_PREFERENCE = [2, 1, 0, 3];
+
 function defaultTier(groups: ReleaseGroup[]): number {
-  const known = groups
-    .map((group) => group.tier)
-    .filter((tier) => tier >= 0 && tier <= 3)
-    .sort((left, right) => right - left);
-  return known[0] ?? groups[0]?.tier ?? 99;
+  const available = new Set(groups.map((group) => group.tier));
+  for (const tier of DEFAULT_TIER_PREFERENCE) {
+    if (available.has(tier)) {
+      return tier;
+    }
+  }
+  return groups[0]?.tier ?? 99;
 }
 
 function releaseTargetLabel(

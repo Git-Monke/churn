@@ -213,7 +213,9 @@ Release search is Prowlarr-first. Opening a movie or season sends one search to
 each enabled Prowlarr indexer in parallel. The chooser opens as soon as the first
 usable result arrives, then keeps adding results as each indexer finishes, with
 progress such as `5/9 indexers finished` and a chip per indexer. If the user has
-not picked a tier, the chooser follows the best newly arrived tier.
+not picked a tier, the chooser selects `1080p` when it is available, otherwise
+steps down to `720p`, then `480p`, and only falls back to `2160p` when nothing at
+or below 1080p exists. 4K is never the default while a lower tier is available.
 Sonarr/Radarr's own `/api/v3/parse` endpoint supplies title/year,
 season, episode and quality metadata used to filter unrelated releases. Options are grouped into the quality
 tiers that actually have releases (`480p`, `720p`, `1080p`, `2160p`, `Other`)
@@ -295,9 +297,11 @@ entry.
 
 The backend watches Sonarr/Radarr import history and qBittorrent for finished
 `churn-direct` downloads. Either event asks Jellyfin to refresh, even when no
-dashboard tab is open. While a Library card is **Scanning**, the page polls
-Jellyfin every 2 seconds so the card becomes playable as soon as the item is
-indexed.
+dashboard tab is open. A finished direct download keeps requesting a scan every
+15 seconds for up to 10 minutes until Jellyfin exposes the series or movie, so a
+scan that starts before the files are visible is retried instead of losing the
+download. While a Library card is **Scanning**, the page polls Jellyfin every 2
+seconds so the card becomes playable as soon as the item is indexed.
 
 Movies stay at card level. Clicking a show opens
 `/api/library/shows/:source/:id`, which unions Jellyfin and Sonarr episodes by
@@ -313,7 +317,9 @@ connected and swarm seeders, and ETA. While a download is active, the page polls
 the lightweight movie/show download endpoint twice per second. Those endpoints
 read only qBittorrent plus a cached title/episode identity populated by the
 full detail route, so Jellyfin, Sonarr and Radarr are not queried on every tick.
-Finished and imported downloads stay on the slower full-detail cadence.
+Finished and imported downloads stay on the slower full-detail cadence. Once
+Jellyfin exposes an episode, a still-seeding finished torrent is hidden from the
+live show endpoint so **Available** and **Importing** never appear together.
 
 If a qBittorrent download finished before Sonarr imported it, churn asks Sonarr
 to scan its content path. This recovers downloads whose queue record was lost
