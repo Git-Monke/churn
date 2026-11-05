@@ -8,7 +8,9 @@ tags:
     - playback
     - shows
 created_at: 2026-11-05T17:21:57Z
-updated_at: 2026-11-05T17:21:57Z
+updated_at: 2026-11-05T18:29:15Z
+blocked_by:
+    - churn-bhfb
 ---
 
 ## Goal
@@ -47,3 +49,22 @@ after the current episode.
 - [ ] Add the "Up next" button and autoplay countdown to `PlayPage`
 - [ ] Stop/start Jellyfin sessions cleanly when advancing
 - [ ] Tests: next-episode resolution (last of season, last of series, missing file) and UI behaviour
+
+
+## Plan
+
+Implementation plan: `plans/play-next-episode.md`.
+
+Decisions recorded there: the backend resolves the next episode from Jellyfin's
+series episode list; season 0 specials do not roll into season 1; the lookup is
+best effort and cached per series; the player gets a persistent Up next card and
+a 10-second end overlay with a persisted autoplay toggle; advancing uses
+`replaceHash` so Back returns to the show/season. Credits-based countdown timing
+is owned by `churn-bhfb`.
+
+
+## Sequencing
+
+Do `churn-bhfb` (IntroDB segments) first; this bean is blocked-by it. The
+credits trigger uses `item.segments.outro.startSec` from that bean, falling back
+to `<video>` `ended` when no outro data exists. Plan: `plans/play-next-episode.md`.
