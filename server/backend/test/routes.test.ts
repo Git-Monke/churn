@@ -3923,6 +3923,79 @@ describe("playback", () => {
     await app.close();
   });
 
+  it("offers quality presets and forces a transcode for a chosen tier", async () => {
+    installFetch((url) => {
+      if (url.includes("/PlaybackInfo?")) {
+        return jsonResponse({
+          PlaySessionId: "session-1",
+          MediaSources: [
+            {
+              Id: "source-1",
+              Container: "mp4",
+              Bitrate: 15_000_000,
+              SupportsDirectPlay: true,
+              MediaStreams: [
+                { Type: "Video", Codec: "h264", Height: 1080 },
+                { Type: "Audio", Codec: "aac", Channels: 2 },
+              ],
+            },
+          ],
+        });
+      }
+      if (/\/Items\/item-1\?/.test(url)) {
+        return jsonResponse(playbackItem);
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildAuthedServer(makeConfig());
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/playback/items/item-1?quality=medium",
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.item).toMatchObject({
+      playbackMethod: "hls",
+      directPlay: false,
+      quality: "medium",
+      streamUrl:
+        "/api/playback/items/item-1/hls.m3u8?mediaSourceId=source-1&playSessionId=session-1&quality=medium",
+    });
+    expect(body.item.qualities.map((option: { id: string }) => option.id)).toEqual([
+      "max",
+      "high",
+      "medium",
+      "low",
+    ]);
+
+    const manifest = await app.inject({
+      method: "GET",
+      url: "/api/playback/items/item-1/hls.m3u8?mediaSourceId=source-1&playSessionId=session-1&quality=medium",
+    });
+    expect(manifest.statusCode).toBe(302);
+    const location = String(manifest.headers.location);
+    expect(location).toContain("MaxHeight=720");
+    expect(location).toContain("VideoBitrate=5000000");
+    await app.close();
+  });
+
+  it("rejects an unknown quality", async () => {
+    installFetch(() => {
+      throw new Error("an invalid quality should not reach Jellyfin");
+    });
+    const app = await buildAuthedServer(makeConfig());
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/playback/items/item-1?quality=ultra",
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.code).toBe("invalid_quality");
+    await app.close();
+  });
+
   it("fills missing stream ids from PlaybackInfo", async () => {
     installPlaybackFetch();
     const app = await buildAuthedServer(makeConfig());

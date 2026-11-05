@@ -621,6 +621,18 @@ export interface PlaybackItem {
   mediaSourceId?: string;
   directPlay: boolean;
   playbackMethod: "direct" | "hls";
+  quality: PlaybackQuality;
+  /** Selectable presets for this source; always contains `max`. */
+  qualities: PlaybackQualityOption[];
+}
+
+export type PlaybackQuality = "max" | "high" | "medium" | "low";
+
+export interface PlaybackQualityOption {
+  id: PlaybackQuality;
+  label: string;
+  /** Pre-formatted caps, e.g. "720p · 5 Mbps". */
+  detail: string;
 }
 
 export interface PlaybackItemResponse {
@@ -634,4 +646,5 @@ export interface PlaybackReport {
   playSessionId?: string;
   mediaSourceId?: string;
   isPaused?: boolean;
+  playbackMethod?: "direct" | "hls";
 }

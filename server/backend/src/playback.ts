@@ -10,6 +10,49 @@ import type {
 
 export type PlaybackState = "ok" | "unauthorized" | "unreachable";
 
+export type PlaybackQuality = "max" | "high" | "medium" | "low";
+
+export interface PlaybackQualityOption {
+  id: PlaybackQuality;
+  label: string;
+  /** Pre-formatted caps, e.g. "720p · 5 Mbps". */
+  detail: string;
+}
+
+export interface QualityTranscodeCaps {
+  height: number;
+  bitrate: number;
+}
+
+export const PLAYBACK_QUALITIES: readonly PlaybackQuality[] = [
+  "max",
+  "high",
+  "medium",
+  "low",
+];
+
+/**
+ * Transcode presets offered in the player. `max` is the original file: direct
+ * play when the browser can decode it, otherwise today's source-bitrate
+ * transcode. The other tiers cap both resolution and bitrate; Jellyfin scales
+ * down during the H.264 encode it already does.
+ */
+export const QUALITY_PRESETS: Record<
+  PlaybackQuality,
+  { label: string; maxHeight?: number; bitrate?: number }
+> = {
+  max: { label: "Max" },
+  high: { label: "High", maxHeight: 1080, bitrate: 10_000_000 },
+  medium: { label: "Medium", maxHeight: 720, bitrate: 5_000_000 },
+  low: { label: "Low", maxHeight: 480, bitrate: 2_000_000 },
+};
+
+const DEFAULT_SOURCE_BITRATE = 8_000_000;
+const MIN_TRANSCODE_BITRATE = 1_000_000;
+const MAX_TRANSCODE_BITRATE = 20_000_000;
+const MIN_TRANSCODE_HEIGHT = 240;
+const MAX_TRANSCODE_HEIGHT = 2160;
+
 export interface PlaybackItem {
   id: string;
   type: "Movie" | "Episode";
@@ -30,6 +73,9 @@ export interface PlaybackItem {
   mediaSourceId?: string;
   directPlay: boolean;
   playbackMethod: "direct" | "hls";
+  quality: PlaybackQuality;
+  /** Selectable presets for this source; always contains `max`. */
+  qualities: PlaybackQualityOption[];
 }
 
 export interface PlaybackItemResponse {
@@ -43,6 +89,7 @@ export interface PlaybackReportInput {
   playSessionId?: string;
   mediaSourceId?: string;
   isPaused?: boolean;
+  playbackMethod?: "direct" | "hls";
 }
 
 export interface PlaybackReportBodies {
@@ -85,6 +132,7 @@ export function playbackHlsPath(
   itemId: string,
   mediaSourceId?: string,
   playSessionId?: string,
+  quality?: PlaybackQuality,
 ): string {
   const params = new URLSearchParams();
   if (mediaSourceId) {
@@ -93,8 +141,114 @@ export function playbackHlsPath(
   if (playSessionId) {
     params.set("playSessionId", playSessionId);
   }
+  if (quality && quality !== "max") {
+    params.set("quality", quality);
+  }
   const suffix = params.size > 0 ? `?${params.toString()}` : "";
   return `/api/playback/items/${encodeURIComponent(itemId)}/hls.m3u8${suffix}`;
+}
+
+/** Validate a `quality` query value; missing means the original stream. */
+export function parsePlaybackQuality(value: unknown): PlaybackQuality {
+  if (value === undefined) {
+    return "max";
+  }
+  if (
+    typeof value === "string" &&
+    (PLAYBACK_QUALITIES as readonly string[]).includes(value)
+  ) {
+    return value as PlaybackQuality;
+  }
+  throw new ApiError(
+    400,
+    "invalid_quality",
+    "quality must be max, high, medium or low",
+  );
+}
+
+function sourceBitrate(source: JellyfinMediaSource | undefined): number {
+  const video = source?.MediaStreams?.find((stream) => stream.Type === "Video");
+  return Math.round(
+    source?.Bitrate ?? video?.BitRate ?? DEFAULT_SOURCE_BITRATE,
+  );
+}
+
+/** Caps the original file needs when the browser cannot direct-play it. */
+function sourceTranscodeCaps(
+  source: JellyfinMediaSource | undefined,
+): QualityTranscodeCaps {
+  const video = source?.MediaStreams?.find((stream) => stream.Type === "Video");
+  return {
+    height: clamp(
+      Math.round(video?.Height ?? 1080),
+      MIN_TRANSCODE_HEIGHT,
+      MAX_TRANSCODE_HEIGHT,
+    ),
+    bitrate: clamp(
+      sourceBitrate(source),
+      MIN_TRANSCODE_BITRATE,
+      MAX_TRANSCODE_BITRATE,
+    ),
+  };
+}
+
+/**
+ * Effective transcode caps for a preset. Presets never exceed the source, so a
+ * 10 Mbps tier on a 3 Mbps file encodes at 3 Mbps and a 1080p tier on a 720p
+ * file stays at 720p.
+ */
+export function qualityTranscodeCaps(
+  source: JellyfinMediaSource | undefined,
+  quality: PlaybackQuality = "max",
+): QualityTranscodeCaps {
+  const base = sourceTranscodeCaps(source);
+  const preset = QUALITY_PRESETS[quality];
+  if (preset.maxHeight === undefined || preset.bitrate === undefined) {
+    return base;
+  }
+  return {
+    height: clamp(
+      Math.min(preset.maxHeight, base.height),
+      MIN_TRANSCODE_HEIGHT,
+      MAX_TRANSCODE_HEIGHT,
+    ),
+    bitrate: clamp(
+      Math.min(preset.bitrate, base.bitrate),
+      MIN_TRANSCODE_BITRATE,
+      MAX_TRANSCODE_BITRATE,
+    ),
+  };
+}
+
+/**
+ * Presets worth offering: `max` plus every tier strictly lighter than the
+ * source. A source already below the smallest tier gets no picker.
+ */
+export function availablePlaybackQualities(
+  source: JellyfinMediaSource | undefined,
+): PlaybackQualityOption[] {
+  const originalBitrate = sourceBitrate(source);
+  const options: PlaybackQualityOption[] = [
+    { id: "max", label: QUALITY_PRESETS.max.label, detail: "Original quality" },
+  ];
+  for (const id of ["high", "medium", "low"] as const) {
+    const preset = QUALITY_PRESETS[id];
+    if (preset.bitrate === undefined || preset.bitrate >= originalBitrate) {
+      continue;
+    }
+    options.push({
+      id,
+      label: preset.label,
+      detail: formatQualityDetail(qualityTranscodeCaps(source, id)),
+    });
+  }
+  return options;
+}
+
+function formatQualityDetail(caps: QualityTranscodeCaps): string {
+  const mbps = caps.bitrate / 1_000_000;
+  const bitrate = Number.isInteger(mbps) ? String(mbps) : mbps.toFixed(1);
+  return `${caps.height}p · ${bitrate} Mbps`;
 }
 
 /**
@@ -179,17 +333,11 @@ export function buildJellyfinHlsUrl(
   source: JellyfinMediaSource | undefined,
   playSessionId: string | undefined,
   token: string,
+  quality: PlaybackQuality = "max",
 ): string {
-  const video = source?.MediaStreams?.find((stream) => stream.Type === "Video");
-  const maxHeight = clamp(
-    Math.round(video?.Height ?? 1080),
-    240,
-    2160,
-  );
-  const videoBitrate = clamp(
-    Math.round(source?.Bitrate ?? video?.BitRate ?? 8_000_000),
-    1_000_000,
-    20_000_000,
+  const { height: maxHeight, bitrate: videoBitrate } = qualityTranscodeCaps(
+    source,
+    quality,
   );
 
   const params = new URLSearchParams({
@@ -234,6 +382,7 @@ export function mapPlaybackItem(
   playSessionId: string | undefined,
   streamUrl: string,
   directPlay = canBrowserDirectPlay(source),
+  quality: PlaybackQuality = "max",
 ): PlaybackItem | null {
   if (
     !item.Id ||
@@ -251,6 +400,8 @@ export function mapPlaybackItem(
     streamUrl,
     directPlay,
     playbackMethod: directPlay ? "direct" : "hls",
+    quality,
+    qualities: availablePlaybackQualities(source),
   };
 
   assignIfDefined(playback, "seriesName", item.SeriesName);
@@ -321,6 +472,16 @@ export function parsePlaybackReport(body: unknown): PlaybackReportInput {
     }
     report.isPaused = input.isPaused;
   }
+  if (input.playbackMethod !== undefined) {
+    if (input.playbackMethod !== "direct" && input.playbackMethod !== "hls") {
+      throw new ApiError(
+        400,
+        "invalid_playback_report",
+        "playbackMethod must be direct or hls",
+      );
+    }
+    report.playbackMethod = input.playbackMethod;
+  }
 
   return report;
 }
@@ -336,7 +497,11 @@ export function playbackReportBodies(
     PositionTicks: input.positionTicks,
     CanSeek: true,
     IsMuted: false,
-    PlayMethod: "DirectPlay" as const,
+    // HLS sessions are Jellyfin transcodes; saying DirectPlay would make the
+    // dashboard claim the original file is being streamed.
+    PlayMethod: (input.playbackMethod === "hls"
+      ? "Transcode"
+      : "DirectPlay") as "DirectPlay" | "Transcode",
   };
   const isPaused = input.isPaused ?? false;
 

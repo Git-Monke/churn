@@ -22,6 +22,7 @@ import type {
   MovieDetailResponse,
   MovieDownloadResponse,
   PlaybackItemResponse,
+  PlaybackQuality,
   PlaybackReport,
   RequestedLibraryResponse,
   RequestOptionsResponse,
@@ -202,9 +203,14 @@ export function fetchShowDownloads(
   );
 }
 
-export function fetchPlayback(itemId: string): Promise<PlaybackItemResponse> {
+export function fetchPlayback(
+  itemId: string,
+  quality?: PlaybackQuality,
+): Promise<PlaybackItemResponse> {
+  const suffix =
+    quality && quality !== "max" ? `?quality=${encodeURIComponent(quality)}` : "";
   return getJson<PlaybackItemResponse>(
-    `/api/playback/items/${encodeURIComponent(itemId)}`,
+    `/api/playback/items/${encodeURIComponent(itemId)}${suffix}`,
   );
 }
 

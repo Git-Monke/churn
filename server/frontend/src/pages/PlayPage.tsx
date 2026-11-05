@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type Hls from "hls.js";
+import { toast } from "sonner";
 import {
   ChevronLeftIcon,
   CircleAlertIcon,
+  LoaderCircleIcon,
   PlayIcon,
   TriangleAlertIcon,
 } from "lucide-react";
@@ -14,11 +16,22 @@ import {
   reportPlaybackStart,
   reportPlaybackStop,
 } from "@/api/client";
-import type { PlaybackItem, PlaybackReport } from "@/api/types";
+import type {
+  PlaybackItem,
+  PlaybackQuality,
+  PlaybackReport,
+} from "@/api/types";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 
 const TICKS_PER_SECOND = 10_000_000;
@@ -34,10 +47,14 @@ type MediaIssue = "codec" | "stream";
 
 export function PlayPage({ id }: { id: string }) {
   const queryClient = useQueryClient();
+  const [quality, setQuality] = useState<PlaybackQuality>("max");
   const playbackQuery = useQuery({
-    queryKey: ["playback", id],
-    queryFn: () => fetchPlayback(id),
+    queryKey: ["playback", id, quality],
+    queryFn: () => fetchPlayback(id, quality),
     retry: false,
+    // Keep the current stream on screen while a new quality is fetched instead
+    // of dropping back to the loading skeleton.
+    placeholderData: (previous) => previous,
   });
 
   const item = playbackQuery.data?.item;
@@ -48,6 +65,14 @@ export function PlayPage({ id }: { id: string }) {
   const startedRef = useRef(false);
   const stoppedRef = useRef(false);
   const resumeAppliedRef = useRef(false);
+  // Set when a quality switch is requested; the next stream starts here.
+  const qualitySwitchRef = useRef<{
+    quality: PlaybackQuality;
+    ticks: number;
+    paused: boolean;
+    previous?: PlaybackItem;
+  } | null>(null);
+  const [switchingQuality, setSwitchingQuality] = useState(false);
   const [resumed, setResumed] = useState(false);
   const [mediaIssue, setMediaIssue] = useState<MediaIssue | null>(null);
   const [recovering, setRecovering] = useState(false);
@@ -62,6 +87,50 @@ export function PlayPage({ id }: { id: string }) {
   const recoveryTimerRef = useRef<number | null>(null);
 
   itemRef.current = item;
+
+  // Finish a quality switch once the backend answers with the new stream: the
+  // previous Jellyfin play session is stopped and the new one starts at the
+  // position the old stream had reached.
+  useEffect(() => {
+    const pending = qualitySwitchRef.current;
+    const current = itemRef.current;
+    if (!pending || !current || current.quality !== pending.quality) {
+      return;
+    }
+    if (startedRef.current) {
+      if (
+        pending.previous &&
+        pending.previous.playSessionId !== current.playSessionId
+      ) {
+        void reportPlaybackStop(
+          pending.previous.id,
+          reportBody(pending.previous, pending.ticks, true),
+        ).catch(() => {
+          // The old session may already be gone; nothing to clean up.
+        });
+      }
+      void reportPlaybackStart(
+        current.id,
+        reportBody(current, pending.ticks, false),
+      ).catch(() => {
+        // Reporting is best-effort; the new stream keeps playing.
+      });
+    }
+    setSwitchingQuality(false);
+  }, [item?.streamUrl, item?.quality]);
+
+  // A failed quality switch keeps the current stream and reverts the picker.
+  useEffect(() => {
+    if (!playbackQuery.error || !item || !qualitySwitchRef.current) {
+      return;
+    }
+    qualitySwitchRef.current = null;
+    setSwitchingQuality(false);
+    setQuality(item.quality);
+    toast.error("Could not switch quality", {
+      description: playbackQuery.error.message,
+    });
+  }, [playbackQuery.error, item?.quality]);
 
   const reportProgress = useCallback((isPaused: boolean) => {
     const current = itemRef.current;
@@ -203,22 +272,49 @@ export function PlayPage({ id }: { id: string }) {
 
     const activeRecovery =
       recovery?.itemId === item.id ? recovery : undefined;
-    const targetSeconds = activeRecovery
-      ? activeRecovery.targetTicks / TICKS_PER_SECOND
-      : undefined;
-
-    setMediaIssue(null);
+    // A quality switch starts the new transcode at the position the old stream
+    // reached. The ref stays until consumed so the direct-play path can seek on
+    // its own `loadedmetadata`.
+    const pendingSwitch =
+      qualitySwitchRef.current?.quality === item.quality
+        ? qualitySwitchRef.current
+        : undefined;
+    const targetTicks = activeRecovery?.targetTicks ?? pendingSwitch?.ticks;
+    const targetSeconds =
+      targetTicks !== undefined ? targetTicks / TICKS_PER_SECOND : undefined;
+    // A paused player stays paused across a quality switch; error recovery
+    // always resumes.
+    const autoplay = pendingSwitch ? !pendingSwitch.paused : true;
+    if (pendingSwitch) {
+      qualitySwitchRef.current = null;
+    }
 
     if (video.canPlayType("application/vnd.apple.mpegurl")) {
       video.src = item.streamUrl;
-      if (targetSeconds !== undefined) {
+      let disposed = false;
+      const seekAndPlay = () => {
+        if (disposed || targetSeconds === undefined) {
+          return;
+        }
         try {
           video.currentTime = targetSeconds;
         } catch {
           // Not seekable until metadata is ready.
         }
+        if (autoplay) {
+          void video.play().catch(() => {
+            // The controls remain available if autoplay is blocked.
+          });
+        }
+      };
+      if (video.readyState >= 1) {
+        seekAndPlay();
+      } else {
+        video.addEventListener("loadedmetadata", seekAndPlay, { once: true });
       }
       return () => {
+        disposed = true;
+        video.removeEventListener("loadedmetadata", seekAndPlay);
         video.removeAttribute("src");
         video.load();
       };
@@ -247,7 +343,7 @@ export function PlayPage({ id }: { id: string }) {
         hlsRef.current = hls;
         hls.loadSource(item.streamUrl);
         hls.attachMedia(video);
-        if (targetSeconds !== undefined) {
+        if (targetSeconds !== undefined && autoplay) {
           hls.on(HlsConstructor.Events.MANIFEST_PARSED, () => {
             void video.play().catch(() => {
               // The element may still be waiting for the first fragment.
@@ -344,7 +440,23 @@ export function PlayPage({ id }: { id: string }) {
 
   function handleLoadedMetadata() {
     const video = videoRef.current;
-    if (!video || !item || resumeAppliedRef.current) {
+    if (!video) {
+      return;
+    }
+    const pendingSwitch = qualitySwitchRef.current;
+    if (pendingSwitch) {
+      qualitySwitchRef.current = null;
+      resumeAppliedRef.current = true;
+      seekTo(video, pendingSwitch.ticks);
+      positionRef.current = pendingSwitch.ticks;
+      if (!pendingSwitch.paused) {
+        void video.play().catch(() => {
+          // The controls remain available if autoplay is blocked.
+        });
+      }
+      return;
+    }
+    if (!item || resumeAppliedRef.current) {
       return;
     }
     resumeAppliedRef.current = true;
@@ -361,6 +473,27 @@ export function PlayPage({ id }: { id: string }) {
       positionRef.current = Math.round(resumeSeconds * TICKS_PER_SECOND);
       setResumed(true);
     }
+  }
+
+  function handleQualityChange(value: string) {
+    const next = value as PlaybackQuality;
+    if (!item || next === quality || next === item.quality) {
+      return;
+    }
+    const video = videoRef.current;
+    const ticks =
+      video && Number.isFinite(video.currentTime)
+        ? Math.round(video.currentTime * TICKS_PER_SECOND)
+        : positionRef.current;
+    qualitySwitchRef.current = {
+      quality: next,
+      ticks,
+      paused: video?.paused ?? true,
+      previous: item,
+    };
+    setMediaIssue(null);
+    setSwitchingQuality(true);
+    setQuality(next);
   }
 
   function handlePlay() {
@@ -484,6 +617,10 @@ export function PlayPage({ id }: { id: string }) {
     );
   }
 
+  const appliedQuality = item.qualities.find(
+    (option) => option.id === item.quality,
+  );
+
   return (
     <div className="flex flex-col gap-6">
       <a
@@ -538,10 +675,15 @@ export function PlayPage({ id }: { id: string }) {
       {item.playbackMethod === "hls" ? (
         <Alert>
           <TriangleAlertIcon />
-          <AlertTitle>Transcoding for browser playback</AlertTitle>
+          <AlertTitle>
+            {appliedQuality && item.quality !== "max"
+              ? `Streaming at ${appliedQuality.label}`
+              : "Transcoding for browser playback"}
+          </AlertTitle>
           <AlertDescription>
-            Jellyfin is converting this file to a browser-compatible stream.
-            Audio and video may take a moment to start.
+            {appliedQuality && item.quality !== "max"
+              ? `Jellyfin is transcoding this file to ${appliedQuality.detail} so it uses less bandwidth. Audio and video may take a moment to start.`
+              : "Jellyfin is converting this file to a browser-compatible stream. Audio and video may take a moment to start."}
           </AlertDescription>
         </Alert>
       ) : null}
@@ -609,6 +751,38 @@ export function PlayPage({ id }: { id: string }) {
           onError={handleVideoError}
         />
       </Card>
+
+      {item.qualities.length > 1 ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm text-muted-foreground">Quality</span>
+          <Select value={quality} onValueChange={handleQualityChange}>
+            <SelectTrigger
+              size="sm"
+              className="w-48"
+              aria-label="Playback quality"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {item.qualities.map((option) => (
+                <SelectItem key={option.id} value={option.id}>
+                  {option.label} — {option.detail}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {switchingQuality ? (
+            <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+              <LoaderCircleIcon className="size-3.5 animate-spin" />
+              Switching quality…
+            </span>
+          ) : appliedQuality && item.quality !== "max" ? (
+            <span className="text-sm text-muted-foreground">
+              Streaming at {appliedQuality.label} — {appliedQuality.detail}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
         <PlayIcon className="size-3.5" />
@@ -678,7 +852,20 @@ function reportBody(
     mediaSourceId: item.mediaSourceId,
     playSessionId: item.playSessionId,
     isPaused,
+    playbackMethod: item.playbackMethod,
   };
+}
+
+function seekTo(video: HTMLVideoElement, ticks: number): void {
+  const seconds = ticks / TICKS_PER_SECOND;
+  if (Number.isFinite(video.duration) && seconds >= video.duration - 1) {
+    return;
+  }
+  try {
+    video.currentTime = seconds;
+  } catch {
+    // Not seekable until the new media source has metadata.
+  }
 }
 
 function sendStopBeacon(item: PlaybackItem, positionTicks: number): void {

@@ -94,7 +94,7 @@ export interface PlaybackStartInfo {
   CanSeek: boolean;
   IsPaused: boolean;
   IsMuted: boolean;
-  PlayMethod: "DirectPlay";
+  PlayMethod: "DirectPlay" | "Transcode";
 }
 
 export interface PlaybackProgressInfo extends PlaybackStartInfo {}

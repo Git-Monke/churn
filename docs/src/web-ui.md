@@ -147,9 +147,9 @@ uses the signed-in user's Jellyfin session token rather than a static token in
 | `POST /api/library/shows/:source/:id/releases/refresh?season=N` | Start a fresh Prowlarr search |
 | `POST /api/library/shows/:source/:id/releases/grab` | Send the chosen torrent or magnet directly to qBittorrent |
 | `DELETE /api/library/shows/sonarr/:id/episodes/:season/:episode/download` | Cancel one episode's active download and blocklist the release |
-| `GET /api/playback/items/:itemId` | Playable item metadata, resume position and same-origin stream URL |
+| `GET /api/playback/items/:itemId` | Playable item metadata, resume position, quality presets and same-origin stream URL; `?quality=max\|high\|medium\|low` |
 | `GET /api/playback/items/:itemId/stream` | Redirect the media element to Jellyfin's direct stream URL for this session |
-| `GET /api/playback/items/:itemId/hls.m3u8` | Redirect to a Jellyfin HLS transcode (H.264/AAC) when the source is not browser-compatible |
+| `GET /api/playback/items/:itemId/hls.m3u8` | Redirect to a Jellyfin HLS transcode (H.264/AAC) when the source is not browser-compatible; honours `?quality=` |
 | `POST /api/playback/items/:itemId/start` | Report playback start to Jellyfin |
 | `POST /api/playback/items/:itemId/progress` | Report position and paused state to Jellyfin |
 | `POST /api/playback/items/:itemId/stop` | Report playback stop to Jellyfin |
@@ -377,6 +377,25 @@ browser cannot decode (for example HEVC/AC3 in an MKV) use
 `/api/playback/items/:itemId/hls.m3u8`, which redirects to a Jellyfin HLS
 transcode with H.264 video and AAC stereo audio at the source resolution. The
 frontend plays HLS with `hls.js` and falls back to native HLS when available.
+
+The player has a **Quality** picker for slow connections.
+`GET /api/playback/items/:itemId?quality=` accepts `max` (default), `high`
+(1080p, 10 Mbps), `medium` (720p, 5 Mbps) and `low` (480p, 2 Mbps). `max` keeps
+the original stream and may direct-play; any other preset always transcodes and
+caps both `MaxHeight` and `VideoBitrate` in the Jellyfin request, so Jellyfin
+downscales a 1080p file to 720p during the encode it already runs. Presets never
+exceed the source: a 3 Mbps file at `high` encodes at 3 Mbps, and presets at or
+above the source bitrate are not offered at all (a file below 2 Mbps shows no
+picker). The HLS route accepts the same `quality` parameter.
+
+The response advertises the applied `quality` and the selectable `qualities`,
+so the UI needs no preset table of its own. Switching quality mid-playback asks
+for a new item (fresh `PlaySessionId`, because Jellyfin keys transcoding jobs by
+session), rebuilds the HLS pipeline at the current position, stops the old
+Jellyfin session and reports the new one; playback continues without a page
+reload and a paused player stays paused. A switched tier also reports
+`PlayMethod: Transcode` so Jellyfin's dashboard shows the real method instead of
+claiming DirectPlay.
 
 If Jellyfin's transcode job stops because the source file has a damaged
 section, the player retries transient network and media errors in place. If the
