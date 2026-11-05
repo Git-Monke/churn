@@ -297,8 +297,7 @@ The wiring is automatic on first `docker compose up`:
    - creates the qBittorrent categories `prowlarr`, `tv` and `movies`;
    - registers qBittorrent in Prowlarr as a download client (category `prowlarr`);
    - adds and enables the public indexers `EZTV`, `YTS`, `The Pirate Bay`,
-     `1337x`, `LimeTorrents`, `Torrent Downloads`, `TorrentDownload` and
-     `Uindex`;
+     `1337x`, `LimeTorrents`, `Torrent Downloads` and `Uindex`;
    - registers FlareSolverr as a Prowlarr indexer proxy and tags the managed
      indexers so Cloudflare-protected sites such as EZTV work;
    - registers Sonarr and Radarr as Prowlarr applications, so Prowlarr pushes
@@ -338,7 +337,7 @@ The default public indexers need no accounts and are enough to get started.
 Override them with a comma-separated list in `torrent/.env`:
 
 ```bash
-PROWLARR_INDEXERS=eztv,yts,thepiratebay,1337x,limetorrents,torrentdownloads,torrentdownload,uindex
+PROWLARR_INDEXERS=eztv,yts,thepiratebay,1337x,limetorrents,torrentdownloads,uindex
 ```
 
 Supported keys are `1337x`, `eztv`, `yts`, `thepiratebay`, `limetorrents`,

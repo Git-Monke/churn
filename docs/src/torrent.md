@@ -72,8 +72,8 @@ other machines, bind the published port to
 `prowlarr-init` is idempotent. It creates the `prowlarr`, `tv`, and `movies`
 qBittorrent categories, registers qBittorrent in Prowlarr, adds enabled public
 indexers, connects FlareSolverr, and links Sonarr and Radarr. The default
-indexers are EZTV, YTS, The Pirate Bay, 1337x, LimeTorrents, Torrent Downloads,
-TorrentDownload and Uindex; override them with `PROWLARR_INDEXERS`. It reads
+indexers are EZTV, YTS, The Pirate Bay, 1337x, LimeTorrents, Torrent Downloads
+and Uindex; override them with `PROWLARR_INDEXERS`. It reads
 their API keys from `../server/config`, so the current setup expects both
 stacks on the same host. The Sonarr/Radarr application sync categories only
 include normal TV and movie categories, excluding the adult XXX (`6000`-series)

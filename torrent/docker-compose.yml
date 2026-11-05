@@ -164,7 +164,7 @@ services:
       - SONARR_URL=http://${HOST_IP}:${SONARR_PORT:-8989}
       - RADARR_URL=http://${HOST_IP}:${RADARR_PORT:-7878}
       - FLARESOLVERR_URL=${FLARESOLVERR_URL:-http://localhost:8191}
-      - PROWLARR_INDEXERS=${PROWLARR_INDEXERS:-eztv,yts,thepiratebay,1337x,limetorrents,torrentdownloads,torrentdownload,uindex}
+      - PROWLARR_INDEXERS=${PROWLARR_INDEXERS:-eztv,yts,thepiratebay,1337x,limetorrents,torrentdownloads,uindex}
     depends_on:
       gluetun:
         condition: service_healthy

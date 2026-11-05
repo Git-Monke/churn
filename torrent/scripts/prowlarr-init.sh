@@ -8,8 +8,7 @@
 #   * creates the qBittorrent categories (`prowlarr`, `tv`, `movies`),
 #   * registers qBittorrent as a Prowlarr download client,
 #   * enables a set of public indexers (EZTV, YTS, The Pirate Bay, 1337x,
-#     LimeTorrents, Torrent Downloads, TorrentDownload and Uindex) so searches
-#     work immediately,
+#     LimeTorrents, Torrent Downloads and Uindex) so searches work immediately,
 #   * registers Sonarr and Radarr as Prowlarr applications (so Prowlarr pushes
 #     its indexers to them) and keeps their sync categories free of adult
 #     6000-series categories,
@@ -446,7 +445,7 @@ EOF
 # SERVER_COUNTRIES from the selected Mullvad config; override it in torrent/.env.
 #
 # Override with PROWLARR_INDEXERS in torrent/.env, e.g. "eztv,yts".
-indexers=$(printf '%s' "${PROWLARR_INDEXERS:-eztv,yts,thepiratebay,1337x,limetorrents,torrentdownloads,torrentdownload,uindex}" | tr -d '[:space:]')
+indexers=$(printf '%s' "${PROWLARR_INDEXERS:-eztv,yts,thepiratebay,1337x,limetorrents,torrentdownloads,uindex}" | tr -d '[:space:]')
 old_ifs=$IFS
 IFS=,
 for indexer in $indexers; do
