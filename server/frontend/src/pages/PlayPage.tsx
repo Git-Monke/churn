@@ -234,6 +234,7 @@ export function PlayPage({ id, from }: { id: string; from?: ShowReturnContext })
       void reportPlaybackStop(current.id, body)
         .then(() => {
           void queryClient.invalidateQueries({ queryKey: ["playback", current.id] });
+          void queryClient.invalidateQueries({ queryKey: ["resume"] });
         })
         .catch(() => {
           // The session may have expired; the player already has what it needs.
@@ -524,6 +525,7 @@ export function PlayPage({ id, from }: { id: string; from?: ShowReturnContext })
       const currentItem = itemRef.current;
       if (currentItem) {
         void queryClient.invalidateQueries({ queryKey: ["playback", currentItem.id] });
+        void queryClient.invalidateQueries({ queryKey: ["resume"] });
       }
     };
   }, [queryClient]);

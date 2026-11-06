@@ -48,6 +48,8 @@ export interface JellyfinItem {
   ProviderIds?: Record<string, string>;
   UserData?: {
     PlaybackPositionTicks?: number;
+    /** Jellyfin's own percentage; present on resume-list items. */
+    PlayedPercentage?: number;
     Played?: boolean;
     PlayCount?: number;
     LastPlayedDate?: string;
@@ -55,6 +57,9 @@ export interface JellyfinItem {
   ImageTags?: {
     Primary?: string;
   };
+  BackdropImageTags?: string[];
+  /** Poster tag of the series an episode belongs to. */
+  SeriesPrimaryImageTag?: string;
 }
 
 export interface JellyfinMediaStream {
@@ -112,7 +117,11 @@ interface JellyfinItemsResponse {
   TotalRecordCount?: number;
 }
 
+export type JellyfinImageType = "Primary" | "Backdrop";
+
 export interface JellyfinImageQuery {
+  /** Defaults to the poster/thumbnail (`Primary`). */
+  type?: JellyfinImageType;
   tag?: string;
   maxWidth?: number;
   maxHeight?: number;
@@ -149,6 +158,8 @@ const LIBRARY_QUERY = new URLSearchParams({
   EnableImageTypes: "Primary",
 });
 const DETAIL_FIELDS = "ProductionYear,RunTimeTicks,CommunityRating,OfficialRating,Genres,Overview,ProviderIds";
+const RESUME_FIELDS =
+  "RunTimeTicks,SeriesId,ParentIndexNumber,IndexNumber,ImageTags,BackdropImageTags,SeriesPrimaryImageTag";
 
 export function createJellyfinClient(
   config: ServiceConfig,
@@ -328,6 +339,34 @@ export function createJellyfinClient(
       });
     },
 
+    /**
+     * Jellyfin's per-user resume list: partly watched movies and episodes,
+     * newest first, already excluding finished items. `UserItems/Resume` is the
+     * route Jellyfin 10.11 serves; the legacy `Users/{id}/Items/Resume` returns
+     * the same body.
+     */
+    async listResumeItems(userId: string, limit: number): Promise<JellyfinItem[]> {
+      if (!token) {
+        throw new UpstreamError("jellyfin", "unauthorized", "Jellyfin API key is not configured");
+      }
+      const query = new URLSearchParams({
+        userId,
+        Limit: String(limit),
+        MediaTypes: "Video",
+        SortBy: "DatePlayed",
+        SortOrder: "Descending",
+        Fields: RESUME_FIELDS,
+        ImageTypeLimit: "1",
+        EnableImageTypes: "Primary,Backdrop",
+      });
+      const response = await fetchJson<JellyfinItemsResponse>(
+        "jellyfin",
+        `${config.url}/UserItems/Resume?${query.toString()}`,
+        { timeoutMs, headers: authHeaders() },
+      );
+      return response.Items ?? [];
+    },
+
     async getItem(itemId: string, userId?: string): Promise<JellyfinItem> {
       if (!token) {
         throw new UpstreamError("jellyfin", "unauthorized", "Jellyfin API key is not configured");
@@ -445,7 +484,7 @@ export function createJellyfinClient(
       }
     },
 
-    async getPrimaryImage(itemId: string, query: JellyfinImageQuery): Promise<JellyfinImage | null> {
+    async getItemImage(itemId: string, query: JellyfinImageQuery): Promise<JellyfinImage | null> {
       if (!token) {
         throw new UpstreamError("jellyfin", "unauthorized", "Jellyfin API key is not configured");
       }
@@ -454,7 +493,10 @@ export function createJellyfinClient(
       if (query.maxWidth !== undefined) params.set("maxWidth", String(query.maxWidth));
       if (query.maxHeight !== undefined) params.set("maxHeight", String(query.maxHeight));
       const suffix = params.size > 0 ? `?${params.toString()}` : "";
-      const url = `${config.url}/Items/${encodeURIComponent(itemId)}/Images/Primary${suffix}`;
+      // A backdrop image is always the first one; Jellyfin rejects
+      // `Images/Backdrop` without an index.
+      const imageType = query.type === "Backdrop" ? "Backdrop/0" : "Primary";
+      const url = `${config.url}/Items/${encodeURIComponent(itemId)}/Images/${imageType}${suffix}`;
 
       const response = await fetchWithTimeout(
         "jellyfin",

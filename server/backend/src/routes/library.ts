@@ -5,6 +5,11 @@ import type { AppConfig } from "../config.js";
 import { ApiError, isUnauthorized, UpstreamError } from "../errors.js";
 import type { MediaAttributionStore } from "../media-attribution.js";
 import type { ReleaseSearchService } from "../release-search.js";
+import {
+  continueWatchingResponse,
+  mapResumeItems,
+  RESUME_FETCH_LIMIT,
+} from "../resume.js";
 import type {
   CancelJellyfinItemResponse,
   LibraryItem,
@@ -15,6 +20,7 @@ import {
   createJellyfinClient,
   mapJellyfinItem,
   type JellyfinImageQuery,
+  type JellyfinImageType,
   type JellyfinItem,
 } from "../upstream/jellyfin.js";
 import {
@@ -76,6 +82,45 @@ export function registerLibraryRoutes(
       }
       if (error instanceof UpstreamError) {
         return emptyLibrary(libraryStateForError(error), error.message);
+      }
+      throw error;
+    }
+  });
+
+  /**
+   * Continue watching: Jellyfin's own per-user resume list. The user's token is
+   * forwarded, so each profile sees its own progress and nothing is persisted
+   * in Churn.
+   */
+  app.get("/api/library/resume", async (request, reply) => {
+    reply.header("cache-control", "no-store");
+    const auth = requireAuth(request);
+    const service = config.services.jellyfin;
+    if (!service.apiKey) {
+      return continueWatchingResponse(
+        "unconfigured",
+        [],
+        "Set JELLYFIN_API_KEY in server/.env to load continue watching",
+      );
+    }
+    const client = createJellyfinClient(service, config.requestTimeoutMs, auth.accessToken, {
+      deviceId: auth.deviceId,
+    });
+
+    try {
+      const upstreamItems = await client.listResumeItems(auth.user.id, RESUME_FETCH_LIMIT);
+      return continueWatchingResponse("ok", mapResumeItems(upstreamItems));
+    } catch (error) {
+      if (isUnauthorized(error)) {
+        expireSession(request);
+        throw new ApiError(
+          401,
+          "session_expired",
+          "Your Jellyfin session expired. Sign in again.",
+        );
+      }
+      if (error instanceof UpstreamError) {
+        return continueWatchingResponse(libraryStateForError(error), [], error.message);
       }
       throw error;
     }
@@ -170,7 +215,7 @@ export function registerLibraryRoutes(
       deviceId: auth.deviceId,
     });
       try {
-        const image = await client.getPrimaryImage(itemId, query);
+        const image = await client.getItemImage(itemId, query);
         if (!image) {
           throw new ApiError(404, "image_not_found", "Image not found");
         }
@@ -228,10 +273,21 @@ function parseProviderId(value: string | undefined): number | undefined {
 }
 
 function parseImageQuery(query: Record<string, unknown>): JellyfinImageQuery {
+  const type = parseImageType(query.type);
   const tag = optionalString(query.tag, "tag", /^[A-Za-z0-9._~-]{1,128}$/);
   const maxWidth = optionalSize(query.maxWidth, "maxWidth");
   const maxHeight = optionalSize(query.maxHeight, "maxHeight");
-  return { tag, maxWidth, maxHeight };
+  return { type, tag, maxWidth, maxHeight };
+}
+
+function parseImageType(value: unknown): JellyfinImageType | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === "Primary" || value === "Backdrop") {
+    return value;
+  }
+  throw new ApiError(400, "invalid_query", "type must be Primary or Backdrop");
 }
 
 function optionalString(value: unknown, name: string, pattern: RegExp): string | undefined {

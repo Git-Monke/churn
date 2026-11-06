@@ -1,52 +1,20 @@
 import { PlayIcon } from "lucide-react";
 
 import { Progress } from "@/components/ui/progress";
-
-export interface ContinueWatchingItem {
-  id: string;
-  /** Show name for episodes, movie title for films. */
-  title: string;
-  /** `S3 · E5 · 14 min left` for episodes, `48 min left` for movies. */
-  resumeLabel: string;
-  /** Played percentage, 0–100. */
-  progress: number;
-  /** Optional still; the card falls back to a token-coloured placeholder. */
-  imageUrl?: string;
-  /** Present once real resume data (and therefore a playable item id) exists. */
-  href?: string;
-}
+import {
+  toContinueWatchingCards,
+  type ContinueWatchingCard,
+} from "@/features/library/continue-watching-items";
+import { useContinueWatching } from "@/features/library/use-continue-watching";
 
 /**
- * Placeholder resume list: the backend does not proxy Jellyfin's
- * `UserItems/Resume` yet. Tracked as a follow-up bean; swap this for the real
- * query (`fetchResume`) once the route lands.
+ * Jellyfin's per-user resume list: the last episode in progress per show plus
+ * partly watched movies. The row is hidden entirely when there is nothing to
+ * resume (or when Jellyfin is unreachable).
  */
-const MOCK_CONTINUE_WATCHING: ContinueWatchingItem[] = [
-  {
-    id: "mock-parks-and-recreation",
-    title: "Parks and Recreation",
-    resumeLabel: "S3 · E5 · 14 min left",
-    progress: 45,
-  },
-  {
-    id: "mock-30-rock",
-    title: "30 Rock",
-    resumeLabel: "S1 · E8 · 16 min left",
-    progress: 28,
-  },
-  {
-    id: "mock-ninja-scroll",
-    title: "Ninja Scroll",
-    resumeLabel: "48 min left",
-    progress: 52,
-  },
-];
+export function ContinueWatching() {
+  const items = toContinueWatchingCards(useContinueWatching());
 
-export function ContinueWatching({
-  items = MOCK_CONTINUE_WATCHING,
-}: {
-  items?: ContinueWatchingItem[];
-}) {
   if (items.length === 0) {
     return null;
   }
@@ -62,7 +30,7 @@ export function ContinueWatching({
       <ul className="flex gap-5 overflow-x-auto pb-1">
         {items.map((item) => (
           <li key={item.id} className="w-85 shrink-0">
-            <ContinueWatchingCard item={item} />
+            <ResumeCard item={item} />
           </li>
         ))}
       </ul>
@@ -70,9 +38,12 @@ export function ContinueWatching({
   );
 }
 
-function ContinueWatchingCard({ item }: { item: ContinueWatchingItem }) {
-  const body = (
-    <>
+function ResumeCard({ item }: { item: ContinueWatchingCard }) {
+  return (
+    <a
+      href={item.href}
+      className="group flex h-full flex-col gap-3 rounded-lg transition-transform hover:-translate-y-0.5 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+    >
       <div className="relative aspect-video overflow-hidden rounded-lg bg-secondary">
         {item.imageUrl ? (
           <img
@@ -99,19 +70,6 @@ function ContinueWatchingCard({ item }: { item: ContinueWatchingItem }) {
         <span className="truncate font-medium">{item.title}</span>
         <span className="text-sm text-muted-foreground">{item.resumeLabel}</span>
       </div>
-    </>
-  );
-
-  const className =
-    "group flex h-full flex-col gap-3 rounded-lg transition-transform focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none";
-
-  if (!item.href) {
-    return <div className={className}>{body}</div>;
-  }
-
-  return (
-    <a href={item.href} className={`${className} hover:-translate-y-0.5`}>
-      {body}
     </a>
   );
 }

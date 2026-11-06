@@ -143,7 +143,8 @@ uses the signed-in user's Jellyfin session token rather than a static token in
 | `GET /api/status` | Service health, version and latency |
 | `GET /api/vpn` | On-demand VPN leak test from the torrent stack's protected namespace |
 | `GET /api/library` | Jellyfin movies and series with provider ids and `addedBy`, scoped to the user's library views |
-| `GET /api/library/images/:itemId` | Poster proxy |
+| `GET /api/library/images/:itemId` | Image proxy for posters, episode stills and 16:9 backdrops; `?tag=`, `?type=Primary\|Backdrop`, `?maxWidth=`, `?maxHeight=` |
+| `GET /api/library/resume` | Continue watching: the signed-in user's own Jellyfin resume list, one card per series |
 | `GET /api/library/requested` | Sonarr/Radarr library titles with `addedBy`, including requested items not yet downloaded |
 | `DELETE /api/library/requested/:service/:id` | Cancel queue items, delete the title (and files) from the arr, remove matching qBittorrent torrents, refresh Jellyfin |
 | `DELETE /api/library/jellyfin/:itemId` | Delete a Jellyfin-only movie/show and its files, or use the matching arr title when one is found |
@@ -287,6 +288,18 @@ arr catalog) and `/api/activity` (qBittorrent):
 - active downloads sort before available titles;
 - qBittorrent failures show a download notice without hiding Jellyfin, and arr
   failures only affect release search/request actions.
+
+**Continue watching** sits above the toolbar and reads Jellyfin's own per-user
+resume list (`/UserItems/Resume`) with the signed-in user's token, so every
+profile sees its own progress and nothing is stored in Churn. A partly watched
+show can appear once per episode upstream, so the backend keeps only the most
+recently played episode per series and drops finished items; Jellyfin remains the
+source of truth. Cards show a 16:9 still (episode screenshot, or a movie backdrop
+capped with `maxWidth`), the played percentage and `S1 · E6 · 24 min left`.
+Clicking one resumes the item in the player, and episodes carry their show and
+season in the back-link (`#/play/<itemId>?source=jellyfin&show=<id>&season=<n>`).
+The row hides itself when the list is empty, when nobody is signed in, or when
+Jellyfin is unreachable; the rest of Library is unaffected.
 
 The Library toolbar has a search box that filters the grid in the browser: no
 API call, no navigation. It matches every word of the query against the title,

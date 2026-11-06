@@ -15,6 +15,7 @@ import type {
   CreateRequestInput,
   CreateRequestResponse,
   CachedReleasesResponse,
+  ContinueWatchingResponse,
   GrabMovieReleaseInput,
   GrabShowReleaseInput,
   GrabShowReleaseResponse,
@@ -137,6 +138,10 @@ export function fetchVpnStatus(): Promise<VpnStatusResponse> {
 
 export function fetchLibrary(): Promise<LibraryResponse> {
   return getJson<LibraryResponse>("/api/library");
+}
+
+export function fetchResume(): Promise<ContinueWatchingResponse> {
+  return getJson<ContinueWatchingResponse>("/api/library/resume");
 }
 
 export function fetchRequestedLibrary(): Promise<RequestedLibraryResponse> {

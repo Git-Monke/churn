@@ -184,6 +184,32 @@ export interface LibraryResponse {
   detail?: string;
 }
 
+/** One partly watched title from Jellyfin's per-user resume list. */
+export interface ContinueWatchingItem {
+  id: string;
+  kind: "movie" | "episode";
+  /** Series name for episodes, movie title for films. */
+  title: string;
+  /** Episode title; absent for movies. */
+  episodeTitle?: string;
+  seriesId?: string;
+  seasonNumber?: number;
+  episodeNumber?: number;
+  runtimeTicks?: number;
+  positionTicks: number;
+  /** Played percentage, 0–100. */
+  playedPercentage: number;
+  imageUrl?: string;
+  lastPlayedDate?: string;
+}
+
+export interface ContinueWatchingResponse {
+  source: "jellyfin";
+  state: LibraryState;
+  items: ContinueWatchingItem[];
+  detail?: string;
+}
+
 /** A title tracked by Sonarr/Radarr, whether or not it has downloaded yet. */
 export interface RequestedLibraryItem {
   key: string;

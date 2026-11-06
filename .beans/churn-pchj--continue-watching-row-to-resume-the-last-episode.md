@@ -9,7 +9,7 @@ tags:
     - shows
     - library
 created_at: 2026-11-05T17:56:50Z
-updated_at: 2026-11-05T17:56:54Z
+updated_at: 2026-11-06T05:29:22Z
 blocked_by:
     - churn-icdh
 ---
@@ -71,3 +71,18 @@ playback positions there is nothing to rank or display.
 - [ ] "Continue watching" row on `LibraryPage` with progress bars and deep links into the player
 - [ ] Cache invalidation after playback and on refocus
 - [ ] Tests: endpoint mapping/filtering, auth required, frontend rendering and link targets
+
+
+
+## Superseded
+
+Implemented as **churn-lute** (proxy Jellyfin's own resume list) instead of building on per-episode progress from churn-icdh: Jellyfin already knows the signed-in user's positions, so the row needs no Churn-side watch history and does not have to wait for the show-page work.
+
+What shipped there covers the parts of this bean that matter now:
+
+- `JellyfinClient.listResumeItems(userId, limit)` in `server/backend/src/upstream/jellyfin.ts`;
+- `GET /api/library/resume` (per user, finished items filtered, one card per series, capped at 12);
+- `fetchResume` + `ContinueWatching` cards with progress bars and `playHash` deep links into the player, invalidated after playback stops and on refocus;
+- docs in `docs/src/web-ui.md`.
+
+Still open here: the "Next up" suggestion (Jellyfin `/Shows/NextUp`) and anything that depends on the show page showing per-episode progress (churn-icdh). Re-scope or scrap after churn-icdh lands.

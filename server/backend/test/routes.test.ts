@@ -708,6 +708,179 @@ describe("library", () => {
   });
 });
 
+describe("continue watching", () => {
+  const jellyfinConfig = makeConfig({
+    jellyfin: {
+      id: "jellyfin",
+      name: "Jellyfin",
+      url: "http://127.0.0.1:8096",
+      apiKey: "jellyfin-key",
+    },
+  });
+
+  it("requires a dashboard session", async () => {
+    const app = await buildServer(jellyfinConfig);
+    const response = await app.inject({ method: "GET", url: "/api/library/resume" });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json().error.code).toBe("unauthenticated");
+    await app.close();
+  });
+
+  it("reports unconfigured without a Jellyfin API key", async () => {
+    const app = await buildAuthedServer(makeConfig());
+    const response = await app.inject({ method: "GET", url: "/api/library/resume" });
+
+    expect(response.json()).toMatchObject({
+      source: "jellyfin",
+      state: "unconfigured",
+      items: [],
+    });
+    await app.close();
+  });
+
+  it("maps the user's resume list with one card per series", async () => {
+    let resumeRequest: RequestInit | undefined;
+    let resumeUrl = "";
+
+    installFetch((url, init) => {
+      if (url.includes("/UserItems/Resume?")) {
+        resumeUrl = url;
+        resumeRequest = init;
+        return jsonResponse({
+          Items: [
+            {
+              Id: "episode-new",
+              Name: "Rock Show",
+              Type: "Episode",
+              SeriesId: "series-1",
+              SeriesName: "Parks and Recreation",
+              ParentIndexNumber: 1,
+              IndexNumber: 6,
+              RunTimeTicks: 16_096_080_000,
+              ImageTags: { Primary: "still-tag" },
+              UserData: {
+                PlaybackPositionTicks: 2_007_299_910,
+                PlayedPercentage: 12.47,
+                Played: false,
+                LastPlayedDate: "2026-11-05T02:38:38.8752016Z",
+              },
+            },
+            {
+              Id: "episode-old",
+              Name: "Telethon",
+              Type: "Episode",
+              SeriesId: "series-1",
+              SeriesName: "Parks and Recreation",
+              ParentIndexNumber: 1,
+              IndexNumber: 5,
+              RunTimeTicks: 16_096_080_000,
+              UserData: { PlaybackPositionTicks: 1_000_000_000, Played: false },
+            },
+            {
+              Id: "episode-finished",
+              Name: "Bailout",
+              Type: "Episode",
+              SeriesId: "series-2",
+              SeriesName: "30 Rock",
+              ParentIndexNumber: 1,
+              IndexNumber: 8,
+              UserData: { PlaybackPositionTicks: 300_000_000, Played: true },
+            },
+            {
+              Id: "movie-1",
+              Name: "Deep Impact",
+              Type: "Movie",
+              RunTimeTicks: 72_000_000_000,
+              ImageTags: { Primary: "poster-tag" },
+              BackdropImageTags: ["backdrop-tag"],
+              UserData: {
+                PlaybackPositionTicks: 18_000_000_000,
+                Played: false,
+                LastPlayedDate: "2026-11-04T20:00:00.0000000Z",
+              },
+            },
+          ],
+        });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildAuthedServer(jellyfinConfig);
+    const response = await app.inject({ method: "GET", url: "/api/library/resume" });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(body.state).toBe("ok");
+    expect(body.source).toBe("jellyfin");
+    // Played items and the older episode of the same series are gone; the
+    // remaining episode carries its still and the movie its backdrop.
+    expect(body.items).toEqual([
+      {
+        id: "episode-new",
+        kind: "episode",
+        title: "Parks and Recreation",
+        episodeTitle: "Rock Show",
+        seriesId: "series-1",
+        seasonNumber: 1,
+        episodeNumber: 6,
+        runtimeTicks: 16_096_080_000,
+        positionTicks: 2_007_299_910,
+        playedPercentage: 12.5,
+        imageUrl: "/api/library/images/episode-new?tag=still-tag&maxWidth=680",
+        lastPlayedDate: "2026-11-05T02:38:38.8752016Z",
+      },
+      {
+        id: "movie-1",
+        kind: "movie",
+        title: "Deep Impact",
+        runtimeTicks: 72_000_000_000,
+        positionTicks: 18_000_000_000,
+        playedPercentage: 25,
+        imageUrl:
+          "/api/library/images/movie-1?type=Backdrop&tag=backdrop-tag&maxWidth=680",
+        lastPlayedDate: "2026-11-04T20:00:00.0000000Z",
+      },
+    ]);
+
+    // The route must ask for the signed-in user's own list.
+    const params = new URL(resumeUrl).searchParams;
+    expect(params.get("userId")).toBe("test-user");
+    expect(params.get("MediaTypes")).toBe("Video");
+    expect(params.get("Limit")).toBe("20");
+    expect((resumeRequest?.headers as Record<string, string>)["X-Emby-Token"]).toBe(
+      "test-user-token",
+    );
+    await app.close();
+  });
+
+  it("reports an unreachable Jellyfin without failing the request", async () => {
+    installFetch(() => jsonResponse({}, 500));
+
+    const app = await buildAuthedServer(jellyfinConfig);
+    const response = await app.inject({ method: "GET", url: "/api/library/resume" });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(body.state).toBe("unreachable");
+    expect(body.items).toEqual([]);
+    expect(typeof body.detail).toBe("string");
+    await app.close();
+  });
+
+  it("expires the session when Jellyfin rejects the user token", async () => {
+    installFetch(() => jsonResponse({}, 401));
+
+    const app = await buildAuthedServer(jellyfinConfig);
+    const response = await app.inject({ method: "GET", url: "/api/library/resume" });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json().error.code).toBe("session_expired");
+    await app.close();
+  });
+});
+
 describe("requested library", () => {
   it("returns titles tracked by Sonarr and Radarr without requiring Jellyfin", async () => {
     installFetch((url) => {
