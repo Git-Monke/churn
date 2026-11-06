@@ -367,6 +367,20 @@ with no episodes, the backend requests a library scan (at most once every five
 minutes) and the page polls every two seconds while that scan is likely still
 running, so the episode list fills in without a manual reload.
 
+Episode rows also carry the signed-in user's own watch state. The show detail
+route asks Jellyfin for episodes with `?userId=<user>`, which is the only way
+Jellyfin fills `UserData`; a finished episode gets a **Watched** label with an
+accent check at the right of the row, and a started one gets an accent progress
+bar along the bottom of its thumbnail. Churn invents no threshold: Jellyfin's
+`Played` flag decides watched, and the bar uses its `PlayedPercentage` (falling
+back to position over runtime, clamped to 1–99) only while Jellyfin still counts
+the episode as unplayed. Episodes with no Jellyfin user data — Sonarr-only rows —
+stay unmarked rather than guessed at. The show's Play button resumes the episode
+in progress (most recently played first), otherwise the first unwatched episode,
+otherwise the first playable one, and it always skips specials. Positions are
+read fresh on every request and the page already polls, so returning from the
+player shows the new progress.
+
 For shows tracked in Sonarr — including Jellyfin-backed shows — **Choose
 release** runs the progressive Prowlarr season search. The chooser opens on the
 first result and updates as each indexer finishes; the progress line says how

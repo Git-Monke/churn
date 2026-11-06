@@ -423,7 +423,13 @@ export function createJellyfinClient(
       return response.Items ?? [];
     },
 
-    async getEpisodes(seriesId: string): Promise<JellyfinItem[]> {
+    /**
+     * Jellyfin only fills `UserData` (played flag, playback position, played
+     * percentage) when the request names a user, so anything that shows watch
+     * state passes `userId`. Background scans and metadata warmers stay
+     * user-agnostic by omitting it.
+     */
+    async getEpisodes(seriesId: string, userId?: string): Promise<JellyfinItem[]> {
       if (!token) {
         throw new UpstreamError("jellyfin", "unauthorized", "Jellyfin API key is not configured");
       }
@@ -432,6 +438,9 @@ export function createJellyfinClient(
         ImageTypeLimit: "1",
         EnableImageTypes: "Primary",
       });
+      if (userId) {
+        query.set("userId", userId);
+      }
       const response = await fetchJson<JellyfinItemsResponse>(
         "jellyfin",
         `${config.url}/Shows/${encodeURIComponent(seriesId)}/Episodes?${query.toString()}`,

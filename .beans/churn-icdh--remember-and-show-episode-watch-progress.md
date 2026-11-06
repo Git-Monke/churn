@@ -1,14 +1,14 @@
 ---
 # churn-icdh
 title: Remember and show episode watch progress
-status: todo
+status: completed
 type: feature
 priority: normal
 tags:
     - playback
     - shows
 created_at: 2026-11-05T17:56:44Z
-updated_at: 2026-11-05T17:56:44Z
+updated_at: 2026-11-06T05:45:46Z
 ---
 
 ## Goal
@@ -18,56 +18,75 @@ progress, so users can tell at a glance what is unwatched, in progress or done.
 
 ## Current behaviour
 
-Jellyfin already tracks per-user watch state, and the player reads it:
-`GET /api/playback/items/:itemId` loads the item with `auth.user.id`, so
-`mapPlaybackItem` (`server/backend/src/playback.ts`) fills `positionTicks` from
-`UserData.PlaybackPositionTicks` and `PlayPage` resumes from it.
+Jellyfin already tracks per-user watch state and the player reads it: the
+player reports start/progress/stop upstream, so the data is written. The show
+page just never asked for it back: `loadJellyfinShow` called `getSeasons` /
+`getEpisodes` without a user id, so Jellyfin returned no `UserData`,
+`ShowEpisode` had no watch fields, and the episode row left its right-hand
+column empty.
 
-But the show page never asks Jellyfin for user data:
+## Tasks
 
-- `loadJellyfinShow` (`server/backend/src/routes/shows.ts`) calls
-  `client.getItem(itemId)`, `client.getSeasons(itemId)` and
-  `client.getEpisodes(itemId)` without a user id.
-- `getSeasons` / `getEpisodes` (`server/backend/src/upstream/jellyfin.ts`) do not
-  send a `userId` query parameter or request `UserData`, so the returned items
-  have no `PlaybackPositionTicks`, `Played` or `LastPlayedDate`.
-- `ShowEpisode` (`server/backend/src/shows.ts`) consequently has no progress
-  fields, and the episode list in `ShowPage` only shows title, runtime and
-  availability.
+- [x] `JellyfinClient.getEpisodes(seriesId, userId?)` sends `userId`, the only way
+      Jellyfin fills `UserData` (verified on 10.11.11; API-key callers such as
+      `library-scan.ts`, `introdb-warm.ts` and `next-episode.ts` still call it
+      with one argument).
+- [x] `loadJellyfinShow` passes `auth.user.id`; `getSeasons` stays user-agnostic.
+- [x] `ShowEpisode` (backend + frontend) gains `played?`, `progressPercent?`
+      (1–99) and `lastPlayedDate?`.
+- [x] `assignWatchState` in `shows.ts` fills them from `UserData.Played` /
+  `PlayedPercentage` (falling back to position over runtime), skipping
+  unstarted episodes and Sonarr-only rows. No Churn-side threshold: Jellyfin
+  flips `Played` itself.
+- [x] Tests: `shows.test.ts`, the "show watch state" route block, and the
+  frontend `episode-watch-state.test.ts`.
+- [x] `EpisodeRow` shows a check + **Watched** at the top right of a finished
+      row and an accent bar along the bottom of the thumbnail for a started one;
+      both are also in the row's accessible name.
+- [x] `ShowPage` header plays the episode in progress, else the first unwatched,
+      else the first playable (specials excluded).
+- [x] `docs/src/web-ui.md` documents the watch state and the `?userId=` query.
+- [x] Bean kept current and completed with a summary.
 
-The player does report start/progress/stop to Jellyfin, so the upstream data is
-being written; it is just not read back by the library UI.
+## Deferred
 
-## What we need
+- The "3 of 10 watched" count on season tabs — the tabs already carry a
+  not-downloaded dot and the extra number started to crowd them.
+- The right-hand column still shows nothing for a started-but-not-finished
+  episode: the bar on the thumbnail is the only affordance, which keeps a
+  resume row from competing with **Continue watching**'s own label.
 
-- Backend: fetch episode/season metadata with the signed-in user so Jellyfin
-  returns `UserData`. Add `userId` to the upstream client calls (or a dedicated
-  `getEpisodes(seriesId, userId)`), keep the API-key calls working for the
-  background library scan, and pass `auth.user.id` from the show routes.
-- Backend: extend `ShowEpisode` with `positionTicks?`, `runtimeTicks?`,
-  `played?` and `lastPlayedDate?`, populated from `jellyfin.UserData` in
-  `buildShowEpisodes` (`server/backend/src/shows.ts`).
-- Decide what "watched" means for display: use Jellyfin's `Played` flag for the
-  watched state and treat `0 < positionTicks < runtime` as in progress. Jellyfin
-  flips `Played` itself once the stop report crosses its threshold, so Churn
-  should not invent its own threshold.
-- UI: in `ShowPage`, draw a thin progress bar across the bottom of each episode
-  thumbnail (or a compact bar in the list), plus a subtle "Watched" / "Resume
-  from 12:34" affordance. Keep the existing episode actions working.
-- Refresh progress when returning from the player: invalidate the show query
-  (and the continue-watching query once that exists) on navigation back, or use
-  a short stale time so progress is not minutes old.
-- Season summaries can show "3 of 10 watched" if it fits the layout; optional.
-- Sonarr-only shows (episodes without a Jellyfin item) have no upstream watch
-  state; show them as unwatched rather than guessing.
-- Update `server/frontend/src/api/types.ts` and the show API docs
-  (`docs/src/web-ui.md`) for the new fields.
+## Summary of Changes
 
-## Todos
+- `server/backend/src/upstream/jellyfin.ts`: `getEpisodes(seriesId, userId?)`
+  adds `userId` to `/Shows/{id}/Episodes`, with a comment explaining that
+  Jellyfin only returns `UserData` when a user is named.
+- `server/backend/src/routes/shows.ts`: `loadJellyfinShow` passes
+  `auth.user.id`, so the show page sees the signed-in user's progress instead of
+  a library-wide view.
+- `server/backend/src/shows.ts`: `assignWatchState` / `progressPercent` map
+  `Played`, `PlayedPercentage` (or position over runtime) and `LastPlayedDate`
+  onto each episode; percentages are clamped to 1–99 so a nearly finished but
+  still-unplayed episode never looks complete.
+- `server/backend/src/types.ts`, `server/frontend/src/api/types.ts`: the new
+  `played`, `progressPercent` and `lastPlayedDate` fields.
+- `server/frontend/src/features/show/episode-watch-state.ts` (new): `resumeTarget`
+  (in progress by last played, then first unwatched, then first playable;
+  specials and non-playable rows excluded) and `playLabel` (accessible name
+  including the watch state).
+- `server/frontend/src/features/show/EpisodeRow.tsx`: accent `Progress` bar on
+  the bottom edge of the thumbnail for a started episode, a check + **Watched**
+  label at the top right of a finished row, and the watch state in the row's
+  `aria-label`.
+- `server/frontend/src/pages/ShowPage.tsx`: the header's Play button now resumes
+  via `resumeTarget` instead of always starting at the first playable episode.
+- Tests: `shows.test.ts` (+4 mapping cases), a "show watch state" block in
+  `routes.test.ts` (user id forwarded, payload fields, `no-store`) and
+  `episode-watch-state.test.ts` (+6). Backend 384, frontend 30.
+- `docs/src/web-ui.md`: how episode watch state is read and drawn, and what the
+  Play button targets.
 
-- [ ] Pass the Jellyfin user id through show/seasons/episodes lookups and request `UserData`
-- [ ] Map `PlaybackPositionTicks`, `Played`, `LastPlayedDate` and `RunTimeTicks` into `ShowEpisode`
-- [ ] Ensure the background library scan still works without a user id
-- [ ] Add progress bar + watched/resume indicators to the episode list in `ShowPage`
-- [ ] Refresh show data after playback stops
-- [ ] Tests: mapper output for partial/finished/unwatched episodes, show route forwards user id, UI rendering of the three states
+Verified against the live Jellyfin 10.11.11: *Parks and Recreation* as Jacob
+returns S1E1/E3/E4 played, S1E6 in progress at 12.6 %, and S1E2/E5 unmarked
+(rewatch reset) — exactly what the row renders. Typechecks, `npm test` and the
+frontend build are clean.

@@ -226,4 +226,98 @@ describe("buildShowDetail", () => {
       download: { status: "downloading", progress: 50, quality: "2160p" },
     });
   });
+
+  it("takes the watched flag straight from Jellyfin's user data", () => {
+    const detail = buildShowDetail({
+      source: "jellyfin",
+      series,
+      jellyfinEpisodes: [
+        jellyfinEpisode("j1", 1, 1, {
+          RunTimeTicks: 12_955_442_500,
+          UserData: {
+            Played: true,
+            PlayCount: 7,
+            PlaybackPositionTicks: 0,
+            LastPlayedDate: "2026-11-05T19:34:30.4345474Z",
+          },
+        }),
+      ],
+    });
+
+    expect(detail.episodes[0]).toMatchObject({
+      played: true,
+      lastPlayedDate: "2026-11-05T19:34:30.4345474Z",
+    });
+    // A finished episode never also carries a progress bar.
+    expect(detail.episodes[0]?.progressPercent).toBeUndefined();
+  });
+
+  it("uses Jellyfin's played percentage for a started episode", () => {
+    const detail = buildShowDetail({
+      source: "jellyfin",
+      series,
+      jellyfinEpisodes: [
+        jellyfinEpisode("j1", 1, 6, {
+          RunTimeTicks: 16_096_080_000,
+          UserData: {
+            Played: false,
+            PlaybackPositionTicks: 2_031_460_790,
+            PlayedPercentage: 12.62,
+          },
+        }),
+      ],
+    });
+
+    expect(detail.episodes[0]).toMatchObject({ progressPercent: 12.6 });
+    expect(detail.episodes[0]?.played).toBeUndefined();
+  });
+
+  it("derives the percentage from the position when Jellyfin omits it", () => {
+    const detail = buildShowDetail({
+      source: "jellyfin",
+      series,
+      jellyfinEpisodes: [
+        jellyfinEpisode("j1", 1, 1, {
+          RunTimeTicks: 10_000_000_000,
+          UserData: { Played: false, PlaybackPositionTicks: 5_000_000_000 },
+        }),
+        // Clamped: a nearly finished episode still shows as in progress.
+        jellyfinEpisode("j2", 1, 2, {
+          RunTimeTicks: 10_000_000_000,
+          UserData: { Played: false, PlaybackPositionTicks: 9_999_000_000 },
+        }),
+      ],
+    });
+
+    expect(detail.episodes.map((episode) => episode.progressPercent)).toEqual([50, 99]);
+  });
+
+  it("leaves an unstarted episode and a Sonarr-only episode unmarked", () => {
+    const detail = buildShowDetail({
+      source: "jellyfin",
+      series,
+      jellyfinEpisodes: [
+        jellyfinEpisode("j1", 1, 1, {
+          RunTimeTicks: 12_955_442_500,
+          // Rewatch in progress but not started: no bar, no badge.
+          UserData: {
+            Played: false,
+            PlayCount: 3,
+            PlaybackPositionTicks: 0,
+            LastPlayedDate: "2026-11-05T19:34:47.2137406Z",
+          },
+        }),
+      ],
+      sonarrEpisodes: [sonarrEpisode(1, 1, 2, { hasFile: true })],
+    });
+
+    expect(detail.episodes[0]).toMatchObject({
+      lastPlayedDate: "2026-11-05T19:34:47.2137406Z",
+    });
+    expect(detail.episodes[0]?.played).toBeUndefined();
+    expect(detail.episodes[0]?.progressPercent).toBeUndefined();
+    expect(detail.episodes[1]?.played).toBeUndefined();
+    expect(detail.episodes[1]?.progressPercent).toBeUndefined();
+    expect(detail.episodes[1]?.lastPlayedDate).toBeUndefined();
+  });
 });

@@ -205,7 +205,8 @@ async function loadJellyfinShow(
     [item, seasons, episodes] = await Promise.all([
       client.getItem(itemId),
       client.getSeasons(itemId),
-      client.getEpisodes(itemId),
+      // The signed-in user, so Jellyfin returns each episode's watch state.
+      client.getEpisodes(itemId, auth.user.id),
     ]);
   } catch (error) {
     if (isUnauthorized(error)) {

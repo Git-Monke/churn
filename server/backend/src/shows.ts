@@ -144,6 +144,7 @@ function mapEpisode(
   assignIfDefined(episode, "imageUrl", jellyfinImageUrl(jellyfin) ?? fallbackImage);
   assignIfDefined(episode, "monitored", sonarr?.monitored);
   assignIfDefined(episode, "jellyfinId", jellyfin?.Id);
+  assignWatchState(episode, jellyfin);
   if (!jellyfin && sonarr?.hasFile) {
     episode.imported = true;
   }
@@ -159,6 +160,54 @@ function mapEpisode(
     }
   }
   return episode;
+}
+
+/**
+ * Jellyfin's per-user watch state. `Played` is authoritative: Jellyfin flips it
+ * itself from the player's stop report, so Churn adds no threshold of its own.
+ * Episodes without user data (Sonarr-only, or a request that named no user) are
+ * left unmarked rather than guessed at.
+ */
+function assignWatchState(episode: ShowEpisode, jellyfin: JellyfinItem | undefined): void {
+  const userData = jellyfin?.UserData;
+  if (!userData) {
+    return;
+  }
+  assignIfDefined(episode, "lastPlayedDate", userData.LastPlayedDate);
+  if (userData.Played === true) {
+    episode.played = true;
+    return;
+  }
+  const percent = progressPercent(userData, jellyfin?.RunTimeTicks);
+  if (percent !== undefined) {
+    episode.progressPercent = percent;
+  }
+}
+
+/**
+ * How far a started, not-yet-played episode got, clamped to 1–99 so the bar is
+ * visible from the first seconds and never looks finished while Jellyfin still
+ * counts the episode as unplayed.
+ */
+function progressPercent(
+  userData: NonNullable<JellyfinItem["UserData"]>,
+  runtimeTicks: number | undefined,
+): number | undefined {
+  const positionTicks = userData.PlaybackPositionTicks ?? 0;
+  if (positionTicks <= 0) {
+    return undefined;
+  }
+  const reported = userData.PlayedPercentage;
+  const percent =
+    reported !== undefined && Number.isFinite(reported) && reported > 0
+      ? reported
+      : runtimeTicks !== undefined && runtimeTicks > 0
+        ? (positionTicks / runtimeTicks) * 100
+        : undefined;
+  if (percent === undefined) {
+    return undefined;
+  }
+  return Math.min(99, Math.max(1, Math.round(percent * 10) / 10));
 }
 
 /**

@@ -3211,6 +3211,93 @@ describe("show detail", () => {
   });
 });
 
+describe("show watch state", () => {
+  const jellyfinConfig = makeConfig({
+    jellyfin: {
+      id: "jellyfin",
+      name: "Jellyfin",
+      url: "http://jellyfin.test:8096",
+      apiKey: "jellyfin-key",
+    },
+  });
+
+  it("asks Jellyfin for the signed-in user's episode watch state", async () => {
+    let episodeUrl = "";
+    installFetch((url) => {
+      if (url.includes("jellyfin.test") && url.includes("/Items/series-1?")) {
+        return jsonResponse({
+          Id: "series-1",
+          Name: "Parks and Recreation",
+          Type: "Series",
+          ProviderIds: { Tvdb: "8592" },
+        });
+      }
+      if (url.includes("jellyfin.test") && url.includes("/Shows/series-1/Seasons")) {
+        return jsonResponse({ Items: [{ Id: "season-1", IndexNumber: 1 }] });
+      }
+      if (url.includes("jellyfin.test") && url.includes("/Shows/series-1/Episodes")) {
+        episodeUrl = url;
+        return jsonResponse({
+          Items: [
+            {
+              Id: "episode-1",
+              Name: "Pilot",
+              ParentIndexNumber: 1,
+              IndexNumber: 1,
+              RunTimeTicks: 12_955_442_500,
+              UserData: {
+                Played: true,
+                PlayCount: 7,
+                PlaybackPositionTicks: 0,
+                LastPlayedDate: "2026-11-05T19:34:30.4345474Z",
+              },
+            },
+            {
+              Id: "episode-6",
+              Name: "Rock Show",
+              ParentIndexNumber: 1,
+              IndexNumber: 6,
+              RunTimeTicks: 16_096_080_000,
+              UserData: {
+                Played: false,
+                PlaybackPositionTicks: 2_031_460_790,
+                PlayedPercentage: 12.62,
+                LastPlayedDate: "2026-11-05T02:38:38.8752016Z",
+              },
+            },
+          ],
+        });
+      }
+      // Sonarr is not configured with an API key here, so no other upstream
+      // calls are expected.
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildAuthedServer(jellyfinConfig);
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/library/shows/jellyfin/series-1",
+    });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["cache-control"]).toBe("no-store");
+    // The session's Jellyfin user id, so the response carries UserData.
+    expect(new URL(episodeUrl).searchParams.get("userId")).toBe("test-user");
+    expect(body.episodes).toMatchObject([
+      { key: "s01e01", played: true, lastPlayedDate: "2026-11-05T19:34:30.4345474Z" },
+      {
+        key: "s01e06",
+        progressPercent: 12.6,
+        lastPlayedDate: "2026-11-05T02:38:38.8752016Z",
+      },
+    ]);
+    expect(body.episodes[0].progressPercent).toBeUndefined();
+    expect(body.episodes[1].played).toBeUndefined();
+    await app.close();
+  });
+});
+
 describe("movie detail", () => {
   it("matches a Jellyfin movie to Radarr by TMDB id", async () => {
     installFetch((url) => {

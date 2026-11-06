@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { EllipsisIcon } from "lucide-react";
+import { CheckIcon, EllipsisIcon } from "lucide-react";
 
 import type { ShowDownload, ShowEpisode } from "@/api/types";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Progress } from "@/components/ui/progress";
+import { playLabel } from "@/features/show/episode-watch-state";
 import { formatAirDate, formatRuntime, formatTimeLeftAbout } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -60,7 +61,7 @@ function PlayableEpisodeRow({
   return (
     <a
       href={playHref}
-      aria-label={`Play episode ${episode.episodeNumber}: ${episode.title}`}
+      aria-label={playLabel(episode)}
       className={cn(
         "-mx-3 flex flex-wrap items-center gap-5 px-3 py-4 transition-colors",
         "hover:bg-foreground/[0.03] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary",
@@ -78,8 +79,11 @@ function PlayableEpisodeRow({
         ) : null}
       </div>
 
-      {/* Watching progress is not tracked yet, so this column stays empty. */}
-      <div className="flex w-full shrink-0 items-center justify-start gap-1.5 pl-37 text-[13px] text-muted-foreground sm:w-auto sm:min-w-27.5 sm:justify-end sm:pl-0" />
+      {/* A finished episode is marked at the top-right of the row, level with
+          the thumbnail's top edge. */}
+      <div className="flex w-full shrink-0 items-start justify-start gap-1.5 pl-37 text-[13px] text-muted-foreground sm:w-auto sm:min-w-27.5 sm:justify-end sm:self-start sm:pl-0">
+        {episode.played === true ? <WatchedLabel /> : null}
+      </div>
     </a>
   );
 }
@@ -185,15 +189,35 @@ function MissingEpisodeRow({
   );
 }
 
+/**
+ * Jellyfin's watched flag, shown once at the right of the row. The accent check
+ * and quiet label keep it readable next to a busy still without shouting.
+ */
+function WatchedLabel() {
+  return (
+    <span className="flex items-center gap-1.5">
+      <CheckIcon className="size-4 shrink-0 text-primary" aria-hidden="true" />
+      Watched
+    </span>
+  );
+}
+
 function Thumbnail({ episode }: { episode: ShowEpisode }) {
   return (
-    <div className="aspect-video w-32 shrink-0 overflow-hidden rounded-lg bg-muted sm:w-48">
+    <div className="relative aspect-video w-32 shrink-0 overflow-hidden rounded-lg bg-muted sm:w-48">
       {episode.imageUrl ? (
         <img
           src={episode.imageUrl}
           alt=""
           loading="lazy"
           className="size-full object-cover"
+        />
+      ) : null}
+      {episode.progressPercent !== undefined ? (
+        <Progress
+          value={episode.progressPercent}
+          aria-label={`Watched ${Math.round(episode.progressPercent)}% of episode ${episode.episodeNumber}`}
+          className="absolute inset-x-0 bottom-0 h-1 rounded-none bg-foreground/20"
         />
       ) : null}
     </div>

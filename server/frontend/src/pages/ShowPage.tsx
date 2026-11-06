@@ -23,6 +23,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { VersionPicker } from "@/features/releases/VersionPicker";
 import { CancelEpisodeDownloadDialog } from "@/features/show/CancelEpisodeDownloadDialog";
 import { EpisodeList, EpisodeRow } from "@/features/show/EpisodeRow";
+import { resumeTarget } from "@/features/show/episode-watch-state";
 import { ReleasePickerDialog } from "@/features/show/ReleasePickerDialog";
 import { SeasonTabs } from "@/features/show/SeasonTabs";
 import { DeleteTitleDialog } from "@/features/title/DeleteTitleDialog";
@@ -380,9 +381,9 @@ export function ShowPage({
 }
 
 /**
- * Poster, title and the one primary action for a show. Playback always targets
- * the first playable episode: there is no per-episode watch state yet, so the
- * page cannot say where someone left off.
+ * Poster, title and the one primary action for a show. Playback resumes where
+ * this user left off: the episode in progress, otherwise the first unwatched
+ * episode, otherwise the first playable one.
  */
 function ShowHeader({
   data,
@@ -409,7 +410,7 @@ function ShowHeader({
     playable,
   );
 
-  const episode = firstPlayableEpisode(episodes);
+  const episode = resumeTarget(episodes);
   const action: TitleAction =
     episode?.jellyfinId === undefined
       ? { kind: "not-downloaded" }
@@ -465,22 +466,6 @@ function ShowHeader({
       />
     </>
   );
-}
-
-/** First non-special episode Jellyfin can actually play. */
-function firstPlayableEpisode(episodes: ShowEpisode[]): ShowEpisode | undefined {
-  return [...episodes]
-    .filter(
-      (episode) =>
-        episode.availability === "jellyfin" &&
-        episode.jellyfinId !== undefined &&
-        episode.seasonNumber !== 0,
-    )
-    .sort(
-      (left, right) =>
-        left.seasonNumber - right.seasonNumber ||
-        left.episodeNumber - right.episodeNumber,
-    )[0];
 }
 
 function ShowStateNotice({ show }: { show: ShowDetailResponse }) {

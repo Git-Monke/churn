@@ -425,6 +425,15 @@ export interface ShowEpisode {
   /** Sonarr has a file, but Jellyfin has not indexed it yet (not playable). */
   imported?: boolean;
   download?: ShowDownload;
+  /** Jellyfin's own per-user watched flag; absent without user data. */
+  played?: boolean;
+  /**
+   * How far the signed-in user got, 1–99. Only set for a started episode that
+   * Jellyfin does not consider played.
+   */
+  progressPercent?: number;
+  /** Last play time for this user; ranks resume targets. */
+  lastPlayedDate?: string;
 }
 
 export interface ShowSeason {
