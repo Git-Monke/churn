@@ -25,10 +25,12 @@ a Jellyfin login.
 ```bash
 cd server
 npm install
-npm run dev        # UI http://127.0.0.1:5173, API http://127.0.0.1:4000
+npm run dev        # UI http://127.0.0.1:5173, API http://127.0.0.1:4001
 ```
 
-Vite proxies `/api` to Fastify in development. For a single production server:
+Vite proxies `/api` to Fastify in development. The dev backend listens on
+`4001` so a `docker compose` dashboard container keeps its `4000`; set `PORT`
+to move the backend and the proxy together. For a single production server:
 
 ```bash
 cd server
@@ -45,7 +47,7 @@ survive a rerun.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `HOST` | `0.0.0.0` in the compose container | Backend bind address |
-| `PORT` | `4000` | Backend port (`DASHBOARD_PORT` in compose) |
+| `PORT` | `4001` in dev, `4000` in production | Backend port (`DASHBOARD_PORT` in compose) |
 | `JELLYFIN_URL` | `http://127.0.0.1:8096` | Jellyfin base URL used by the backend |
 | `JELLYFIN_PUBLIC_URL` | request host, LAN address as fallback | Browser-facing Jellyfin URL for video playback and service links |
 | `SONARR_PUBLIC_URL` / `RADARR_PUBLIC_URL` | request host, LAN address as fallback | Browser-facing arr URLs for service links and redirects |

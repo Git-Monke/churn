@@ -31,8 +31,14 @@ npm run dev
 ```
 
 - UI: <http://127.0.0.1:5173>
-- API: <http://127.0.0.1:4000>
+- API: <http://127.0.0.1:4001>
 - Vite proxies `/api` to Fastify during development.
+
+The dev backend listens on `4001` instead of `4000` so a dashboard container
+started by `docker compose` (which publishes `4000` on the host network) can
+keep running while you develop. `npm run dev` uses `PORT` when it is set, and
+Vite's proxy follows the same variable; production (`npm start`) still uses
+`4000`.
 
 Production build:
 
@@ -61,7 +67,7 @@ preserves unknown keys, so hand-added settings survive a rerun.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `HOST` | `127.0.0.1` | Backend bind address |
-| `PORT` | `4000` | Backend port |
+| `PORT` | `4001` (dev), `4000` (production) | Backend port |
 | `JELLYFIN_URL` | `http://127.0.0.1:8096` | Jellyfin base URL used by the backend |
 | `JELLYFIN_PUBLIC_URL` | request host, LAN address as fallback | Jellyfin URL the browser uses for video streams and service links |
 | `SONARR_PUBLIC_URL` / `RADARR_PUBLIC_URL` | request host, LAN address as fallback | Browser-facing arr URLs for service links and redirects |

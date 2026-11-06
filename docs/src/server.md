@@ -121,8 +121,12 @@ only calls the backend; upstream keys and URLs stay server-side.
 ```bash
 cd server
 npm install
-npm run dev        # UI http://127.0.0.1:5173, API http://127.0.0.1:4000
+npm run dev        # UI http://127.0.0.1:5173, API http://127.0.0.1:4001
 ```
+
+The dev backend listens on `4001` so the dashboard container (`DASHBOARD_PORT`,
+default `4000`) can keep running alongside it; set `PORT` to move both the
+backend and Vite's `/api` proxy.
 
 After the server stack starts, churn completes Jellyfin's first-run wizard,
 creates an API key named `churn`, and writes it to `server/.env` as
