@@ -1,7 +1,7 @@
 ---
 # churn-pchj
 title: Continue watching row to resume the last episode
-status: todo
+status: completed
 type: feature
 priority: normal
 tags:
@@ -9,7 +9,7 @@ tags:
     - shows
     - library
 created_at: 2026-11-05T17:56:50Z
-updated_at: 2026-11-06T05:29:22Z
+updated_at: 2026-11-06T05:52:50Z
 blocked_by:
     - churn-icdh
 ---
