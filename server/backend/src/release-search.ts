@@ -372,13 +372,14 @@ export function createReleaseSearchService(
     jobs.set(key, job);
     pruneJobs();
     if (job.indexers.length === 0) {
-      job.completedAt = now().toISOString();
       job.error = "Prowlarr has no enabled indexers.";
+      const completedAt = now().toISOString();
       try {
-        await persist(job);
+        await persist(job, completedAt);
       } catch {
         // Keep the in-memory job usable even if the snapshot cannot be written.
       } finally {
+        job.completedAt = completedAt;
         job.settle();
       }
       return job;
@@ -428,25 +429,28 @@ export function createReleaseSearchService(
     if (jobs.get(job.key) !== job || job.completedAt !== undefined) {
       return;
     }
-    job.completedAt = now().toISOString();
+    const completedAt = now().toISOString();
     try {
-      await persist(job);
+      await persist(job, completedAt);
     } catch {
       // Results remain available in memory; a later refresh can rewrite the
       // snapshot.
     } finally {
+      // Only now is the search finished: `state: "ready"` promises the
+      // snapshot is on disk, so mark the job complete after the write.
+      job.completedAt = completedAt;
       job.settle();
     }
   }
 
-  async function persist(job: SearchJob): Promise<void> {
+  async function persist(job: SearchJob, fetchedAt: string): Promise<void> {
     const snapshot: Snapshot = {
       version: SNAPSHOT_VERSION,
       kind: job.target.kind,
       ...(job.target.kind === "movie"
         ? { movieId: job.target.movieId }
         : { seriesId: job.target.seriesId, seasonNumber: job.target.seasonNumber }),
-      fetchedAt: job.completedAt ?? job.startedAt,
+      fetchedAt,
       indexers: job.indexers,
       releases: [...job.releasesByIndexer.values()].flat(),
     };
@@ -530,11 +534,14 @@ export function createReleaseSearchService(
     const groups = groupShowReleases(mapped, { includeUnavailable: true });
     const progress = buildProgress(job, episodeNumber);
     const allSettled = job.indexers.length > 0 && job.indexers.every(isSettled);
+    // A finished indexer is not the same as a finished search: the job also has
+    // to be persisted, so a caller that sees "ready" can read the snapshot.
+    const finished = allSettled && job.completedAt !== undefined;
     const allFailed =
       allSettled && job.indexers.every((indexer) => indexer.state === "error");
     const state: CachedReleasesResponse["state"] = job.error
       ? "error"
-      : allSettled
+      : finished
         ? allFailed && mapped.length === 0
           ? "error"
           : "ready"
