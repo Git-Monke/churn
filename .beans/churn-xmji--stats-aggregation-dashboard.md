@@ -5,7 +5,7 @@ status: completed
 type: feature
 priority: normal
 created_at: 2026-11-05T00:24:12Z
-updated_at: 2026-11-05T20:00:55Z
+updated_at: 2026-11-06T00:15:51Z
 ---
 
 Implemented. Stats live under **Services → Stats** for every signed-in user.

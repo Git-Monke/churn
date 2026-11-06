@@ -1,10 +1,11 @@
 ---
 # churn-r9s2
 title: Redesign the Library page
-status: in-progress
+status: completed
 type: feature
+priority: normal
 created_at: 2026-11-05T22:58:49Z
-updated_at: 2026-11-05T22:58:49Z
+updated_at: 2026-11-06T00:16:07Z
 ---
 
 ## Plan (approved: plans/library-redesign-implementation.md)

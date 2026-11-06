@@ -186,7 +186,7 @@ function tokenize(value: string): string[] {
     .filter(Boolean);
 }
 
-function normalizeTitle(value: string): string {
+export function normalizeTitle(value: string): string {
   return value
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -196,6 +196,35 @@ function normalizeTitle(value: string): string {
 
 export function entryTitle(entry: LibraryEntry): string {
   return entry.library?.name ?? entry.requested?.title ?? entry.activity?.title ?? "";
+}
+
+/**
+ * Detail page for an entry: the Jellyfin item when the title is local,
+ * otherwise the arr record the request or download came from.
+ */
+export function entryHref(entry: LibraryEntry): string | undefined {
+  if (entry.type === "Series") {
+    if (entry.library) {
+      return `#/library/show/jellyfin/${encodeURIComponent(entry.library.id)}`;
+    }
+    if (entry.requested?.kind === "series") {
+      return `#/library/show/sonarr/${entry.requested.arrId}`;
+    }
+    if (entry.activity?.seriesId !== undefined) {
+      return `#/library/show/sonarr/${entry.activity.seriesId}`;
+    }
+    return undefined;
+  }
+  if (entry.library) {
+    return `#/library/movie/jellyfin/${encodeURIComponent(entry.library.id)}`;
+  }
+  if (entry.requested?.kind === "movie") {
+    return `#/library/movie/radarr/${entry.requested.arrId}`;
+  }
+  if (entry.activity?.movieId !== undefined) {
+    return `#/library/movie/radarr/${entry.activity.movieId}`;
+  }
+  return undefined;
 }
 
 function entryRank(entry: LibraryEntry): number {

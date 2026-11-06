@@ -1,27 +1,29 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import {
-  ChevronLeftIcon,
-  CircleAlertIcon,
-  DownloadIcon,
-  FilmIcon,
-  Loader2Icon,
-  PlayIcon,
-  Trash2Icon,
-} from "lucide-react";
+import { CircleAlertIcon } from "lucide-react";
 
 import { fetchMovie, fetchMovieDownload } from "@/api/client";
-import type { ActivityItem, MovieDetailResponse } from "@/api/types";
+import type { ActivityItem } from "@/api/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
-import { DownloadStats } from "@/features/download/DownloadStats";
 import { CancelRequestDialog } from "@/features/library/CancelRequestDialog";
 import { CancelMovieDownloadDialog } from "@/features/movie/CancelMovieDownloadDialog";
-import { ReleaseChooser } from "@/features/releases/ReleaseChooser";
+import { VersionPicker } from "@/features/releases/VersionPicker";
+import { useTitleAttribution } from "@/features/title/use-title-attribution";
+import {
+  resumeDetail,
+  useTitlePlayback,
+} from "@/features/title/use-title-playback";
+import { DeleteTitleDialog } from "@/features/title/DeleteTitleDialog";
+import { TitleHeader } from "@/features/title/TitleHeader";
+import { TitleMenu, type TitleMenuItem } from "@/features/title/TitleMenu";
+import { TitlePrimaryAction, type TitleAction } from "@/features/title/TitlePrimaryAction";
+import { playHash } from "@/hooks/use-hash-route";
+import {
+  formatCompletionAbout,
+  formatRuntime,
+  formatTimeLeftAbout,
+} from "@/lib/format";
 
 export function MoviePage({
   source,
@@ -32,9 +34,12 @@ export function MoviePage({
 }) {
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelRequestOpen, setCancelRequestOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  /** The picker is open on demand for a title that is already playable. */
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [awaitingDownload, setAwaitingDownload] = useState(false);
-  // Briefly disable Cancel after a grab. The release chooser is replaced by
-  // the download card under the cursor, so a second click (double-click) could
+  // Briefly disable Cancel after a grab. The release picker is replaced by the
+  // downloading header under the cursor, so a second click (double-click) could
   // otherwise land on Cancel and open its confirmation dialog by accident.
   const [cancelReady, setCancelReady] = useState(true);
   const movieQuery = useQuery({
@@ -58,14 +63,23 @@ export function MoviePage({
   const download = liveDownload?.ready
     ? liveDownload.download
     : movieQuery.data?.download;
-  // A Radarr request with no Jellyfin copy and nothing downloading is waiting on
-  // a release pick, which is also the only state where cancelling the request
-  // makes sense from this page.
+
+  const movie = movieQuery.data?.movie;
+  const jellyfinId = movieQuery.data?.jellyfinId;
   const radarrId = movieQuery.data?.radarrId;
-  const cancelRequestTarget =
-    !download && movieQuery.data?.jellyfinId === undefined && radarrId !== undefined
-      ? ({ service: "radarr", id: radarrId } as const)
-      : undefined;
+  const playable = jellyfinId !== undefined && download === undefined;
+  const downloading = download !== undefined || awaitingDownload;
+
+  const playback = useTitlePlayback(jellyfinId);
+  const addedBy = useTitleAttribution(
+    {
+      kind: "movie",
+      ...(movie?.tmdbId === undefined ? {} : { tmdbId: movie.tmdbId }),
+      title: movie?.title ?? "",
+      ...(movie?.year === undefined ? {} : { year: movie.year }),
+    },
+    jellyfinId !== undefined,
+  );
 
   useEffect(() => {
     if (download) {
@@ -89,16 +103,59 @@ export function MoviePage({
     return () => clearTimeout(timer);
   }, [cancelReady]);
 
+  const action = movieAction({
+    movieId: jellyfinId,
+    playback,
+    downloading,
+    download,
+    awaitingDownload,
+  });
+
+  const menuItems: TitleMenuItem[] = [];
+  if (downloading) {
+    if (download) {
+      menuItems.push({
+        label: "Cancel download",
+        destructive: true,
+        onSelect: () => setCancelOpen(true),
+      });
+    }
+    if (radarrId !== undefined) {
+      menuItems.push({
+        label: "Cancel request",
+        destructive: true,
+        onSelect: () => setCancelRequestOpen(true),
+      });
+    }
+  } else if (playable) {
+    menuItems.push(
+      {
+        label: pickerOpen ? "Hide more versions" : "Download a different version",
+        onSelect: () => setPickerOpen((open) => !open),
+      },
+      {
+        label: "Delete from library",
+        destructive: true,
+        onSelect: () => setDeleteOpen(true),
+      },
+    );
+  } else if (radarrId !== undefined) {
+    menuItems.push({
+      label: "Cancel request",
+      destructive: true,
+      onSelect: () => setCancelRequestOpen(true),
+    });
+  }
+
+  // Where the picker belongs: always for a request with nothing playable, on
+  // demand for a title that already plays.
+  const showPicker =
+    !downloading &&
+    radarrId !== undefined &&
+    ((playable && pickerOpen) || (!playable && jellyfinId === undefined));
+
   return (
     <div className="flex flex-col gap-6">
-      <a
-        href="#/library"
-        className="inline-flex w-fit items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ChevronLeftIcon className="size-4" />
-        Back to Library
-      </a>
-
       {movieQuery.isLoading ? <MoviePageSkeleton /> : null}
 
       {movieQuery.error && !movieQuery.data ? (
@@ -119,60 +176,49 @@ export function MoviePage({
         </Alert>
       ) : null}
 
-      {movieQuery.data ? (
+      {movie && movieQuery.data?.state === "ok" ? (
         <>
-          <MovieHeader movie={movieQuery.data} />
-          {movieQuery.data.detail && movieQuery.data.state === "ok" ? (
-            <Alert>
-              <CircleAlertIcon />
-              <AlertTitle>Release search is limited</AlertTitle>
-              <AlertDescription>{movieQuery.data.detail}</AlertDescription>
-            </Alert>
-          ) : null}
-          {download ? (
-            <MovieDownloadCard
-              download={download}
-              cancelDisabled={!cancelReady}
-              onCancel={() => setCancelOpen(true)}
+          <div className="flex flex-col gap-10">
+            <TitleHeader
+              poster={{ imageUrl: movie.imageUrl, alt: `${movie.title} poster` }}
+              title={movie.title}
+              metadata={[
+                movie.year === undefined ? undefined : String(movie.year),
+                movie.network,
+                movie.runtimeMinutes === undefined
+                  ? undefined
+                  : formatRuntime(movie.runtimeMinutes),
+                movie.rating === undefined
+                  ? undefined
+                  : `${movie.rating.toFixed(1)} / 10`,
+              ]}
+              synopsis={movie.overview}
+              dimmed={!playable}
+              action={<TitlePrimaryAction action={action} />}
+              menu={<TitleMenu items={menuItems} />}
+              attribution={
+                addedBy
+                  ? `${playable ? "Added" : "Requested"} by ${addedBy.name}`
+                  : undefined
+              }
             />
-          ) : awaitingDownload ? (
-            <Alert>
-              <Loader2Icon className="animate-spin" />
-              <AlertTitle>Starting download</AlertTitle>
-              <AlertDescription>
-                Waiting for qBittorrent to report the new torrent.
-              </AlertDescription>
-            </Alert>
-          ) : movieQuery.data.jellyfinId ? (
-            // Playable: the header carries the only action (Play), so no torrents.
-            null
-          ) : movieQuery.data.radarrId !== undefined ? (
-            <div className="flex flex-col gap-3">
-              <ReleaseChooser
-                kind="movie"
-                movieId={movieQuery.data.radarrId}
-                title={movieQuery.data.movie.title}
+
+            {showPicker && radarrId !== undefined ? (
+              <VersionPicker
+                scope="movie"
+                movieId={radarrId}
+                onClose={playable ? () => setPickerOpen(false) : undefined}
                 onGrabbed={() => {
+                  setPickerOpen(false);
                   setCancelReady(false);
                   setAwaitingDownload(true);
                   void movieQuery.refetch();
                 }}
               />
-              {cancelRequestTarget ? (
-                <div className="flex justify-end">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                    onClick={() => setCancelRequestOpen(true)}
-                  >
-                    <Trash2Icon data-icon="inline-start" />
-                    Cancel request
-                  </Button>
-                </div>
-              ) : null}
-            </div>
-          ) : (
+            ) : null}
+          </div>
+
+          {!downloading && !playable && radarrId === undefined ? (
             <Alert>
               <CircleAlertIcon />
               <AlertTitle>No release options available</AlertTitle>
@@ -181,159 +227,97 @@ export function MoviePage({
                 Add it to Radarr first.
               </AlertDescription>
             </Alert>
-          )}
+          ) : null}
+
           {download ? (
             <CancelMovieDownloadDialog
               open={cancelOpen}
               onOpenChange={setCancelOpen}
               source={source}
               id={id}
-              title={movieQuery.data.movie.title}
+              title={movie.title}
             />
           ) : null}
-          {cancelRequestTarget ? (
+
+          {radarrId !== undefined ? (
             <CancelRequestDialog
               open={cancelRequestOpen}
               onOpenChange={setCancelRequestOpen}
-              target={cancelRequestTarget}
-              title={movieQuery.data.movie.title}
+              target={{ service: "radarr", id: radarrId }}
+              title={movie.title}
+              onCancelled={() => setPickerOpen(false)}
             />
           ) : null}
+
+          <DeleteTitleDialog
+            open={deleteOpen}
+            onOpenChange={setDeleteOpen}
+            title={movie.title}
+            jellyfinId={jellyfinId}
+            arrService="radarr"
+            arrId={radarrId}
+            onDeleted={() => {
+              window.location.hash = "#/library";
+            }}
+          />
         </>
       ) : null}
     </div>
   );
 }
 
-function MovieHeader({ movie }: { movie: MovieDetailResponse }) {
-  const details = movie.movie;
-  return (
-    <section className="flex flex-col gap-5 sm:flex-row">
-      <div className="aspect-[2/3] w-32 shrink-0 overflow-hidden rounded-xl bg-muted">
-        {details.imageUrl ? (
-          <img
-            src={details.imageUrl}
-            alt={`${details.title} poster`}
-            className="size-full object-cover"
-          />
-        ) : (
-          <div className="flex size-full items-center justify-center">
-            <FilmIcon className="size-8 text-muted-foreground" />
-          </div>
-        )}
-      </div>
-      <div className="flex min-w-0 flex-col gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="outline">{movie.source === "jellyfin" ? "Jellyfin" : "Radarr"}</Badge>
-          {details.year ? <span className="text-sm text-muted-foreground">{details.year}</span> : null}
-          {details.network ? (
-            <span className="text-sm text-muted-foreground">{details.network}</span>
-          ) : null}
-          {details.rating !== undefined ? (
-            <span className="text-sm text-muted-foreground">{details.rating.toFixed(1)} / 10</span>
-          ) : null}
-          {details.runtimeMinutes !== undefined ? (
-            <span className="text-sm text-muted-foreground">
-              {formatRuntime(details.runtimeMinutes)}
-            </span>
-          ) : null}
-        </div>
-        <h1 className="font-heading text-2xl font-semibold tracking-tight">{details.title}</h1>
-        {details.overview ? (
-          <p className="max-w-3xl text-sm text-muted-foreground">{details.overview}</p>
-        ) : null}
-        {movie.jellyfinId ? (
-          <Button asChild variant="outline" size="sm" className="mt-2 w-fit">
-            <a href={`#/play/${encodeURIComponent(movie.jellyfinId)}`}>
-              <PlayIcon data-icon="inline-start" />
-              Play
-            </a>
-          </Button>
-        ) : null}
-      </div>
-    </section>
-  );
-}
-
-function MovieDownloadCard({
+function movieAction({
+  movieId,
+  playback,
+  downloading,
   download,
-  cancelDisabled,
-  onCancel,
+  awaitingDownload,
 }: {
-  download: ActivityItem;
-  cancelDisabled: boolean;
-  onCancel: () => void;
-}) {
-  return (
-    <Card className="gap-0 py-0">
-      <CardContent className="flex flex-col gap-3 p-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <DownloadIcon className="size-4 text-muted-foreground" />
-          <h2 className="font-heading text-base font-semibold">Downloading now</h2>
-          <Badge variant={download.status === "warning" ? "destructive" : "default"}>
-            {downloadLabel(download)}
-          </Badge>
-          <span className="text-xs text-muted-foreground">
-            {download.downloadClients[0] ?? "qBittorrent"}
-            {download.protocols[0] === "torrent" ? " · Torrent" : ""}
-            {download.quality ? ` · ${download.quality}` : ""}
-          </span>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="ml-auto text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-            disabled={cancelDisabled}
-            onClick={onCancel}
-          >
-            <Trash2Icon data-icon="inline-start" />
-            Cancel download
-          </Button>
-        </div>
-        <Progress value={download.progress} aria-label="Movie download progress" />
-        <div className="text-xs text-muted-foreground">
-          {download.progress}% complete
-        </div>
-        <DownloadStats download={download} />
-        {download.statusMessages?.length ? (
-          <p className="text-xs text-destructive">{download.statusMessages.join(" · ")}</p>
-        ) : null}
-      </CardContent>
-    </Card>
-  );
-}
-
-function downloadLabel(download: ActivityItem): string {
-  switch (download.status) {
-    case "downloading":
-      return `Downloading ${download.progress}%`;
-    case "importing":
-      return "Importing";
-    case "warning":
-      return "Needs attention";
-    default:
-      return "Queued";
+  movieId: string | undefined;
+  playback: ReturnType<typeof useTitlePlayback>;
+  downloading: boolean;
+  download: ActivityItem | undefined;
+  awaitingDownload: boolean;
+}): TitleAction {
+  if (downloading) {
+    const eta =
+      formatTimeLeftAbout(download?.timeLeft) ??
+      formatCompletionAbout(download?.estimatedCompletionTime);
+    return {
+      kind: "downloading",
+      ...(eta === undefined ? {} : { eta }),
+      progress: download?.progress ?? 0,
+      ...(download === undefined ? {} : { download }),
+    };
   }
+  if (movieId === undefined) {
+    return { kind: "not-downloaded" };
+  }
+  const href = playHash(movieId);
+  if (!playback.resumable) {
+    return { kind: "play", href, label: "Play" };
+  }
+  const detail = resumeDetail(playback.remainingMinutes);
+  return {
+    kind: "play",
+    href,
+    label: "Resume",
+    ...(detail === undefined ? {} : { detail }),
+  };
 }
 
 function MoviePageSkeleton() {
   return (
-    <div className="flex flex-col gap-5 sm:flex-row">
-      <Skeleton className="aspect-[2/3] w-32 shrink-0 rounded-xl" />
-      <div className="flex flex-1 flex-col gap-3">
-        <Skeleton className="h-5 w-40" />
-        <Skeleton className="h-9 w-2/3" />
-        <Skeleton className="h-4 w-full" />
-        <Skeleton className="h-4 w-4/5" />
+    <div className="flex flex-wrap items-end gap-x-10 gap-y-6">
+      <Skeleton className="aspect-[2/3] w-35 shrink-0 rounded-lg sm:w-55" />
+      <div className="flex min-w-0 flex-[999_1_480px] flex-col gap-4.5">
+        <Skeleton className="h-3.5 w-20" />
+        <Skeleton className="h-10 w-2/3 max-w-md" />
+        <Skeleton className="h-4 w-64" />
+        <Skeleton className="h-4 w-full max-w-xl" />
+        <Skeleton className="h-4 w-4/5 max-w-lg" />
+        <Skeleton className="h-12 w-32" />
       </div>
     </div>
   );
-}
-
-function formatRuntime(minutes: number): string {
-  if (minutes < 60) {
-    return `${minutes}m`;
-  }
-  const hours = Math.floor(minutes / 60);
-  const remainder = minutes % 60;
-  return remainder === 0 ? `${hours}h` : `${hours}h ${remainder}m`;
 }

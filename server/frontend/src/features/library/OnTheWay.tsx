@@ -10,7 +10,7 @@ import {
   type CancelRequestTarget,
 } from "@/features/library/CancelRequestDialog";
 import type { LibraryEntry } from "@/features/library/library-entries";
-import { entryTitle } from "@/features/library/library-entries";
+import { entryHref, entryTitle } from "@/features/library/library-entries";
 import { formatDownloaded, formatSpeed } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -22,6 +22,10 @@ import { cn } from "@/lib/utils";
  * release, so they sort first and link to the movie page's release chooser.
  * Those cards also carry the cancel action, since that is where a request that
  * nobody wants any more is going to be noticed.
+ *
+ * Every card is a link to its detail page (the whole card is clickable, and
+ * lifts on hover like the library grid). Interactive bits inside the card stay
+ * clickable on top of that overlay.
  */
 export function OnTheWay({ entries }: { entries: LibraryEntry[] }) {
   if (entries.length === 0) {
@@ -57,7 +61,8 @@ function OnTheWayCard({ entry }: { entry: LibraryEntry }) {
   const imageUrl = entry.requested?.imageUrl ?? entry.activity?.imageUrl;
   const activity = entry.activity;
   const isSeries = entry.type === "Series";
-  const pickHref = needsPick(entry) ? movieHref(entry) : undefined;
+  const href = entryHref(entry);
+  const pickHref = needsPick(entry) ? href : undefined;
   // Only requests with nothing playable yet can be cancelled from here; once
   // Jellyfin has the title it lives in the grid and cancellation belongs on the
   // detail page.
@@ -68,9 +73,17 @@ function OnTheWayCard({ entry }: { entry: LibraryEntry }) {
 
   return (
     <Card
-      className={cn("relative gap-0 p-3.5", pickHref && "ring-primary/40")}
+      className={cn(
+        "relative gap-0 p-3.5",
+        pickHref && "ring-primary/40",
+        href &&
+          "transition-transform hover:-translate-y-0.5 focus-within:ring-2 focus-within:ring-ring/50",
+      )}
     >
-      <div className="flex gap-3">
+      {href ? (
+        <a href={href} aria-label={title} className="absolute inset-0 rounded-xl" />
+      ) : null}
+      <div className="pointer-events-none relative flex gap-3">
         <div className="flex h-21 w-14 shrink-0 items-center justify-center overflow-hidden rounded-sm bg-muted">
           {imageUrl ? (
             <img src={imageUrl} alt="" loading="lazy" className="size-full object-cover" />
@@ -108,7 +121,7 @@ function OnTheWayCard({ entry }: { entry: LibraryEntry }) {
             </div>
           ) : null}
           {pickHref ? (
-            <Button asChild size="sm" className="w-fit">
+            <Button asChild size="sm" className="pointer-events-auto w-fit">
               <a href={pickHref}>
                 Pick a version
                 <ArrowRightIcon data-icon="inline-end" />
@@ -211,12 +224,3 @@ function seasonHint(seasons: number[]): string {
     : `Seasons ${sorted.join(", ")}`;
 }
 
-function movieHref(entry: LibraryEntry): string | undefined {
-  if (entry.requested?.kind === "movie") {
-    return `#/library/movie/radarr/${entry.requested.arrId}`;
-  }
-  if (entry.activity?.movieId !== undefined) {
-    return `#/library/movie/radarr/${entry.activity.movieId}`;
-  }
-  return undefined;
-}

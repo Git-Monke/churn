@@ -2,7 +2,7 @@ import { FilmIcon, TvIcon } from "lucide-react";
 
 import { Skeleton } from "@/components/ui/skeleton";
 import type { LibraryEntry } from "@/features/library/library-entries";
-import { entryTitle } from "@/features/library/library-entries";
+import { entryHref, entryTitle } from "@/features/library/library-entries";
 
 export function LibraryGrid({ entries }: { entries: LibraryEntry[] }) {
   return (
@@ -36,7 +36,7 @@ function LibraryCard({ entry }: { entry: LibraryEntry }) {
   const imageUrl =
     entry.library?.imageUrl ?? entry.requested?.imageUrl ?? entry.activity?.imageUrl;
   const kind = entry.type === "Movie" ? "Movie" : "Show";
-  const href = entry.type === "Series" ? showHref(entry) : movieHref(entry);
+  const href = entryHref(entry);
 
   const body = (
     <>
@@ -81,30 +81,4 @@ function LibraryCard({ entry }: { entry: LibraryEntry }) {
       {body}
     </a>
   );
-}
-
-function movieHref(entry: LibraryEntry): string | undefined {
-  if (entry.library) {
-    return `#/library/movie/jellyfin/${encodeURIComponent(entry.library.id)}`;
-  }
-  if (entry.requested?.kind === "movie") {
-    return `#/library/movie/radarr/${entry.requested.arrId}`;
-  }
-  if (entry.activity?.movieId !== undefined) {
-    return `#/library/movie/radarr/${entry.activity.movieId}`;
-  }
-  return undefined;
-}
-
-function showHref(entry: LibraryEntry): string | undefined {
-  if (entry.library) {
-    return `#/library/show/jellyfin/${encodeURIComponent(entry.library.id)}`;
-  }
-  if (entry.requested?.kind === "series") {
-    return `#/library/show/sonarr/${entry.requested.arrId}`;
-  }
-  if (entry.activity?.seriesId !== undefined) {
-    return `#/library/show/sonarr/${entry.activity.seriesId}`;
-  }
-  return undefined;
 }

@@ -1,29 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   ChevronLeftIcon,
   CircleAlertIcon,
   DownloadIcon,
-  Loader2Icon,
-  PlayIcon,
   FilmIcon,
-  Trash2Icon,
   TriangleAlertIcon,
 } from "lucide-react";
 
-import { fetchSeasonReleases, fetchShow, fetchShowDownloads } from "@/api/client";
-import type {
-  ActivityStatus,
-  CachedReleasesResponse,
-  ShowDetailResponse,
-  ShowDownload,
-  ShowEpisode,
-  ShowSeriesSummary,
-} from "@/api/types";
+import { fetchShow, fetchShowDownloads } from "@/api/client";
+import type { ShowDetailResponse, ShowEpisode } from "@/api/types";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import {
   Empty,
   EmptyDescription,
@@ -31,19 +19,20 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
-import { Progress } from "@/components/ui/progress";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { DownloadStats } from "@/features/download/DownloadStats";
-import { ReleaseChooser } from "@/features/releases/ReleaseChooser";
-import { ReleasePickerDialog } from "@/features/show/ReleasePickerDialog";
+import { VersionPicker } from "@/features/releases/VersionPicker";
 import { CancelEpisodeDownloadDialog } from "@/features/show/CancelEpisodeDownloadDialog";
+import { EpisodeList, EpisodeRow } from "@/features/show/EpisodeRow";
+import { ReleasePickerDialog } from "@/features/show/ReleasePickerDialog";
+import { SeasonTabs } from "@/features/show/SeasonTabs";
+import { DeleteTitleDialog } from "@/features/title/DeleteTitleDialog";
+import { TitleHeader } from "@/features/title/TitleHeader";
+import { TitleMenu, type TitleMenuItem } from "@/features/title/TitleMenu";
+import {
+  TitlePrimaryAction,
+  type TitleAction,
+} from "@/features/title/TitlePrimaryAction";
+import { useTitleAttribution } from "@/features/title/use-title-attribution";
 import { playHash, replaceHash, showHash, type ShowSource } from "@/hooks/use-hash-route";
 
 export function ShowPage({
@@ -78,10 +67,12 @@ export function ShowPage({
     ? showDownloadQuery.data.downloads
     : undefined;
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
-  const [releasesOpen, setReleasesOpen] = useState(false);
   const [releaseEpisode, setReleaseEpisode] = useState<ShowEpisode | null>(null);
   const [cancelEpisode, setCancelEpisode] = useState<ShowEpisode | null>(null);
-  const autoOpenedReleaseKey = useRef<string | null>(null);
+  /** Off by default: the season picker grabs a whole season pack at once. */
+  const [pickEpisodes, setPickEpisodes] = useState(false);
+  /** The season picker, opened from the banner for a partially downloaded season. */
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   useEffect(() => {
     const data = showQuery.data;
@@ -123,99 +114,49 @@ export function ShowPage({
     });
   }, [selectedSeason, showQuery.data, liveDownloads]);
 
+  // A different season is a different list: reset the local view state.
+  useEffect(() => {
+    setPickEpisodes(false);
+    setPickerOpen(false);
+  }, [selectedSeason]);
+
   // Jellyfin-backed shows still expose their Sonarr series id, so release
   // searches and episode cancels work from the same page.
   const sonarrSeriesId = showQuery.data?.sonarrId;
-  const seasonHasDownload = episodes.some(
-    (episode) =>
-      episode.download !== undefined &&
-      !(episode.download.untracked && episode.download.status === "warning"),
-  );
-  const seasonHasFile = episodes.some(
-    (episode) => episode.availability === "jellyfin" || episode.imported,
-  );
   const seasonDownloadActive = episodes.some(
     (episode) =>
       episode.download !== undefined && episode.download.status !== "warning",
   );
-  const showReleasePrompt =
+  const seasonHasFile = episodes.some(
+    (episode) => episode.availability === "jellyfin" || episode.imported,
+  );
+  const missingEpisodes = episodes.filter(
+    (episode) => episode.availability === "missing" && !episode.imported,
+  );
+  // A season with nothing at all opens on its download card; a season that is
+  // only partially there keeps a quieter banner until asked.
+  const seasonMissing = episodes.length > 0 && missingEpisodes.length === episodes.length;
+  const canPickSeason =
     sonarrSeriesId !== undefined &&
     selectedSeason !== null &&
-    episodes.some(
-      (episode) => episode.availability === "missing" && !episode.imported,
-    ) &&
-    !seasonHasDownload &&
-    !seasonHasFile;
-
-  // Share the chooser's cache key so opening it does not trigger another fetch.
-  const seasonReleasesQuery = useQuery<CachedReleasesResponse>({
-    queryKey: ["season-releases", sonarrSeriesId, selectedSeason, null],
-    queryFn: () =>
-      fetchSeasonReleases(sonarrSeriesId as number, selectedSeason as number),
-    enabled:
-      sonarrSeriesId !== undefined &&
-      selectedSeason !== null &&
-      showReleasePrompt,
-    staleTime: 30_000,
-    refetchOnWindowFocus: false,
-    refetchInterval: (query) =>
-      query.state.data?.state === "searching" || query.state.data?.refreshing
-        ? 1_000
-        : false,
-  });
-
-  useEffect(() => {
-    autoOpenedReleaseKey.current = null;
-  }, [sonarrSeriesId, selectedSeason]);
-
-  useEffect(() => {
-    if (seasonDownloadActive) {
-      setReleasesOpen(false);
-    }
-  }, [seasonDownloadActive]);
-
-  useEffect(() => {
-    const releases = seasonReleasesQuery.data;
-    if (
-      sonarrSeriesId === undefined ||
-      selectedSeason === null ||
-      !showReleasePrompt ||
-      releasesOpen ||
-      releases === undefined ||
-      releases.releaseCount === 0
-    ) {
-      return;
-    }
-    const key = `${sonarrSeriesId}:${selectedSeason}`;
-    if (autoOpenedReleaseKey.current === key) {
-      return;
-    }
-    autoOpenedReleaseKey.current = key;
-    setReleasesOpen(true);
-  }, [
-    sonarrSeriesId,
-    selectedSeason,
-    showReleasePrompt,
-    releasesOpen,
-    seasonReleasesQuery.data,
-  ]);
-
-  const searchingSeasonReleases =
-    showReleasePrompt &&
-    !releasesOpen &&
-    (seasonReleasesQuery.isLoading ||
-      (seasonReleasesQuery.data?.state === "searching" &&
-        seasonReleasesQuery.data.releaseCount === 0));
+    !seasonDownloadActive &&
+    !pickEpisodes &&
+    missingEpisodes.length > 0;
+  const showSeasonPicker = canPickSeason && (seasonMissing || pickerOpen);
+  const showMissingBanner = canPickSeason && !seasonMissing && !pickerOpen;
 
   return (
-    <div className="flex flex-col gap-6">
-      <a
-        href="#/library"
-        className="inline-flex w-fit items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ChevronLeftIcon className="size-4" />
-        Back to Library
-      </a>
+    <div className="flex flex-col gap-8">
+      {/* The header owns the back link once the show is loaded. */}
+      {showQuery.data?.state === "ok" ? null : (
+        <a
+          href="#/library"
+          className="inline-flex w-fit items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+        >
+          <ChevronLeftIcon className="size-4" />
+          Back to Library
+        </a>
+      )}
 
       {showQuery.isLoading ? <ShowPageSkeleton /> : null}
 
@@ -233,7 +174,7 @@ export function ShowPage({
 
       {showQuery.data?.state === "ok" ? (
         <>
-          <ShowHeader series={showQuery.data.series} source={source} />
+          <ShowHeader data={showQuery.data} source={source} id={id} />
 
           {showQuery.data.warnings?.map((warning) => (
             <Alert key={warning}>
@@ -244,71 +185,86 @@ export function ShowPage({
           ))}
 
           {showQuery.data.seasons.length > 0 ? (
-            <section className="flex flex-col gap-4">
-              <div className="flex flex-wrap items-end justify-between gap-3">
-                <div className="flex flex-col gap-1">
-                  <h2 className="font-heading text-xl font-semibold tracking-tight">Episodes</h2>
-                  <p className="text-sm text-muted-foreground">
-                    {showQuery.data.episodes.length} episodes across{" "}
-                    {showQuery.data.seasons.length}{" "}
-                    {showQuery.data.seasons.length === 1 ? "season" : "seasons"}
-                  </p>
-                </div>
-                <Select
-                  value={selectedSeason === null ? undefined : String(selectedSeason)}
-                  onValueChange={(value) => {
-                    const next = Number(value);
-                    setSelectedSeason(next);
-                    // Keep the season in the URL so the player can return to it.
-                    replaceHash(showHash(source, id, next));
-                  }}
-                >
-                  <SelectTrigger className="w-56" aria-label="Choose season">
-                    <SelectValue placeholder="Choose season" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {showQuery.data.seasons.map((season) => (
-                      <SelectItem
-                        key={season.seasonNumber}
-                        value={String(season.seasonNumber)}
+            <section className="flex flex-col gap-5">
+
+              <SeasonTabs
+                seasons={showQuery.data.seasons}
+                selected={selectedSeason}
+                onSelect={(next) => {
+                  setSelectedSeason(next);
+                  // Keep the season in the URL so the player can return to it.
+                  replaceHash(showHash(source, id, next));
+                }}
+              />
+
+              {showSeasonPicker && selectedSeason !== null ? (
+                <div className="mt-1">
+                  <VersionPicker
+                    key={`${sonarrSeriesId}:${selectedSeason}`}
+                    scope="season"
+                    seriesId={sonarrSeriesId}
+                    seasonNumber={selectedSeason}
+                    title={
+                      seasonHasFile
+                        ? `${missingEpisodes.length} ${
+                            missingEpisodes.length === 1 ? "episode is" : "episodes are"
+                          } still missing`
+                        : `${seasonName(selectedSeason)} isn’t downloaded yet`
+                    }
+                    subtitle={
+                      seasonHasFile
+                        ? "Pick a version to fill in the missing episodes, or grab them one at a time."
+                        : `Pick a quality and all ${episodes.length} ${
+                            episodes.length === 1 ? "episode" : "episodes"
+                          } will download together.`
+                    }
+                    primaryLabel="Download season"
+                    footerExtra={
+                      <Button
+                        variant="link"
+                        size="sm"
+                        className="h-auto px-0 text-sm underline"
+                        onClick={() => setPickEpisodes(true)}
                       >
-                        {season.name} · {season.episodeCount} episodes
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {sonarrSeriesId !== undefined && selectedSeason !== null ? (
+                        Pick episodes one at a time
+                      </Button>
+                    }
+                    onGrabbed={() => void showQuery.refetch()}
+                  />
+                </div>
+              ) : null}
+
+              {showMissingBanner ? (
+                <div className="flex flex-wrap items-center gap-4 rounded-xl bg-card px-4.5 py-3.5">
+                  <p className="flex-1 text-sm text-foreground">
+                    {missingEpisodes.length} {missingEpisodes.length === 1 ? "episode" : "episodes"}{" "}
+                    in this season {missingEpisodes.length === 1 ? "isn't" : "aren't"} downloaded yet.
+                  </p>
                   <Button
                     variant="outline"
-                    size="sm"
-                    onClick={() => setReleasesOpen((open) => !open)}
-                    disabled={seasonDownloadActive}
+                    className="h-10 shrink-0 border-primary px-4 text-sm font-medium"
+                    onClick={() => setPickerOpen(true)}
                   >
-                    <DownloadIcon data-icon="inline-start" />
-                    {seasonDownloadActive
-                      ? "Download in progress"
-                      : releasesOpen
-                        ? "Hide releases"
-                        : "Choose release"}
+                    Get missing episodes
                   </Button>
-                ) : null}
-              </div>
+                </div>
+              ) : null}
 
-              {sonarrSeriesId !== undefined &&
-              releasesOpen &&
-              selectedSeason !== null ? (
-                <ReleaseChooser
-                  key={`${sonarrSeriesId}:${selectedSeason}`}
-                  kind="series"
-                  seriesId={sonarrSeriesId}
-                  seasonNumber={selectedSeason}
-                  title={showQuery.data.series.title}
-                  onGrabbed={() => {
-                    autoOpenedReleaseKey.current = `${sonarrSeriesId}:${selectedSeason}`;
-                    setReleasesOpen(false);
-                    void showQuery.refetch();
-                  }}
-                />
+              {pickEpisodes && missingEpisodes.length > 0 ? (
+                <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
+                  <span>Picking episodes one at a time.</span>
+                  <Button
+                    variant="link"
+                    size="sm"
+                    className="h-auto px-0 text-sm underline"
+                    onClick={() => {
+                      setPickEpisodes(false);
+                      setPickerOpen(true);
+                    }}
+                  >
+                    Download the whole season instead
+                  </Button>
+                </div>
               ) : null}
 
               <ReleasePickerDialog
@@ -342,67 +298,40 @@ export function ShowPage({
                 seasonPack={cancelEpisode?.download?.seasonPack === true}
               />
 
-              {searchingSeasonReleases && !releasesOpen ? (
-                <Alert>
-                  <Loader2Icon className="animate-spin" />
-                  <AlertTitle>
-                    Searching for {selectedSeason === null ? "season" : seasonName(selectedSeason)} releases
-                  </AlertTitle>
-                  <AlertDescription>
-                    This runs in the background. The release options will open automatically
-                    as soon as the first results arrive.
-                  </AlertDescription>
-                </Alert>
-              ) : null}
-
-              {showReleasePrompt && !searchingSeasonReleases && !releasesOpen ? (
-                <Alert>
-                  <TriangleAlertIcon />
-                  <AlertTitle>Choose a release for this season</AlertTitle>
-                  <AlertDescription>
-                    Browse the cached quality options, compare seeders and size, then pick the
-                    torrent you want. Multi-season packs are listed under every season they cover.
-                  </AlertDescription>
-                  <AlertAction>
-                    <Button variant="outline" size="sm" onClick={() => setReleasesOpen(true)}>
-                      Choose release
-                    </Button>
-                  </AlertAction>
-                </Alert>
-              ) : null}
-
               {episodes.length > 0 ? (
-                <div className="flex flex-col gap-3">
+                <EpisodeList>
                   {episodes.map((episode) => (
                     <EpisodeRow
                       key={episode.key}
                       episode={episode}
+                      compact={!seasonHasFile}
                       playHref={
-                        episode.jellyfinId && episode.availability === "jellyfin"
-                          ? playHash(episode.jellyfinId, {
-                              source,
-                              id,
-                              season: selectedSeason ?? undefined,
-                            })
-                          : undefined
-                      }
-                      onChooseRelease={
-                        sonarrSeriesId !== undefined &&
-                        episode.download === undefined &&
-                        episode.availability === "missing" &&
-                        !episode.imported
-                          ? () => setReleaseEpisode(episode)
-                          : undefined
-                      }
-                      onCancelDownload={
-                        sonarrSeriesId !== undefined &&
-                        episode.download !== undefined
-                          ? () => setCancelEpisode(episode)
-                          : undefined
-                      }
-                    />
-                  ))}
-                </div>
+                          episode.jellyfinId && episode.availability === "jellyfin"
+                            ? playHash(episode.jellyfinId, {
+                                source,
+                                id,
+                                season: selectedSeason ?? undefined,
+                              })
+                            : undefined
+                        }
+                        onChooseRelease={
+                          pickEpisodes &&
+                          sonarrSeriesId !== undefined &&
+                          episode.download === undefined &&
+                          episode.availability === "missing" &&
+                          !episode.imported
+                            ? () => setReleaseEpisode(episode)
+                            : undefined
+                        }
+                        onCancelDownload={
+                          sonarrSeriesId !== undefined &&
+                          episode.download !== undefined
+                            ? () => setCancelEpisode(episode)
+                            : undefined
+                        }
+                      />
+                    ))}
+                </EpisodeList>
               ) : (
                 <Empty className="border">
                   <EmptyHeader>
@@ -450,189 +379,108 @@ export function ShowPage({
   );
 }
 
-function ShowHeader({ series, source }: { series: ShowSeriesSummary; source: ShowSource }) {
-  return (
-    <section className="flex flex-col gap-5 sm:flex-row">
-      <div className="aspect-[2/3] w-32 shrink-0 overflow-hidden rounded-xl bg-muted">
-        {series.imageUrl ? (
-          <img
-            src={series.imageUrl}
-            alt={`${series.title} poster`}
-            className="size-full object-cover"
-          />
-        ) : (
-          <div className="flex size-full items-center justify-center">
-            <FilmIcon className="size-8 text-muted-foreground" />
-          </div>
-        )}
-      </div>
-      <div className="flex min-w-0 flex-col gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="outline">{source === "jellyfin" ? "Jellyfin" : "Sonarr"}</Badge>
-          {series.year ? <span className="text-sm text-muted-foreground">{series.year}</span> : null}
-          {series.network ? (
-            <span className="text-sm text-muted-foreground">{series.network}</span>
-          ) : null}
-          {series.rating !== undefined ? (
-            <span className="text-sm text-muted-foreground">{series.rating.toFixed(1)} / 10</span>
-          ) : null}
-        </div>
-        <h1 className="font-heading text-2xl font-semibold tracking-tight">{series.title}</h1>
-        {series.overview ? (
-          <p className="max-w-3xl text-sm text-muted-foreground">{series.overview}</p>
-        ) : null}
-      </div>
-    </section>
-  );
-}
-
-function EpisodeRow({
-  episode,
-  playHref,
-  onChooseRelease,
-  onCancelDownload,
+/**
+ * Poster, title and the one primary action for a show. Playback always targets
+ * the first playable episode: there is no per-episode watch state yet, so the
+ * page cannot say where someone left off.
+ */
+function ShowHeader({
+  data,
+  source,
+  id,
 }: {
-  episode: ShowEpisode;
-  playHref?: string;
-  onChooseRelease?: () => void;
-  onCancelDownload?: () => void;
+  data: ShowDetailResponse;
+  source: ShowSource;
+  id: string;
 }) {
-  const download = episode.download;
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const { series, episodes, seasons, sonarrId } = data;
+  const playable = episodes.some((episode) => episode.availability === "jellyfin");
+  const jellyfinId = source === "jellyfin" ? id : undefined;
+  const regularSeasons = seasons.filter((season) => season.seasonNumber !== 0);
+  const addedBy = useTitleAttribution(
+    {
+      kind: "series",
+      ...(series.tvdbId === undefined ? {} : { tvdbId: series.tvdbId }),
+      ...(series.tmdbId === undefined ? {} : { tmdbId: series.tmdbId }),
+      title: series.title,
+      ...(series.year === undefined ? {} : { year: series.year }),
+    },
+    playable,
+  );
+
+  const episode = firstPlayableEpisode(episodes);
+  const action: TitleAction =
+    episode?.jellyfinId === undefined
+      ? { kind: "not-downloaded" }
+      : {
+          kind: "play",
+          href: playHash(episode.jellyfinId, {
+            source,
+            id,
+            season: episode.seasonNumber,
+          }),
+          label: `Play S${episode.seasonNumber} · E${episode.episodeNumber}`,
+        };
+
+  const menuItems: TitleMenuItem[] = [
+    {
+      label: "Delete from library",
+      destructive: true,
+      onSelect: () => setDeleteOpen(true),
+    },
+  ];
+
   return (
-    <Card className="gap-0 py-0">
-      <CardContent className="flex flex-col gap-3 p-4 sm:flex-row">
-        <div className="flex shrink-0 flex-col gap-1 sm:w-28">
-          <span className="font-mono text-xs font-medium text-muted-foreground">
-            {episodeCode(episode)}
-          </span>
-          {episode.imageUrl ? (
-            <img
-              src={episode.imageUrl}
-              alt=""
-              loading="lazy"
-              className="hidden aspect-video w-28 rounded-md object-cover sm:block"
-            />
-          ) : null}
-        </div>
-
-        <div className="flex min-w-0 flex-1 flex-col gap-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 className="font-medium">{episode.title}</h3>
-            {episode.imported && episode.availability === "missing" ? (
-              <Badge variant="outline">Waiting for Jellyfin</Badge>
-            ) : episode.availability !== "missing" || !download ? (
-              <AvailabilityBadge availability={episode.availability} />
-            ) : null}
-            {download ? <DownloadBadge download={download} /> : null}
-            {playHref || onChooseRelease || onCancelDownload ? (
-              <div className="ml-auto flex flex-wrap items-center gap-2">
-                {playHref ? (
-                  <Button asChild variant="secondary" size="sm">
-                    <a href={playHref}>
-                      <PlayIcon data-icon="inline-start" />
-                      Play
-                    </a>
-                  </Button>
-                ) : null}
-                {onChooseRelease ? (
-                  <Button variant="outline" size="sm" onClick={onChooseRelease}>
-                    <DownloadIcon data-icon="inline-start" />
-                    Choose release
-                  </Button>
-                ) : null}
-                {onCancelDownload ? (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                    onClick={onCancelDownload}
-                  >
-                    <Trash2Icon data-icon="inline-start" />
-                    Cancel download
-                  </Button>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            {episode.airDate ? <span>{formatAirDate(episode.airDate)}</span> : null}
-            {episode.runtimeMinutes !== undefined ? (
-              <span>{formatRuntime(episode.runtimeMinutes)}</span>
-            ) : null}
-            {download?.quality ? <span>{download.quality}</span> : null}
-            {download ? <span>{downloadClientLabel(download)}</span> : null}
-          </div>
-
-          {episode.overview ? (
-            <p className="line-clamp-2 text-sm text-muted-foreground">{episode.overview}</p>
-          ) : null}
-
-          {download ? (
-            <div className="flex flex-col gap-1.5">
-              <Progress
-                value={download.progress}
-                aria-label={`${episode.title} download progress`}
-              />
-              <div className="text-xs text-muted-foreground">
-                {download.seasonPack ? "Season pack · " : ""}
-                {download.progress}% complete
-              </div>
-              <DownloadStats download={download} compact />
-              {download.statusMessages?.length ? (
-                <p className="text-xs text-destructive">{download.statusMessages.join(" · ")}</p>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-      </CardContent>
-    </Card>
+    <>
+      <TitleHeader
+        poster={{ imageUrl: series.imageUrl, alt: `${series.title} poster` }}
+        title={series.title}
+        metadata={[
+          series.year === undefined ? undefined : String(series.year),
+          series.network,
+          regularSeasons.length === 0
+            ? undefined
+            : `${regularSeasons.length} ${regularSeasons.length === 1 ? "season" : "seasons"}`,
+          series.rating === undefined ? undefined : `${series.rating.toFixed(1)} / 10`,
+        ]}
+        synopsis={series.overview}
+        dimmed={!playable}
+        action={<TitlePrimaryAction action={action} />}
+        menu={<TitleMenu items={menuItems} />}
+        attribution={
+          addedBy ? `${playable ? "Added" : "Requested"} by ${addedBy.name}` : undefined
+        }
+      />
+      <DeleteTitleDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        title={series.title}
+        jellyfinId={jellyfinId}
+        arrService={sonarrId === undefined ? undefined : "sonarr"}
+        arrId={sonarrId}
+        onDeleted={() => {
+          window.location.hash = "#/library";
+        }}
+      />
+    </>
   );
 }
 
-function AvailabilityBadge({ availability }: { availability: ShowEpisode["availability"] }) {
-  switch (availability) {
-    case "jellyfin":
-      return <Badge variant="secondary">Available</Badge>;
-    case "upcoming":
-      return <Badge variant="outline">Upcoming</Badge>;
-    default:
-      return <Badge variant="outline">Missing</Badge>;
-  }
-}
-
-function DownloadBadge({ download }: { download: ShowDownload }) {
-  return (
-    <Badge variant={downloadBadgeVariant(download.status)}>
-      {downloadBadgeLabel(download)}
-    </Badge>
-  );
-}
-
-function downloadBadgeLabel(download: ShowDownload): string {
-  switch (download.status) {
-    case "downloading":
-      return `Downloading ${download.progress}%`;
-    case "importing":
-      return "Importing";
-    case "warning":
-      return "Needs attention";
-    default:
-      return "Queued";
-  }
-}
-
-function downloadBadgeVariant(status: ActivityStatus): "default" | "secondary" | "destructive" | "outline" {
-  switch (status) {
-    case "downloading":
-      return "default";
-    case "importing":
-      return "secondary";
-    case "warning":
-      return "destructive";
-    default:
-      return "outline";
-  }
+/** First non-special episode Jellyfin can actually play. */
+function firstPlayableEpisode(episodes: ShowEpisode[]): ShowEpisode | undefined {
+  return [...episodes]
+    .filter(
+      (episode) =>
+        episode.availability === "jellyfin" &&
+        episode.jellyfinId !== undefined &&
+        episode.seasonNumber !== 0,
+    )
+    .sort(
+      (left, right) =>
+        left.seasonNumber - right.seasonNumber ||
+        left.episodeNumber - right.episodeNumber,
+    )[0];
 }
 
 function ShowStateNotice({ show }: { show: ShowDetailResponse }) {
@@ -662,18 +510,20 @@ function ShowStateNotice({ show }: { show: ShowDetailResponse }) {
 function ShowPageSkeleton() {
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-5 sm:flex-row">
-        <Skeleton className="aspect-[2/3] w-32 shrink-0 rounded-xl" />
-        <div className="flex flex-1 flex-col gap-2">
-          <Skeleton className="h-5 w-48" />
-          <Skeleton className="h-8 w-72" />
-          <Skeleton className="h-4 w-full max-w-2xl" />
-          <Skeleton className="h-4 w-3/4 max-w-xl" />
+      <div className="flex flex-wrap items-end gap-x-10 gap-y-6">
+        <Skeleton className="aspect-[2/3] w-35 shrink-0 rounded-lg sm:w-55" />
+        <div className="flex min-w-0 flex-[999_1_480px] flex-col gap-4.5">
+          <Skeleton className="h-3.5 w-20" />
+          <Skeleton className="h-10 w-2/3 max-w-md" />
+          <Skeleton className="h-4 w-64" />
+          <Skeleton className="h-4 w-full max-w-xl" />
+          <Skeleton className="h-4 w-4/5 max-w-lg" />
+          <Skeleton className="h-12 w-32" />
         </div>
       </div>
       <div className="flex flex-col gap-3">
         {Array.from({ length: 5 }).map((_, index) => (
-          <Skeleton key={index} className="h-28 rounded-xl" />
+          <Skeleton key={index} className="h-20 rounded-xl" />
         ))}
       </div>
     </div>
@@ -686,33 +536,4 @@ function seasonName(seasonNumber: number): string {
 
 function episodeCode(episode: ShowEpisode): string {
   return `S${String(episode.seasonNumber).padStart(2, "0")}E${String(episode.episodeNumber).padStart(2, "0")}`;
-}
-
-function downloadClientLabel(download: ShowDownload): string {
-  const protocol = download.protocol === "usenet" ? "Usenet" : download.protocol === "torrent" ? "Torrent" : undefined;
-  if (download.downloadClient && protocol) {
-    return `${download.downloadClient} · ${protocol}`;
-  }
-  return download.downloadClient ?? protocol ?? "Downloading";
-}
-
-function formatAirDate(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-  return new Intl.DateTimeFormat(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  }).format(date);
-}
-
-function formatRuntime(minutes: number): string {
-  if (minutes < 60) {
-    return `${minutes}m`;
-  }
-  const hours = Math.floor(minutes / 60);
-  const remainder = minutes % 60;
-  return remainder === 0 ? `${hours}h` : `${hours}h ${remainder}m`;
 }

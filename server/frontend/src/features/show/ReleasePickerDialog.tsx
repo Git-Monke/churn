@@ -5,7 +5,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { ReleaseChooser } from "@/features/releases/ReleaseChooser";
+import { VersionPicker } from "@/features/releases/VersionPicker";
 
 interface ReleasePickerDialogProps {
   open: boolean;
@@ -16,6 +16,10 @@ interface ReleasePickerDialogProps {
   showTitle?: string;
 }
 
+/**
+ * Per-episode variant of the release picker, used when picking episodes one at
+ * a time instead of grabbing the whole season at once.
+ */
 export function ReleasePickerDialog({
   open,
   onOpenChange,
@@ -28,23 +32,24 @@ export function ReleasePickerDialog({
     return null;
   }
 
+  const episodeLabel = `S${String(seasonNumber).padStart(2, "0")}E${String(episodeNumber).padStart(2, "0")}`;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Choose a release</DialogTitle>
+          <DialogTitle>Download one episode</DialogTitle>
           <DialogDescription>
             {showTitle ? `${showTitle} · ` : ""}
-            Search every indexer for this episode and pick a release to send straight to
-            qBittorrent.
+            {episodeLabel} only. Every indexer is searched for this episode.
           </DialogDescription>
         </DialogHeader>
-        <ReleaseChooser
-          kind="series"
+        <VersionPicker
+          scope="season"
           seriesId={seriesId}
           seasonNumber={seasonNumber}
           episodeNumber={episodeNumber}
-          title={showTitle}
+          primaryLabel="Download episode"
           onGrabbed={() => onOpenChange(false)}
         />
       </DialogContent>

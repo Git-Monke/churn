@@ -22,9 +22,15 @@ interface StatItem {
 export function DownloadStats({
   download,
   compact = false,
+  percent,
+  showEta = true,
 }: {
   download: DownloadStatsSource;
   compact?: boolean;
+  /** Whole-number progress, appended to the transferred size when known. */
+  percent?: number;
+  /** Callers that print the ETA themselves turn this off. */
+  showEta?: boolean;
 }) {
   const items: StatItem[] = [];
 
@@ -33,13 +39,21 @@ export function DownloadStats({
   }
   const downloaded = formatDownloaded(download.sizeBytes, download.sizeLeftBytes);
   if (downloaded !== undefined) {
-    items.push({ label: "Downloaded", value: downloaded });
+    items.push({
+      label: "Downloaded",
+      value:
+        percent === undefined || percent <= 0
+          ? downloaded
+          : `${downloaded} (${Math.round(percent)}%)`,
+    });
   }
   const seeders = seederLabel(download);
   if (seeders !== undefined) {
     items.push({ label: "Seeders", value: seeders });
   }
-  items.push({ label: "ETA", value: downloadEta(download) ?? "—" });
+  if (showEta) {
+    items.push({ label: "ETA", value: downloadEta(download) ?? "—" });
+  }
 
   if (compact) {
     return (
