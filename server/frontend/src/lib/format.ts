@@ -69,6 +69,27 @@ export function formatAirDate(value: string): string {
   }).format(date);
 }
 
+/**
+ * A calendar date (`2009-04-16`, or a Jellyfin timestamp of
+ * `2009-04-16T00:00:00.0000000Z`) shown as written. `formatAirDate` shifts those
+ * into the viewer's timezone, which turns a midnight UTC premiere into the
+ * previous day west of Greenwich.
+ */
+export function formatCalendarDate(value: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  const date = match
+    ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
+    : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  }).format(date);
+}
+
 /** `1h 32m`, `45m` or `2h` — used by the title header metadata row. */
 export function formatRuntime(minutes: number): string {
   if (minutes < 60) {

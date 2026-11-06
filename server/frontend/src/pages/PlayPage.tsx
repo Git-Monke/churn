@@ -2,14 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type Hls from "hls.js";
 import { toast } from "sonner";
-import {
-  ChevronLeftIcon,
-  CircleAlertIcon,
-  LoaderCircleIcon,
-  PlayIcon,
-  SkipForwardIcon,
-  TriangleAlertIcon,
-} from "lucide-react";
+import { ChevronLeftIcon, CircleAlertIcon } from "lucide-react";
 
 import {
   fetchPlayback,
@@ -23,18 +16,22 @@ import type {
   PlaybackReport,
 } from "@/api/types";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Switch } from "@/components/ui/switch";
+import {
+  EndedOverlay,
+  PlaybackErrorOverlay,
+  SkipIntroButton,
+} from "@/features/player/PlayerOverlays";
+import { PlaybackSettingsMenu } from "@/features/player/PlaybackSettingsMenu";
+import { PlaybackTitleRow } from "@/features/player/PlaybackTitleRow";
+import { UpNextCard } from "@/features/player/UpNextCard";
+import {
+  TICKS_PER_SECOND,
+  upNextTriggerSeconds,
+  UP_NEXT_COUNTDOWN_SECONDS,
+} from "@/features/player/playback-meta";
+import { usePlayerShortcuts } from "@/features/player/use-player-shortcuts";
 import {
   playHash,
   replaceHash,
@@ -49,10 +46,8 @@ import {
 } from "@/lib/playback-preferences";
 import { isInsideSegment } from "@/lib/playback-segments";
 
-const TICKS_PER_SECOND = 10_000_000;
 const REPORT_INTERVAL_MS = 10_000;
 const RESUME_END_MARGIN_SECONDS = 30;
-const NEXT_EPISODE_COUNTDOWN_SECONDS = 3;
 // A timeupdate gap larger than this means the user jumped rather than played
 // through the trigger naturally. Autoplay only arms on natural playback.
 const NEXT_EPISODE_NATURAL_GAP_SECONDS = 2;
@@ -86,6 +81,7 @@ export function PlayPage({ id, from }: { id: string; from?: ShowReturnContext })
 
   const item = playbackQuery.data?.item;
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const frameRef = useRef<HTMLDivElement | null>(null);
   const hlsRef = useRef<Hls | null>(null);
   const itemRef = useRef<PlaybackItem | undefined>(undefined);
   const positionRef = useRef(0);
@@ -100,11 +96,11 @@ export function PlayPage({ id, from }: { id: string; from?: ShowReturnContext })
     previous?: PlaybackItem;
   } | null>(null);
   const [switchingQuality, setSwitchingQuality] = useState(false);
-  const [resumed, setResumed] = useState(false);
   const [showSkipIntro, setShowSkipIntro] = useState(false);
   const [nextPrompt, setNextPrompt] = useState<NextPromptState | null>(null);
   const [mediaIssue, setMediaIssue] = useState<MediaIssue | null>(null);
   const [recovering, setRecovering] = useState(false);
+  const [ended, setEnded] = useState(false);
   const [recovery, setRecovery] = useState<{
     itemId: string;
     targetTicks: number;
@@ -122,10 +118,10 @@ export function PlayPage({ id, from }: { id: string; from?: ShowReturnContext })
   const seekingRef = useRef(false);
   const seekedRef = useRef(false);
   const lastSeekAtRef = useRef(0);
-  const playNextRef = useRef<() => void>(() => {});
+  const advanceNextRef = useRef<() => void>(() => {});
 
   itemRef.current = item;
-  playNextRef.current = playNext;
+  advanceNextRef.current = () => advanceToNext(true);
 
   // Finish a quality switch once the backend answers with the new stream: the
   // previous Jellyfin play session is stopped and the new one starts at the
@@ -196,7 +192,7 @@ export function PlayPage({ id, from }: { id: string; from?: ShowReturnContext })
         Math.ceil((deadline - Date.now()) / 1000),
       );
       if (remaining <= 0) {
-        playNextRef.current();
+        advanceNextRef.current();
         return;
       }
       setNextPrompt((previous) =>
@@ -262,6 +258,7 @@ export function PlayPage({ id, from }: { id: string; from?: ShowReturnContext })
     setMediaIssue(null);
     setShowSkipIntro(false);
     setNextPrompt(null);
+    setEnded(false);
     promptShownRef.current = false;
     promptDismissedRef.current = false;
     advancingRef.current = false;
@@ -561,7 +558,6 @@ export function PlayPage({ id, from }: { id: string; from?: ShowReturnContext })
       if (!nearEnd) {
         video.currentTime = resumeSeconds;
         positionRef.current = Math.round(resumeSeconds * TICKS_PER_SECOND);
-        setResumed(true);
       }
     }
     // The user already chose this item; start it as soon as the source is
@@ -654,10 +650,16 @@ export function PlayPage({ id, from }: { id: string; from?: ShowReturnContext })
           isInsideSegment(intro, video.currentTime),
       );
 
-      const outro = current?.segments?.outro;
+      // The credits marker or the last 20 seconds, whichever comes first.
+      const triggerAt = current?.nextEpisode
+        ? upNextTriggerSeconds({
+            durationSec: Number.isFinite(video.duration) ? video.duration : undefined,
+            outro: current.segments?.outro,
+          })
+        : undefined;
       if (
         current?.nextEpisode &&
-        outro &&
+        triggerAt !== undefined &&
         !video.ended &&
         !recoveringRef.current &&
         !mediaIssue &&
@@ -665,8 +667,7 @@ export function PlayPage({ id, from }: { id: string; from?: ShowReturnContext })
         !promptDismissedRef.current &&
         !advancingRef.current
       ) {
-        const triggerAt = Math.max(0, outro.startSec);
-        const advanceAt = triggerAt + NEXT_EPISODE_COUNTDOWN_SECONDS;
+        const advanceAt = triggerAt + UP_NEXT_COUNTDOWN_SECONDS;
         if (video.currentTime >= triggerAt) {
           if (!promptShownRef.current) {
             promptShownRef.current = true;
@@ -681,7 +682,7 @@ export function PlayPage({ id, from }: { id: string; from?: ShowReturnContext })
           }
           const auto = autoArmedRef.current && autoplay;
           if (auto && video.currentTime >= advanceAt) {
-            playNext();
+            advanceToNext(true);
           } else {
             const remaining = auto
               ? Math.max(1, Math.ceil(advanceAt - video.currentTime))
@@ -724,7 +725,12 @@ export function PlayPage({ id, from }: { id: string; from?: ShowReturnContext })
     }
   }
 
-  function playNext() {
+  /**
+   * Jump to the next episode. `markWatched` reports the whole runtime so
+   * Jellyfin marks the finished episode played; an explicit mid-episode skip
+   * reports the current position instead.
+   */
+  function advanceToNext(markWatched: boolean) {
     const current = itemRef.current;
     const next = current?.nextEpisode;
     if (!current || !next || advancingRef.current) {
@@ -736,12 +742,11 @@ export function PlayPage({ id, from }: { id: string; from?: ShowReturnContext })
     setNextPrompt(null);
 
     const video = videoRef.current;
-    const durationTicks =
-      video && Number.isFinite(video.duration) && video.duration > 0
+    const durationTicks = markWatched
+      ? video && Number.isFinite(video.duration) && video.duration > 0
         ? Math.round(video.duration * TICKS_PER_SECOND)
-        : (current.runtimeTicks ?? positionRef.current);
-    // Advancing at the credits marker must still report the full duration so
-    // Jellyfin marks the episode played.
+        : (current.runtimeTicks ?? positionRef.current)
+      : positionRef.current;
     stopPlayback(durationTicks);
 
     const nextFrom = from
@@ -759,6 +764,34 @@ export function PlayPage({ id, from }: { id: string; from?: ShowReturnContext })
   function dismissNextPrompt() {
     promptDismissedRef.current = true;
     setNextPrompt(null);
+  }
+
+  /** Start over from the first frame; the report already covers this session. */
+  function startFromBeginning() {
+    const video = videoRef.current;
+    if (!video) {
+      return;
+    }
+    try {
+      video.currentTime = 0;
+    } catch {
+      // Not seekable until metadata is ready.
+    }
+    positionRef.current = 0;
+    lastTimeRef.current = 0;
+    promptShownRef.current = false;
+    promptDismissedRef.current = false;
+    autoArmedRef.current = false;
+    setNextPrompt(null);
+  }
+
+  /** Replay a finished movie or final episode. */
+  function watchAgain() {
+    setEnded(false);
+    startFromBeginning();
+    void videoRef.current?.play().catch(() => {
+      // The native controls remain available if autoplay is blocked.
+    });
   }
 
   function skipIntro() {
@@ -839,11 +872,12 @@ export function PlayPage({ id, from }: { id: string; from?: ShowReturnContext })
       promptDismissedRef.current ||
       advancingRef.current
     ) {
+      setEnded(true);
       return;
     }
     if (promptShownRef.current) {
       if (autoplay && autoArmedRef.current) {
-        playNext();
+        advanceToNext(true);
       }
       return;
     }
@@ -854,21 +888,85 @@ export function PlayPage({ id, from }: { id: string; from?: ShowReturnContext })
     autoArmedRef.current = auto;
     promptShownRef.current = true;
     setNextPrompt({
-      remaining: auto ? NEXT_EPISODE_COUNTDOWN_SECONDS : 0,
+      remaining: auto ? UP_NEXT_COUNTDOWN_SECONDS : 0,
       auto,
       ...(auto
-        ? { deadline: Date.now() + NEXT_EPISODE_COUNTDOWN_SECONDS * 1000 }
+        ? { deadline: Date.now() + UP_NEXT_COUNTDOWN_SECONDS * 1000 }
         : {}),
     });
   }
 
-  // Return to the season the episode came from instead of dumping the user in
-  // the library. Movies and context-less deep links keep the library link.
+  function togglePlay() {
+    const video = videoRef.current;
+    if (!video) {
+      return;
+    }
+    if (video.paused) {
+      void video.play().catch(() => {
+        // The native controls remain available if autoplay is blocked.
+      });
+    } else {
+      video.pause();
+    }
+  }
+
+  function seekBy(deltaSeconds: number) {
+    const video = videoRef.current;
+    if (!video) {
+      return;
+    }
+    const duration = Number.isFinite(video.duration) ? video.duration : undefined;
+    const target = Math.max(0, Math.min(video.currentTime + deltaSeconds, duration ?? Infinity));
+    try {
+      video.currentTime = target;
+      positionRef.current = Math.round(target * TICKS_PER_SECOND);
+    } catch {
+      // Not seekable until metadata is ready.
+    }
+  }
+
+  function toggleFullscreen() {
+    const frame = frameRef.current;
+    if (!frame) {
+      return;
+    }
+    if (document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => {});
+      return;
+    }
+    void frame.requestFullscreen().catch(() => {
+      // Fullscreen can be blocked by browser policy; the native control works.
+    });
+  }
+
+  function toggleMute() {
+    const video = videoRef.current;
+    if (video) {
+      video.muted = !video.muted;
+    }
+  }
+
+  usePlayerShortcuts(
+    {
+      onTogglePlay: togglePlay,
+      onSeek: seekBy,
+      onFullscreen: toggleFullscreen,
+      onMute: toggleMute,
+      onNext: () => advanceToNext(false),
+    },
+    item !== undefined,
+  );
+
+  // Return to the show the episode came from instead of dumping the user in the
+  // library. Movies and context-less deep links keep the library link.
   const backHref = from ? showHash(from.source, from.id, from.season) : "#/library";
-  const backLabel = from
-    ? (item?.seriesName ??
-      (from.season !== undefined ? `Back to season ${from.season}` : "Back to show"))
-    : "Back to Library";
+  const backLabel = item?.seriesName
+    ? `Back to ${item.seriesName}`
+    : from
+      ? from.season !== undefined
+        ? `Back to season ${from.season}`
+        : "Back to show"
+      : "Back to Library";
 
   if (playbackQuery.isLoading) {
     return <PlaybackLoading />;
@@ -902,129 +1000,24 @@ export function PlayPage({ id, from }: { id: string; from?: ShowReturnContext })
     );
   }
 
-  const appliedQuality = item.qualities.find(
-    (option) => option.id === item.quality,
-  );
+  const showUpNext = nextPrompt !== null && item.nextEpisode !== undefined;
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-5">
       <a
         href={backHref}
         className="inline-flex w-fit items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
       >
-        <ChevronLeftIcon className="size-4" />
+        <ChevronLeftIcon className="size-4" aria-hidden />
         {backLabel}
       </a>
-
-      <div className="flex flex-col gap-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="outline">{item.type}</Badge>
-          {item.type === "Episode" && item.seasonNumber !== undefined && item.episodeNumber !== undefined ? (
-            <span className="font-mono text-xs text-muted-foreground">
-              {episodeCode(item.seasonNumber, item.episodeNumber)}
-            </span>
-          ) : null}
-          {item.year ? (
-            <span className="text-sm text-muted-foreground">{item.year}</span>
-          ) : null}
-          {item.runtimeTicks !== undefined ? (
-            <span className="text-sm text-muted-foreground">
-              {formatRuntimeTicks(item.runtimeTicks)}
-            </span>
-          ) : null}
-          {resumed ? <Badge variant="secondary">Resumed</Badge> : null}
-        </div>
-        <div className="flex flex-col gap-1">
-          <h1 className="font-heading text-2xl font-semibold tracking-tight">
-            {item.name}
-          </h1>
-          {item.type === "Episode" && item.seriesName ? (
-            <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-              <span>{item.seriesName}</span>
-              {from || item.seriesId ? (
-                <a
-                  href={
-                    from
-                      ? backHref
-                      : `#/library/show/jellyfin/${encodeURIComponent(item.seriesId ?? "")}`
-                  }
-                  className="underline-offset-4 hover:text-foreground hover:underline"
-                >
-                  View show
-                </a>
-              ) : null}
-            </div>
-          ) : null}
-          {item.overview ? (
-            <p className="max-w-3xl text-sm text-muted-foreground">{item.overview}</p>
-          ) : null}
-        </div>
-      </div>
-
-      {item.playbackMethod === "hls" ? (
-        <Alert>
-          <TriangleAlertIcon />
-          <AlertTitle>
-            {appliedQuality && item.quality !== "max"
-              ? `Streaming at ${appliedQuality.label}`
-              : "Transcoding for browser playback"}
-          </AlertTitle>
-          <AlertDescription>
-            {appliedQuality && item.quality !== "max"
-              ? `Jellyfin is transcoding this file to ${appliedQuality.detail} so it uses less bandwidth. Audio and video may take a moment to start.`
-              : "Jellyfin is converting this file to a browser-compatible stream. Audio and video may take a moment to start."}
-          </AlertDescription>
-        </Alert>
-      ) : null}
-
-      {recovering ? (
-        <Alert>
-          <TriangleAlertIcon />
-          <AlertTitle>Reconnecting playback</AlertTitle>
-          <AlertDescription>
-            The stream stopped responding. Churn is resuming a few seconds
-            ahead to skip the problem.
-          </AlertDescription>
-        </Alert>
-      ) : null}
-
-      {mediaIssue ? (
-        <Alert variant="destructive">
-          <CircleAlertIcon />
-          <AlertTitle>
-            {mediaIssue === "codec"
-              ? "This video could not play in the browser"
-              : "Playback was interrupted"}
-          </AlertTitle>
-          <AlertDescription>
-            {mediaIssue === "codec"
-              ? "The file may use a codec the browser cannot decode. Open Jellyfin to watch it there."
-              : "Jellyfin stopped sending video, which usually means part of the file is damaged. Retry from the last position, or open Jellyfin."}
-          </AlertDescription>
-          <AlertAction>
-            {mediaIssue === "stream" ? (
-              <Button variant="outline" size="sm" onClick={retryPlayback}>
-                Retry
-              </Button>
-            ) : (
-              <Button asChild variant="outline" size="sm">
-                <a
-                  href="/api/services/jellyfin/open"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Open Jellyfin
-                </a>
-              </Button>
-            )}
-          </AlertAction>
-        </Alert>
-      ) : null}
-
-      <Card className="relative gap-0 overflow-hidden bg-black py-0">
+      <div
+        ref={frameRef}
+        className="relative mx-auto aspect-video w-full max-w-[calc((100dvh_-_19rem)*16/9)] overflow-hidden bg-black"
+      >
         <video
           ref={videoRef}
-          className="aspect-video w-full bg-black"
+          className="size-full bg-black"
           controls
           playsInline
           preload="metadata"
@@ -1041,103 +1034,52 @@ export function PlayPage({ id, from }: { id: string; from?: ShowReturnContext })
           onCanPlay={handleCanPlay}
           onError={handleVideoError}
         />
-        {showSkipIntro && !recovering && !mediaIssue ? (
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            className="absolute bottom-16 right-4 z-10 shadow-lg"
-            onClick={skipIntro}
-            aria-label="Skip intro"
-          >
-            <SkipForwardIcon className="size-4" />
-            Skip intro
-          </Button>
+        {mediaIssue ? <PlaybackErrorOverlay onRetry={retryPlayback} /> : null}
+        {!mediaIssue && ended ? (
+          <EndedOverlay
+            onWatchAgain={watchAgain}
+            backHref={backHref}
+            backLabel={backLabel}
+          />
         ) : null}
-        {nextPrompt && item.nextEpisode ? (
-          <div className="absolute bottom-16 right-4 z-10 flex flex-wrap items-center gap-3 rounded-lg border bg-background/95 px-3 py-2 shadow-lg backdrop-blur">
-            <div className="flex flex-col">
-              <span className="text-sm font-medium">
-                {nextPrompt.auto
-                  ? `Next episode in ${Math.max(1, nextPrompt.remaining)}`
-                  : "Next episode"}
-              </span>
-              <span className="font-mono text-[11px] text-muted-foreground">
-                {episodeCode(
-                  item.nextEpisode.seasonNumber,
-                  item.nextEpisode.episodeNumber,
-                )}{" "}
-                — {item.nextEpisode.name}
-              </span>
-            </div>
-            <div className="flex items-center gap-1">
-              <Button type="button" size="sm" onClick={playNext}>
-                {nextPrompt.auto ? "Play now" : "Play next"}
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                onClick={dismissNextPrompt}
-              >
-                Cancel
-              </Button>
-            </div>
-          </div>
+        {!mediaIssue && !ended && !showUpNext && showSkipIntro ? (
+          <SkipIntroButton onClick={skipIntro} />
         ) : null}
-      </Card>
-
-      <div className="flex flex-wrap items-center gap-3">
-        {item.qualities.length > 1 ? (
-          <>
-            <span className="text-sm text-muted-foreground">Quality</span>
-            <Select value={quality} onValueChange={handleQualityChange}>
-              <SelectTrigger
-                size="sm"
-                className="w-48"
-                aria-label="Playback quality"
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {item.qualities.map((option) => (
-                  <SelectItem key={option.id} value={option.id}>
-                    {option.label} — {option.detail}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {switchingQuality ? (
-              <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                <LoaderCircleIcon className="size-3.5 animate-spin" />
-                Switching quality…
-              </span>
-            ) : appliedQuality && item.quality !== "max" ? (
-              <span className="text-sm text-muted-foreground">
-                Streaming at {appliedQuality.label} — {appliedQuality.detail}
-              </span>
-            ) : null}
-          </>
-        ) : null}
-        {item.nextEpisode ? (
-          <label className="ml-auto flex items-center gap-2 text-sm text-muted-foreground">
-            <Switch
-              checked={autoplay}
-              onCheckedChange={handleAutoplayChange}
-              size="sm"
-              aria-label="Autoplay next episode"
-            />
-            Autoplay next episode
-          </label>
+        {!mediaIssue && !ended && nextPrompt && item.nextEpisode ? (
+          <UpNextCard
+            episode={item.nextEpisode}
+            thumbnailUrl={`/api/library/images/${encodeURIComponent(item.nextEpisode.id)}`}
+            remainingSeconds={
+              nextPrompt.auto ? Math.max(1, nextPrompt.remaining) : undefined
+            }
+            countdownSeconds={UP_NEXT_COUNTDOWN_SECONDS}
+            onPlayNow={() => advanceToNext(true)}
+            onCancel={dismissNextPrompt}
+          />
         ) : null}
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-        <PlayIcon className="size-3.5" />
-        Progress and watched state sync to Jellyfin.
-      </div>
+      <PlaybackTitleRow
+        item={item}
+        from={from}
+        onNext={item.nextEpisode ? () => advanceToNext(false) : undefined}
+        settings={
+          <PlaybackSettingsMenu
+            qualities={item.qualities}
+            quality={quality}
+            onQualityChange={handleQualityChange}
+            autoplay={item.type === "Episode" ? autoplay : undefined}
+            onAutoplayChange={
+              item.type === "Episode" ? handleAutoplayChange : undefined
+            }
+            onStartOver={startFromBeginning}
+            switchingQuality={switchingQuality}
+          />
+        }
+      />
     </div>
   );
+
 }
 
 function PlaybackMessage({
@@ -1182,14 +1124,20 @@ function PlaybackMessage({
 
 function PlaybackLoading() {
   return (
-    <div className="flex flex-col gap-6">
-      <Skeleton className="h-4 w-28" />
-      <div className="flex flex-col gap-2">
-        <Skeleton className="h-5 w-40" />
-        <Skeleton className="h-8 w-72" />
-        <Skeleton className="h-4 w-full max-w-2xl" />
+    <div className="flex flex-col gap-5">
+      <Skeleton className="h-5 w-44" />
+      <Skeleton className="mx-auto aspect-video w-full max-w-[calc((100dvh_-_19rem)*16/9)]" />
+      <div className="flex flex-wrap items-start justify-between gap-6">
+        <div className="flex min-w-0 flex-[999_1_480px] flex-col gap-2.5">
+          <Skeleton className="h-8 w-72" />
+          <Skeleton className="h-4 w-64" />
+          <Skeleton className="h-4 w-full max-w-[72ch]" />
+        </div>
+        <div className="flex flex-none items-center gap-2.5">
+          <Skeleton className="h-12 w-48" />
+          <Skeleton className="size-12" />
+        </div>
       </div>
-      <Skeleton className="aspect-video w-full rounded-xl" />
     </div>
   );
 }
@@ -1246,18 +1194,4 @@ function sendStopKeepalive(item: PlaybackItem, positionTicks: number): void {
   }).catch(() => {
     // Best-effort on navigation or unmount.
   });
-}
-
-function episodeCode(season: number, episode: number): string {
-  return `S${String(season).padStart(2, "0")}E${String(episode).padStart(2, "0")}`;
-}
-
-function formatRuntimeTicks(ticks: number): string {
-  const minutes = Math.round(ticks / 600_000_000);
-  if (minutes < 60) {
-    return `${minutes}m`;
-  }
-  const hours = Math.floor(minutes / 60);
-  const remainder = minutes % 60;
-  return remainder === 0 ? `${hours}h` : `${hours}h ${remainder}m`;
 }

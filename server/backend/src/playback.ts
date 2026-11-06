@@ -63,6 +63,10 @@ export interface PlaybackItem {
   seasonNumber?: number;
   episodeNumber?: number;
   year?: number;
+  /** Content rating such as `TV-PG`; movies only in practice. */
+  officialRating?: string;
+  /** ISO air date for episodes (`2009-04-16T00:00:00.0000000Z`). */
+  premiereDate?: string;
   overview?: string;
   runtimeTicks?: number;
   positionTicks?: number;
@@ -487,6 +491,8 @@ export function mapPlaybackItem(
   assignIfDefined(playback, "seasonNumber", item.ParentIndexNumber);
   assignIfDefined(playback, "episodeNumber", item.IndexNumber);
   assignIfDefined(playback, "year", item.ProductionYear);
+  assignIfDefined(playback, "officialRating", item.OfficialRating);
+  assignIfDefined(playback, "premiereDate", item.PremiereDate);
   assignIfDefined(playback, "overview", item.Overview);
   assignIfDefined(playback, "runtimeTicks", item.RunTimeTicks);
   assignIfDefined(

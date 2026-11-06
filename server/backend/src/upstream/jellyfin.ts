@@ -157,7 +157,8 @@ const LIBRARY_QUERY = new URLSearchParams({
   ImageTypeLimit: "1",
   EnableImageTypes: "Primary",
 });
-const DETAIL_FIELDS = "ProductionYear,RunTimeTicks,CommunityRating,OfficialRating,Genres,Overview,ProviderIds";
+const DETAIL_FIELDS =
+  "ProductionYear,RunTimeTicks,CommunityRating,OfficialRating,Genres,Overview,ProviderIds,PremiereDate";
 const RESUME_FIELDS =
   "RunTimeTicks,SeriesId,ParentIndexNumber,IndexNumber,ImageTags,BackdropImageTags,SeriesPrimaryImageTag";
 
