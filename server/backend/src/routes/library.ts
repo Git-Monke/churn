@@ -6,8 +6,10 @@ import { ApiError, isUnauthorized, UpstreamError } from "../errors.js";
 import type { MediaAttributionStore } from "../media-attribution.js";
 import type { ReleaseSearchService } from "../release-search.js";
 import {
+  buildContinueWatching,
   continueWatchingResponse,
-  mapResumeItems,
+  NEXT_UP_FETCH_LIMIT,
+  PLAYED_FETCH_LIMIT,
   RESUME_FETCH_LIMIT,
 } from "../resume.js";
 import type {
@@ -88,7 +90,8 @@ export function registerLibraryRoutes(
   });
 
   /**
-   * Continue watching: Jellyfin's own per-user resume list. The user's token is
+   * Continue watching: Jellyfin's own per-user resume list merged with its Next
+   * Up list, so finishing an episode offers the next one. The user's token is
    * forwarded, so each profile sees its own progress and nothing is persisted
    * in Churn.
    */
@@ -108,8 +111,17 @@ export function registerLibraryRoutes(
     });
 
     try {
-      const upstreamItems = await client.listResumeItems(auth.user.id, RESUME_FETCH_LIMIT);
-      return continueWatchingResponse("ok", mapResumeItems(upstreamItems));
+      // The resume list is the row's backbone; the two lookups that add a
+      // next-up card are best effort, so a slow or failing Next Up never hides
+      // the cards that already work today.
+      const resume = client.listResumeItems(auth.user.id, RESUME_FETCH_LIMIT);
+      const nextUp = client.listNextUpItems(auth.user.id, NEXT_UP_FETCH_LIMIT).catch(() => []);
+      const played = client.listPlayedEpisodes(auth.user.id, PLAYED_FETCH_LIMIT).catch(() => []);
+      const [resumeItems, nextUpItems, playedItems] = await Promise.all([resume, nextUp, played]);
+      return continueWatchingResponse(
+        "ok",
+        buildContinueWatching({ resume: resumeItems, nextUp: nextUpItems, played: playedItems }),
+      );
     } catch (error) {
       if (isUnauthorized(error)) {
         expireSession(request);

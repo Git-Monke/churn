@@ -134,6 +134,11 @@ export interface ContinueWatchingItem {
   positionTicks: number;
   /** Played percentage, 0–100. */
   playedPercentage: number;
+  /**
+   * The episode after the last completed one, offered before it is started.
+   * `positionTicks` and `playedPercentage` are 0 for these cards.
+   */
+  upNext?: boolean;
   imageUrl?: string;
   lastPlayedDate?: string;
 }

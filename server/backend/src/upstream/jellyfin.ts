@@ -368,6 +368,63 @@ export function createJellyfinClient(
       return response.Items ?? [];
     },
 
+    /**
+     * Jellyfin's Next Up list: one episode per series, the first unplayed one
+     * after the highest played episode, with gaps in a season skipped and
+     * specials left out. This is how a finished show still offers its next
+     * episode. `EnableResumable` stays at its default (`true`) so a next-up
+     * episode that already has a saved position is still listed — the caller
+     * prefers the resume card for those.
+     */
+    async listNextUpItems(userId: string, limit: number): Promise<JellyfinItem[]> {
+      if (!token) {
+        throw new UpstreamError("jellyfin", "unauthorized", "Jellyfin API key is not configured");
+      }
+      const query = new URLSearchParams({
+        userId,
+        Limit: String(limit),
+        StartIndex: "0",
+        Fields: RESUME_FIELDS,
+        ImageTypeLimit: "1",
+        EnableImageTypes: "Primary,Backdrop",
+      });
+      const response = await fetchJson<JellyfinItemsResponse>(
+        "jellyfin",
+        `${config.url}/Shows/NextUp?${query.toString()}`,
+        { timeoutMs, headers: authHeaders() },
+      );
+      return response.Items ?? [];
+    },
+
+    /**
+     * Episodes the user has finished, newest first. Used only as the gate for
+     * next-up cards: Jellyfin's own `GetNextUpSeriesKeys` needs a series to have
+     * *some* watch history, and when nothing is marked played it falls back to
+     * the series' very first episode. Requiring a completed episode keeps
+     * Continue watching to shows the user is actually watching.
+     */
+    async listPlayedEpisodes(userId: string, limit: number): Promise<JellyfinItem[]> {
+      if (!token) {
+        throw new UpstreamError("jellyfin", "unauthorized", "Jellyfin API key is not configured");
+      }
+      const query = new URLSearchParams({
+        userId,
+        Recursive: "true",
+        IncludeItemTypes: "Episode",
+        Filters: "IsPlayed",
+        SortBy: "DatePlayed",
+        SortOrder: "Descending",
+        Fields: "SeriesId,UserData",
+        Limit: String(limit),
+      });
+      const response = await fetchJson<JellyfinItemsResponse>(
+        "jellyfin",
+        `${config.url}/Items?${query.toString()}`,
+        { timeoutMs, headers: authHeaders() },
+      );
+      return response.Items ?? [];
+    },
+
     async getItem(itemId: string, userId?: string): Promise<JellyfinItem> {
       if (!token) {
         throw new UpstreamError("jellyfin", "unauthorized", "Jellyfin API key is not configured");

@@ -11,6 +11,8 @@ export interface ContinueWatchingCard {
   resumeLabel: string;
   /** Played percentage, 0–100. */
   progress: number;
+  /** The episode after the last completed one: nothing watched yet. */
+  upNext: boolean;
   /** Optional still; the card falls back to a token-coloured placeholder. */
   imageUrl?: string;
   /** Player link; episodes keep their season in the back-link. */
@@ -28,12 +30,17 @@ export function toContinueWatchingCards(
     title: item.title || item.episodeTitle || "Untitled",
     resumeLabel: resumeLabel(item),
     progress: item.playedPercentage,
+    upNext: item.upNext === true,
     imageUrl: item.imageUrl,
     href: cardHref(item),
   }));
 }
 
-/** `S1 · E6 · 24 min left` for episodes, `24 min left` for movies. */
+/**
+ * `S1 · E6 · 24 min left` for episodes, `24 min left` for movies, and
+ * `S1 · E5 · Up next` for the episode after the last completed one — a card
+ * nobody has started has no minutes left to report.
+ */
 export function resumeLabel(item: ContinueWatchingItem): string {
   const parts: string[] = [];
   if (
@@ -43,7 +50,7 @@ export function resumeLabel(item: ContinueWatchingItem): string {
   ) {
     parts.push(`S${item.seasonNumber} · E${item.episodeNumber}`);
   }
-  const detail = resumeDetail(remainingMinutes(item));
+  const detail = item.upNext ? "Up next" : resumeDetail(remainingMinutes(item));
   if (detail) {
     parts.push(detail);
   }

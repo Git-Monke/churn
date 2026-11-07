@@ -55,6 +55,19 @@ describe("continue watching labels", () => {
     expect(resumeLabel(movie({ runtimeTicks: undefined }))).toBe("In progress");
   });
 
+  it("marks the episode after the last completed one as up next", () => {
+    // Nothing has been watched yet, so no minutes-left text even though the
+    // whole runtime is ahead.
+    expect(resumeLabel(episode({ upNext: true, positionTicks: 0, playedPercentage: 0 }))).toBe(
+      "S1 · E6 · Up next",
+    );
+    expect(
+      resumeLabel(
+        episode({ upNext: true, positionTicks: 0, seasonNumber: undefined, episodeNumber: undefined }),
+      ),
+    ).toBe("Up next");
+  });
+
   it("rounds up and never reports zero minutes", () => {
     expect(remainingMinutes(episode())).toBe(24);
     expect(remainingMinutes(movie({ positionTicks: 71_999_000_000 }))).toBe(1);
@@ -87,6 +100,7 @@ describe("continue watching cards", () => {
         title: "Parks and Recreation",
         resumeLabel: "S1 · E6 · 24 min left",
         progress: 12.5,
+        upNext: false,
         imageUrl: "/api/library/images/episode-1?tag=still",
         href: "#/play/episode-1?source=jellyfin&show=series-1&season=1",
       },
@@ -95,10 +109,24 @@ describe("continue watching cards", () => {
         title: "Example Movie",
         resumeLabel: "60 min left",
         progress: 50,
+        upNext: false,
         imageUrl: undefined,
         href: "#/play/movie-1",
       },
     ]);
+  });
+
+  it("maps an up-next episode to a card without progress", () => {
+    const [card] = toContinueWatchingCards([
+      episode({ upNext: true, positionTicks: 0, playedPercentage: 0 }),
+    ]);
+
+    expect(card).toMatchObject({
+      resumeLabel: "S1 · E6 · Up next",
+      progress: 0,
+      upNext: true,
+      href: "#/play/episode-1?source=jellyfin&show=series-1&season=1",
+    });
   });
 
   it("falls back to the episode title when the series name is gone", () => {

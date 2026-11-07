@@ -742,8 +742,53 @@ describe("continue watching", () => {
   it("maps the user's resume list with one card per series", async () => {
     let resumeRequest: RequestInit | undefined;
     let resumeUrl = "";
+    let nextUpUrl = "";
+    let nextUpRequest: RequestInit | undefined;
+    let playedUrl = "";
+    let playedRequest: RequestInit | undefined;
 
     installFetch((url, init) => {
+      if (url.includes("/Shows/NextUp?")) {
+        nextUpUrl = url;
+        nextUpRequest = init;
+        return jsonResponse({
+          Items: [
+            {
+              Id: "episode-next",
+              Name: "The Break Up",
+              Type: "Episode",
+              SeriesId: "series-2",
+              SeriesName: "30 Rock",
+              ParentIndexNumber: 1,
+              IndexNumber: 9,
+              RunTimeTicks: 12_000_000_000,
+              ImageTags: { Primary: "next-still-tag" },
+              UserData: {
+                PlaybackPositionTicks: 0,
+                Played: false,
+                LastPlayedDate: "2026-11-03T00:00:00.0000000Z",
+              },
+            },
+          ],
+        });
+      }
+      if (url.includes("/Items?") && url.includes("Filters=IsPlayed")) {
+        playedUrl = url;
+        playedRequest = init;
+        return jsonResponse({
+          Items: [
+            {
+              Id: "episode-finished",
+              Type: "Episode",
+              SeriesId: "series-2",
+              SeriesName: "30 Rock",
+              ParentIndexNumber: 1,
+              IndexNumber: 8,
+              UserData: { Played: true, LastPlayedDate: "2026-11-05T06:00:00.0000000Z" },
+            },
+          ],
+        });
+      }
       if (url.includes("/UserItems/Resume?")) {
         resumeUrl = url;
         resumeRequest = init;
@@ -842,6 +887,23 @@ describe("continue watching", () => {
           "/api/library/images/movie-1?type=Backdrop&tag=backdrop-tag&maxWidth=680",
         lastPlayedDate: "2026-11-04T20:00:00.0000000Z",
       },
+      // 30 Rock has a completed episode and nothing in progress, so it gets
+      // the episode after the last completed one, dated before the movie.
+      {
+        id: "episode-next",
+        kind: "episode",
+        title: "30 Rock",
+        episodeTitle: "The Break Up",
+        seriesId: "series-2",
+        seasonNumber: 1,
+        episodeNumber: 9,
+        runtimeTicks: 12_000_000_000,
+        positionTicks: 0,
+        playedPercentage: 0,
+        upNext: true,
+        imageUrl: "/api/library/images/episode-next?tag=next-still-tag&maxWidth=680",
+        lastPlayedDate: "2026-11-03T00:00:00.0000000Z",
+      },
     ]);
 
     // The route must ask for the signed-in user's own list.
@@ -852,6 +914,102 @@ describe("continue watching", () => {
     expect((resumeRequest?.headers as Record<string, string>)["X-Emby-Token"]).toBe(
       "test-user-token",
     );
+
+    const nextUpParams = new URL(nextUpUrl).searchParams;
+    expect(nextUpParams.get("userId")).toBe("test-user");
+    expect(nextUpParams.get("Limit")).toBe("20");
+    expect(nextUpParams.get("Fields")).toContain("SeriesPrimaryImageTag");
+    expect((nextUpRequest?.headers as Record<string, string>)["X-Emby-Token"]).toBe(
+      "test-user-token",
+    );
+
+    // The gate reads the user's finished episodes, newest first.
+    const playedParams = new URL(playedUrl).searchParams;
+    expect(playedParams.get("userId")).toBe("test-user");
+    expect(playedParams.get("IncludeItemTypes")).toBe("Episode");
+    expect(playedParams.get("Filters")).toBe("IsPlayed");
+    expect(playedParams.get("SortOrder")).toBe("Descending");
+    expect(playedParams.get("Limit")).toBe("80");
+    expect((playedRequest?.headers as Record<string, string>)["X-Emby-Token"]).toBe(
+      "test-user-token",
+    );
+    await app.close();
+  });
+
+  it("keeps the resume row when Next Up fails", async () => {
+    installFetch((url) => {
+      if (url.includes("/Shows/NextUp?")) {
+        return jsonResponse({}, 500);
+      }
+      if (url.includes("/Items?") && url.includes("Filters=IsPlayed")) {
+        return jsonResponse({ Items: [] });
+      }
+      return jsonResponse({
+        Items: [
+          {
+            Id: "episode-1",
+            Name: "Rock Show",
+            Type: "Episode",
+            SeriesId: "series-1",
+            SeriesName: "Parks and Recreation",
+            ParentIndexNumber: 1,
+            IndexNumber: 6,
+            RunTimeTicks: 4_000_000_000,
+            UserData: { PlaybackPositionTicks: 500_000_000, Played: false },
+          },
+        ],
+      });
+    });
+
+    const app = await buildAuthedServer(jellyfinConfig);
+    const response = await app.inject({ method: "GET", url: "/api/library/resume" });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(body.state).toBe("ok");
+    expect(body.items).toEqual([
+      {
+        id: "episode-1",
+        kind: "episode",
+        title: "Parks and Recreation",
+        episodeTitle: "Rock Show",
+        seriesId: "series-1",
+        seasonNumber: 1,
+        episodeNumber: 6,
+        runtimeTicks: 4_000_000_000,
+        positionTicks: 500_000_000,
+        playedPercentage: 12.5,
+      },
+    ]);
+    await app.close();
+  });
+
+  it("does not offer an up-next card for a series with no completed episode", async () => {
+    installFetch((url) => {
+      if (url.includes("/Shows/NextUp?")) {
+        return jsonResponse({
+          Items: [
+            {
+              Id: "episode-first",
+              Name: "Pilot",
+              Type: "Episode",
+              SeriesId: "series-3",
+              SeriesName: "Never Watched",
+              ParentIndexNumber: 1,
+              IndexNumber: 1,
+              UserData: { PlaybackPositionTicks: 0, Played: false },
+            },
+          ],
+        });
+      }
+      return jsonResponse({ Items: [] });
+    });
+
+    const app = await buildAuthedServer(jellyfinConfig);
+    const response = await app.inject({ method: "GET", url: "/api/library/resume" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().items).toEqual([]);
     await app.close();
   });
 

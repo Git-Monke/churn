@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildContinueWatching,
   continueWatchingResponse,
+  mapNextUpItem,
   mapResumeItem,
   mapResumeItems,
   RESUME_ITEM_LIMIT,
@@ -144,6 +146,136 @@ describe("mapResumeItems", () => {
       "movie-1",
       "movie-2",
     ]);
+  });
+});
+
+function nextUp(overrides: Partial<JellyfinItem> = {}): JellyfinItem {
+  return episode({
+    UserData: {
+      PlaybackPositionTicks: 0,
+      Played: false,
+      LastPlayedDate: "2026-11-05T19:33:21.0518683Z",
+    },
+    ...overrides,
+  });
+}
+
+function played(seriesId: string, lastPlayedDate: string | undefined, id = `${seriesId}-episode`): JellyfinItem {
+  return episode({
+    Id: id,
+    SeriesId: seriesId,
+    UserData: { Played: true, PlaybackPositionTicks: 0, LastPlayedDate: lastPlayedDate },
+  });
+}
+
+describe("mapNextUpItem", () => {
+  it("turns an unstarted next episode into an up-next card", () => {
+    expect(mapNextUpItem(nextUp())).toEqual({
+      id: "episode-1",
+      kind: "episode",
+      title: "Parks and Recreation",
+      episodeTitle: "Rock Show",
+      seriesId: "series-1",
+      seasonNumber: 1,
+      episodeNumber: 6,
+      runtimeTicks: 16_096_080_000,
+      positionTicks: 0,
+      playedPercentage: 0,
+      upNext: true,
+      imageUrl: "/api/library/images/episode-1?tag=still-tag&maxWidth=680",
+      lastPlayedDate: "2026-11-05T19:33:21.0518683Z",
+    });
+  });
+
+  it("falls back to the series poster when the episode has no still", () => {
+    expect(mapNextUpItem(nextUp({ ImageTags: {} }))?.imageUrl).toBe(
+      "/api/library/images/series-1?tag=series-poster-tag&maxWidth=680",
+    );
+  });
+
+  it("drops finished episodes, saved positions and non-episodes", () => {
+    expect(mapNextUpItem(nextUp({ UserData: { Played: true, PlaybackPositionTicks: 0 } }))).toBeNull();
+    // A saved position belongs to the resume list, which owns the series.
+    expect(mapNextUpItem(nextUp({ UserData: { PlaybackPositionTicks: 1_000 } }))).toBeNull();
+    expect(mapNextUpItem(nextUp({ Type: "Movie", SeriesId: undefined }))).toBeNull();
+    expect(mapNextUpItem(nextUp({ SeriesName: undefined }))).toBeNull();
+    expect(mapNextUpItem(nextUp({ Name: undefined }))).toBeNull();
+  });
+});
+
+describe("buildContinueWatching", () => {
+  it("adds the episode after the last completed one", () => {
+    const cards = buildContinueWatching({
+      resume: [movie()],
+      nextUp: [nextUp()],
+      played: [played("series-1", "2026-11-05T20:00:00.000Z")],
+    });
+
+    expect(cards.map((card) => ({ id: card.id, upNext: card.upNext }))).toEqual([
+      { id: "episode-1", upNext: true },
+      { id: "movie-1", upNext: undefined },
+    ]);
+  });
+
+  it("offers the in-progress episode instead of the next one", () => {
+    const cards = buildContinueWatching({
+      resume: [episode({ UserData: { PlaybackPositionTicks: 500, Played: false } })],
+      nextUp: [nextUp()],
+      played: [played("series-1", "2026-11-05T20:00:00.000Z")],
+    });
+
+    const [card] = cards;
+    expect(card?.id).toBe("episode-1");
+    expect(card?.positionTicks).toBe(500);
+    expect(card?.upNext).toBeUndefined();
+  });
+
+  it("drops next-up episodes for series without a completed episode", () => {
+    const cards = buildContinueWatching({
+      // Jellyfin returns the first episode of a series with no watch state; the
+      // completed-episode gate keeps it out of the row.
+      resume: [],
+      nextUp: [nextUp({ Id: "untouched", SeriesId: "series-2" })],
+      played: [played("series-1", "2026-11-05T20:00:00.000Z")],
+    });
+
+    expect(cards).toEqual([]);
+  });
+
+  it("keeps one next-up card per series", () => {
+    const cards = buildContinueWatching({
+      resume: [],
+      nextUp: [nextUp({ Id: "first" }), nextUp({ Id: "second" })],
+      played: [played("series-1", "2026-11-05T20:00:00.000Z")],
+    });
+
+    expect(cards.map((card) => card.id)).toEqual(["first"]);
+  });
+
+  it("falls back to the completion date when a next-up item has none", () => {
+    const cards = buildContinueWatching({
+      resume: [movie()],
+      nextUp: [nextUp({ UserData: {} })],
+      played: [played("series-1", "2026-11-05T20:00:00.000Z")],
+    });
+
+    expect(cards.map((card) => card.id)).toEqual(["episode-1", "movie-1"]);
+  });
+
+  it("caps the merged row", () => {
+    const manyMovies = Array.from({ length: RESUME_ITEM_LIMIT }, (_, index) =>
+      movie({ Id: `movie-${index}`, Name: `Movie ${index}` }),
+    );
+    const cards = buildContinueWatching(
+      {
+        resume: manyMovies,
+        nextUp: [nextUp()],
+        played: [played("series-1", "2026-11-05T20:00:00.000Z")],
+      },
+      3,
+    );
+
+    expect(cards.map((card) => card.id)).toEqual(["episode-1", "movie-0", "movie-1"]);
   });
 });
 

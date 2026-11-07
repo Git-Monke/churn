@@ -8,8 +8,9 @@ import {
 import { useContinueWatching } from "@/features/library/use-continue-watching";
 
 /**
- * Jellyfin's per-user resume list: the last episode in progress per show plus
- * partly watched movies. The row is hidden entirely when there is nothing to
+ * Jellyfin's per-user resume list: the last episode in progress per show, plus
+ * partly watched movies, plus the episode after the last completed one for shows
+ * with nothing in progress. The row is hidden entirely when there is nothing to
  * resume (or when Jellyfin is unreachable).
  */
 export function ContinueWatching() {
@@ -60,11 +61,13 @@ function ResumeCard({ item }: { item: ContinueWatchingCard }) {
             <PlayIcon className="size-5 translate-x-px" fill="currentColor" />
           </span>
         </span>
-        <Progress
-          value={item.progress}
-          aria-label={`${item.title} playback progress`}
-          className="absolute inset-x-0 bottom-0 h-1 rounded-none bg-foreground/20"
-        />
+        {item.upNext ? null : (
+          <Progress
+            value={item.progress}
+            aria-label={`${item.title} playback progress`}
+            className="absolute inset-x-0 bottom-0 h-1 rounded-none bg-foreground/20"
+          />
+        )}
       </div>
       <div className="flex flex-col gap-0.5">
         <span className="truncate font-medium">{item.title}</span>

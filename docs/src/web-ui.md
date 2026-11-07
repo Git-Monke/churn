@@ -146,7 +146,7 @@ uses the signed-in user's Jellyfin session token rather than a static token in
 | `GET /api/vpn` | On-demand VPN leak test from the torrent stack's protected namespace |
 | `GET /api/library` | Jellyfin movies and series with provider ids and `addedBy`, scoped to the user's library views |
 | `GET /api/library/images/:itemId` | Image proxy for posters, episode stills and 16:9 backdrops; `?tag=`, `?type=Primary\|Backdrop`, `?maxWidth=`, `?maxHeight=` |
-| `GET /api/library/resume` | Continue watching: the signed-in user's own Jellyfin resume list, one card per series |
+| `GET /api/library/resume` | Continue watching: the signed-in user's own Jellyfin resume list merged with the next episode after the last completed one, one card per series |
 | `GET /api/library/requested` | Sonarr/Radarr library titles with `addedBy`, including requested items not yet downloaded |
 | `DELETE /api/library/requested/:service/:id` | Cancel queue items, delete the title (and files) from the arr, remove matching qBittorrent torrents, refresh Jellyfin |
 | `DELETE /api/library/jellyfin/:itemId` | Delete a Jellyfin-only movie/show and its files, or use the matching arr title when one is found |
@@ -300,8 +300,20 @@ source of truth. Cards show a 16:9 still (episode screenshot, or a movie backdro
 capped with `maxWidth`), the played percentage and `S1 · E6 · 24 min left`.
 Clicking one resumes the item in the player, and episodes carry their show and
 season in the back-link (`#/play/<itemId>?source=jellyfin&show=<id>&season=<n>`).
-The row hides itself when the list is empty, when nobody is signed in, or when
-Jellyfin is unreachable; the rest of Library is unaffected.
+
+The row also offers the **next episode of a show you finished**: the backend
+merges Jellyfin's Next Up list (`/Shows/NextUp`) into the same response, and a
+next-up card reads `S1 · E7 · Up next` without a progress bar. Jellyfin picks the
+episode itself — the first unplayed one after the highest completed episode,
+skipping gaps in the season and leaving specials out — so churn never guesses,
+and an episode that is not in the library yet is not offered. An up-next card
+only appears for a series where the user has completed at least one episode
+(the backend reads their finished episodes with `Filters=IsPlayed` as a gate,
+because Next Up otherwise falls back to a series' first episode), and the
+in-progress episode always wins when a show has both. Cards are ordered by their
+most recent activity. The row hides itself when the list is empty, when nobody
+is signed in, or when Jellyfin is unreachable; a failing Next Up query leaves the
+resume cards untouched.
 
 The Library toolbar has a search box that filters the grid in the browser: no
 API call, no navigation. It matches every word of the query against the title,
