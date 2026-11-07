@@ -47,7 +47,13 @@ import {
 } from "@/lib/playback-preferences";
 import { isInsideSegment } from "@/lib/playback-segments";
 
-const REPORT_INTERVAL_MS = 10_000;
+// One report per second keeps Jellyfin's resume point within a second of the
+// playhead, so a killed tab or crashed browser does not lose the last minutes
+// of watching. Requests are fire-and-forget; nothing here blocks the video.
+const REPORT_INTERVAL_MS = 1_000;
+// Scrubbing emits a seek per preview frame. Wait for the playhead to settle
+// before telling Jellyfin, so one drag costs one report instead of dozens.
+const SEEK_REPORT_DEBOUNCE_MS = 500;
 // A timeupdate gap larger than this means the user jumped rather than played
 // through the trigger naturally. Autoplay only arms on natural playback.
 const NEXT_EPISODE_NATURAL_GAP_SECONDS = 2;
@@ -59,6 +65,9 @@ const RECOVERY_RETRY_MS = 12_000;
 const RECOVERY_FATAL_GRACE_MS = 1_500;
 
 type MediaIssue = "codec" | "stream";
+
+/** Why a progress report is going out; periodic ticks are the only droppable ones. */
+type ProgressReportReason = "interval" | "pause" | "seek";
 
 interface NextPromptState {
   remaining: number;
@@ -97,6 +106,10 @@ export function PlayPage({
   const startedRef = useRef(false);
   const stoppedRef = useRef(false);
   const resumeAppliedRef = useRef(false);
+  // Last position handed to Jellyfin, so a stalled playhead costs no requests.
+  const lastReportRef = useRef<{ ticks: number; paused: boolean } | null>(null);
+  const progressInFlightRef = useRef(0);
+  const seekReportTimerRef = useRef<number | null>(null);
   // Set when a quality switch is requested; the next stream starts here.
   const qualitySwitchRef = useRef<{
     quality: PlaybackQuality;
@@ -215,18 +228,64 @@ export function PlayPage({
     return () => window.clearInterval(interval);
   }, [nextPrompt?.auto, nextPrompt?.deadline]);
 
-  const reportProgress = useCallback((isPaused: boolean) => {
-    const current = itemRef.current;
-    if (!current || stoppedRef.current) {
-      return;
+  const reportProgress = useCallback(
+    (isPaused: boolean, reason: ProgressReportReason = "interval") => {
+      const current = itemRef.current;
+      if (!current || stoppedRef.current) {
+        return;
+      }
+      const ticks = positionRef.current;
+      if (reason === "interval") {
+        // A stalled stream repeats the same position, and a slow round trip
+        // must not build a queue of reports that are already stale.
+        if (progressInFlightRef.current > 0) {
+          return;
+        }
+        const last = lastReportRef.current;
+        if (last && last.ticks === ticks && last.paused === isPaused) {
+          return;
+        }
+      }
+      lastReportRef.current = { ticks, paused: isPaused };
+      progressInFlightRef.current += 1;
+      void reportPlaybackProgress(current.id, reportBody(current, ticks, isPaused))
+        .catch(() => {
+          // Reporting is best-effort; the video keeps playing.
+        })
+        .finally(() => {
+          progressInFlightRef.current -= 1;
+        });
+    },
+    [],
+  );
+
+  function clearSeekReport(): void {
+    if (seekReportTimerRef.current !== null) {
+      window.clearTimeout(seekReportTimerRef.current);
+      seekReportTimerRef.current = null;
     }
-    void reportPlaybackProgress(
-      current.id,
-      reportBody(current, positionRef.current, isPaused),
-    ).catch(() => {
-      // Reporting is best-effort; the video keeps playing.
-    });
-  }, []);
+  }
+
+  /**
+   * The playhead right now, preferring the media clock over the last
+   * `timeupdate` so a seek or an unmount reports the position the user chose.
+   */
+  function currentTicks(): number {
+    const video = videoRef.current;
+    return video && Number.isFinite(video.currentTime) && video.currentTime > 0
+      ? Math.round(video.currentTime * TICKS_PER_SECOND)
+      : positionRef.current;
+  }
+
+  /** Report the position a moment after the last seek event of a scrub. */
+  const scheduleSeekReport = useCallback(() => {
+    clearSeekReport();
+    seekReportTimerRef.current = window.setTimeout(() => {
+      seekReportTimerRef.current = null;
+      positionRef.current = currentTicks();
+      reportProgress(videoRef.current?.paused ?? true, "seek");
+    }, SEEK_REPORT_DEBOUNCE_MS);
+  }, [reportProgress]);
 
   const stopPlayback = useCallback(
     (positionTicks: number) => {
@@ -251,7 +310,9 @@ export function PlayPage({
   useEffect(() => {
     const interval = window.setInterval(() => {
       const video = videoRef.current;
-      if (video && !video.paused && !video.ended) {
+      // A scrub in progress reports preview positions; the settled position
+      // goes out from `handleSeeked` instead.
+      if (video && !video.paused && !video.ended && !seekingRef.current) {
         reportProgress(false);
       }
     }, REPORT_INTERVAL_MS);
@@ -259,6 +320,9 @@ export function PlayPage({
   }, [reportProgress]);
 
   useEffect(() => {
+    lastReportRef.current = null;
+    progressInFlightRef.current = 0;
+    clearSeekReport();
     recoveryRef.current = { attempts: 0, lastTarget: 0 };
     recoveringRef.current = false;
     recoveryStartedAtRef.current = 0;
@@ -513,7 +577,9 @@ export function PlayPage({
         return;
       }
       stoppedRef.current = true;
-      sendStopBeacon(currentItem, positionRef.current);
+      // A pending seek report is superseded by this stop.
+      clearSeekReport();
+      sendStopBeacon(currentItem, currentTicks());
     };
     const stopOnUnmount = () => {
       const currentItem = itemRef.current;
@@ -521,13 +587,15 @@ export function PlayPage({
         return;
       }
       stoppedRef.current = true;
-      sendStopKeepalive(currentItem, positionRef.current);
+      clearSeekReport();
+      sendStopKeepalive(currentItem, currentTicks());
     };
 
     window.addEventListener("pagehide", stopFromPageHide);
     return () => {
       window.removeEventListener("pagehide", stopFromPageHide);
       stopOnUnmount();
+      clearSeekReport();
       const currentItem = itemRef.current;
       if (currentItem) {
         void queryClient.invalidateQueries({ queryKey: ["playback", currentItem.id] });
@@ -629,6 +697,9 @@ export function PlayPage({
   function handleSeeked() {
     seekingRef.current = false;
     seekedRef.current = true;
+    // Persist the jump as soon as the user stops dragging, instead of waiting
+    // for the next tick or for the page to close.
+    scheduleSeekReport();
   }
 
   function handlePlay() {
@@ -730,7 +801,7 @@ export function PlayPage({
     const video = videoRef.current;
     if (video && !video.ended) {
       positionRef.current = Math.round(video.currentTime * TICKS_PER_SECOND);
-      reportProgress(true);
+      reportProgress(true, "pause");
     }
   }
 
