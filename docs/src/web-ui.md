@@ -436,7 +436,11 @@ playback continues normally. An **Autoplay next episode** switch beside the
 quality picker is remembered per browser in `localStorage`; with autoplay off
 the prompt still offers **Play next** but does not count down. Autoplay only arms
 when playback reaches the countdown naturally; seeking into the credits shows a
-static **Play next** prompt instead of jumping to the next episode.
+static **Play next** prompt instead of jumping to the next episode. Any advance
+the player makes — the countdown, **Play now**, or the natural end of the file —
+opens the next episode at 0:00 (`#/play/<id>?restart=1`) rather than resuming a
+partly watched one, while opening an episode from a show or Continue watching
+still resumes at its Jellyfin position.
 
 Playback is codec-aware. Browser-compatible sources use a same-origin
 `/api/playback/items/:itemId/stream` URL; the backend validates the session and

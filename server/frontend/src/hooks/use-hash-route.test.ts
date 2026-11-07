@@ -51,6 +51,25 @@ describe("hash routing", () => {
     });
   });
 
+  it("carries the autoplay restart intent without changing resume links", () => {
+    const from = { source: "jellyfin" as const, id: "series-1", season: 2 };
+    expect(parseHash(playHash("ep2", from, true))).toEqual({
+      page: "play",
+      id: "ep2",
+      from,
+      restart: true,
+    });
+    // Autoplay with no show context still restarts and stays a plain play hash.
+    expect(parseHash(playHash("ep2", undefined, true))).toEqual({
+      page: "play",
+      id: "ep2",
+      restart: true,
+    });
+    // Ordinary links resume, so the route has no restart key at all.
+    expect(parseHash(playHash("ep2", from))).toEqual({ page: "play", id: "ep2", from });
+    expect(parseHash("#/play/ep2?restart=0")).toEqual({ page: "play", id: "ep2" });
+  });
+
   it("decodes encoded ids", () => {
     expect(parseHash("#/play/a%20b")).toEqual({ page: "play", id: "a b" });
     expect(parseHash("#/library/show/jellyfin/a%20b")).toEqual({

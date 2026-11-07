@@ -6,6 +6,35 @@ export const TICKS_PER_SECOND = 10_000_000;
 export const UP_NEXT_LEAD_SECONDS = 20;
 export const UP_NEXT_COUNTDOWN_SECONDS = 3;
 
+/** A saved position this close to the end is not worth resuming. */
+export const RESUME_END_MARGIN_SECONDS = 30;
+
+/**
+ * Where playback should start, in seconds. `0` means the beginning. Autoplay
+ * advances with `restart`, and a finished item or a position sitting in the end
+ * credits both start over rather than resuming.
+ */
+export function resumeStartSeconds(
+  {
+    positionTicks,
+    played,
+  }: { positionTicks?: number; played?: boolean },
+  { restart, durationSec }: { restart?: boolean; durationSec?: number },
+): number {
+  if (restart || played) {
+    return 0;
+  }
+  const seconds = (positionTicks ?? 0) / TICKS_PER_SECOND;
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    return 0;
+  }
+  const nearEnd =
+    durationSec !== undefined &&
+    Number.isFinite(durationSec) &&
+    seconds >= durationSec - RESUME_END_MARGIN_SECONDS;
+  return nearEnd ? 0 : seconds;
+}
+
 export function upNextTriggerSeconds({
   durationSec,
   outro,

@@ -86,7 +86,12 @@ function Dashboard() {
         {route.page === "search" ? <SearchPage /> : null}
         {route.page === "people" && isAdmin ? <PeoplePage /> : null}
         {route.page === "play" ? (
-          <PlayPage key={route.id} id={route.id} from={route.from} />
+          <PlayPage
+            key={route.id}
+            id={route.id}
+            from={route.from}
+            restart={route.restart}
+          />
         ) : null}
       </main>
     </div>

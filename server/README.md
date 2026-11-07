@@ -458,7 +458,11 @@ back to the video's `ended` event. The autoplay
 switch and the selected quality tier are stored in browser `localStorage`; the
 next episode starts at the same tier. Autoplay only arms when playback reaches
 the countdown naturally, so seeking into the credits shows a static Play next
-prompt instead of advancing automatically. If a file cannot offer that tier,
+prompt instead of advancing automatically. Autoplay, **Play now** and the
+end-of-file advance always open the next episode at 0:00 by adding
+`restart=1` to the player hash, so a rewatch never resumes the next episode
+partway through; opening an episode from the library or Continue watching still
+resumes at its saved position. If a file cannot offer that tier,
 playback falls back to `max` for that file without changing the stored
 preference.
 

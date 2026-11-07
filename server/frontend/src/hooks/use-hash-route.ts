@@ -15,7 +15,7 @@ export type AppRoute =
   | { page: "library" }
   | { page: "show"; source: ShowSource; id: string; season?: number }
   | { page: "movie"; source: MovieSource; id: string }
-  | { page: "play"; id: string; from?: ShowReturnContext }
+  | { page: "play"; id: string; from?: ShowReturnContext; restart?: boolean }
   | { page: "search" }
   | { page: "people" };
 
@@ -49,18 +49,29 @@ export function showHash(source: ShowSource, id: string, season?: number): strin
 
 /**
  * Hash for the player. `from` carries the show/season context so the player's
- * back link can return to the season the episode belongs to.
+ * back link can return to the season the episode belongs to. `restart` asks the
+ * player to start at 0:00 instead of the item's saved position, which is what
+ * autoplay does when it advances to the next episode.
  */
-export function playHash(itemId: string, from?: ShowReturnContext): string {
+export function playHash(
+  itemId: string,
+  from?: ShowReturnContext,
+  restart?: boolean,
+): string {
   const base = `#/play/${encodeURIComponent(itemId)}`;
-  if (!from) {
-    return base;
+  const params = new URLSearchParams();
+  if (from) {
+    params.set("source", from.source);
+    params.set("show", from.id);
+    if (from.season !== undefined) {
+      params.set("season", String(from.season));
+    }
   }
-  const params = new URLSearchParams({ source: from.source, show: from.id });
-  if (from.season !== undefined) {
-    params.set("season", String(from.season));
+  if (restart) {
+    params.set("restart", "1");
   }
-  return `${base}?${params.toString()}`;
+  const query = params.toString();
+  return query ? `${base}?${query}` : base;
 }
 
 export function parseHash(hash: string): AppRoute {
@@ -85,9 +96,14 @@ export function parseHash(hash: string): AppRoute {
   }
   if (parts.length === 2 && parts[0] === "play" && parts[1]) {
     const from = parseReturnContext(query);
-    return from
-      ? { page: "play", id: decodeURIComponent(parts[1]), from }
-      : { page: "play", id: decodeURIComponent(parts[1]) };
+    const restart = query.get("restart") === "1";
+    const id = decodeURIComponent(parts[1]);
+    return {
+      page: "play",
+      id,
+      ...(from ? { from } : {}),
+      ...(restart ? { restart } : {}),
+    };
   }
   if (
     (parts.length === 4 || parts.length === 6) &&

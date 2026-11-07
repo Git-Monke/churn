@@ -27,6 +27,7 @@ import { PlaybackSettingsMenu } from "@/features/player/PlaybackSettingsMenu";
 import { PlaybackTitleRow } from "@/features/player/PlaybackTitleRow";
 import { UpNextCard } from "@/features/player/UpNextCard";
 import {
+  resumeStartSeconds,
   TICKS_PER_SECOND,
   upNextTriggerSeconds,
   UP_NEXT_COUNTDOWN_SECONDS,
@@ -47,7 +48,6 @@ import {
 import { isInsideSegment } from "@/lib/playback-segments";
 
 const REPORT_INTERVAL_MS = 10_000;
-const RESUME_END_MARGIN_SECONDS = 30;
 // A timeupdate gap larger than this means the user jumped rather than played
 // through the trigger naturally. Autoplay only arms on natural playback.
 const NEXT_EPISODE_NATURAL_GAP_SECONDS = 2;
@@ -66,7 +66,16 @@ interface NextPromptState {
   deadline?: number;
 }
 
-export function PlayPage({ id, from }: { id: string; from?: ShowReturnContext }) {
+export function PlayPage({
+  id,
+  from,
+  restart = false,
+}: {
+  id: string;
+  from?: ShowReturnContext;
+  /** Start at 0:00 instead of the saved position; autoplay sets this. */
+  restart?: boolean;
+}) {
   const queryClient = useQueryClient();
   const [quality, setQuality] = useState<PlaybackQuality>(readPlaybackQuality);
   const [autoplay, setAutoplay] = useState(readAutoplay);
@@ -549,16 +558,16 @@ export function PlayPage({ id, from }: { id: string; from?: ShowReturnContext })
       return;
     }
     resumeAppliedRef.current = true;
-    const resumeSeconds = (item.positionTicks ?? 0) / TICKS_PER_SECOND;
-    if (resumeSeconds > 0 && !item.played) {
-      const duration = video.duration;
-      const nearEnd =
-        Number.isFinite(duration) &&
-        resumeSeconds >= duration - RESUME_END_MARGIN_SECONDS;
-      if (!nearEnd) {
-        video.currentTime = resumeSeconds;
-        positionRef.current = Math.round(resumeSeconds * TICKS_PER_SECOND);
-      }
+    const resumeSeconds = resumeStartSeconds(item, {
+      restart,
+      durationSec: video.duration,
+    });
+    if (resumeSeconds > 0) {
+      video.currentTime = resumeSeconds;
+      positionRef.current = Math.round(resumeSeconds * TICKS_PER_SECOND);
+    } else {
+      // Autoplay and rewatching always report the new episode from 0:00.
+      positionRef.current = 0;
     }
     // The user already chose this item; start it as soon as the source is
     // ready. Browsers may still reject this if their autoplay policy requires
@@ -758,7 +767,9 @@ export function PlayPage({ id, from }: { id: string; from?: ShowReturnContext })
             season: next.seasonNumber,
           }
         : undefined;
-    replaceHash(playHash(next.id, nextFrom));
+    // Autoplay (and Play now) always starts the next episode at 0:00, even when
+    // it still has progress from an earlier viewing.
+    replaceHash(playHash(next.id, nextFrom, markWatched));
   }
 
   function dismissNextPrompt() {
