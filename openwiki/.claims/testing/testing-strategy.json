@@ -1,0 +1,130 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:035f37718d02748da46f9f7064ceb270b85901495cd960004b8448ad5d3aad18",
+  "claims": [
+    {
+      "id": "claim_84aa770a9b814e5facecff1c51432256",
+      "statement": "The dashboard workflow runs a test job (npm ci, npm run typecheck, npm test on node 22) that the image job depends on, and the image job verifies version agreement, builds multi-arch on push and amd64 with load on other events, and runs a hardened docker smoke test that asserts /api/health and the served SPA only for non-push events.",
+      "evidence": [
+        {
+          "resource": "repo://.github/workflows/dashboard-image.yml#L1-L121",
+          "version": "repo-lines-v1:sha256:81007445306b91a3be835a634dd3b05b3efe78dd8eb0f21733fdcf68c952a17b:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIxLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiJjYzA1MDBkMzRmODI0NDgyNjI1MWJhYmEzYWU2ZjA4ZjJjNmRlZTEzZjRlZmQzNzJlMGNjZWJmODU0MmQwN2U3IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiIwOGFhNTYxZjZkOTY3OTdlOTFlYmM5NTkxNjFhNjRjMGE5Yjk0MjQyMzQwY2NhOTA1ZjM0YTI0ZjQyZDZjN2RmIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MCwicHJlY2VkaW5nQ29udGV4dEhhc2giOiJlM2IwYzQ0Mjk4ZmMxYzE0OWFmYmY0Yzg5OTZmYjkyNDI3YWU0MWU0NjQ5YjkzNGNhNDk1OTkxYjc4NTJiODU1IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MCwiZm9sbG93aW5nQ29udGV4dEhhc2giOiJlM2IwYzQ0Mjk4ZmMxYzE0OWFmYmY0Yzg5OTZmYjkyNDI3YWU0MWU0NjQ5YjkzNGNhNDk1OTkxYjc4NTJiODU1In0"
+        }
+      ]
+    },
+    {
+      "id": "claim_802eb4694cfe409aa4a8fa899008db6e",
+      "statement": "The smoke test mirrors the compose hardening with host networking, a read-only root filesystem, a tmpfs /tmp, init, dropped capabilities and no-new-privileges, then polls /api/health for up to 30 seconds and greps the root document for id=\"root\".",
+      "evidence": [
+        {
+          "resource": "repo://.github/workflows/dashboard-image.yml#L60-L121",
+          "version": "repo-lines-v1:sha256:5e429b3b8909b547e06dc3583cf2df79aae2d2ae753c204e3a408fcf554973de:eyJzZWxlY3RlZExpbmVDb3VudCI6NjIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM4YmQzYTQxNDE5YTU1ZGVkNGRhZTI5ZWE5NTFmNzFlYTdlYTk1YTIxYjI5ZDMwZDYxYTAzNWJiNDA4MmM3MTIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA4YWE1NjFmNmQ5Njc5N2U5MWViYzk1OTE2MWE2NGMwYTliOTQyNDIzNDBjY2E5MDVmMzRhMjRmNDJkNmM3ZGYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUwMTcxZTRkMjgyODk4MzAyY2FmMDJlZmI1OTMxMTJkYmM2YmJjZmY2MDQyNTVmMzYzMzM3NTAxZTcwNjcyMDMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_537f32c491654b8b9f3a947bd4643ef0",
+      "statement": "The release workflow triggers on v tags, builds static musl binaries for x86_64 and aarch64 with cross after checking the tag against the Cargo version, and the publish job verifies the matching dashboard image is published and public by polling docker manifest inspect before creating the release.",
+      "evidence": [
+        {
+          "resource": "repo://.github/workflows/release.yml#L1-L85",
+          "version": "repo-lines-v1:sha256:3e7b66dab7c23cc36f0218f66f0b0e63300d3e2fbc1f25b17b193b80c6cd76d4:eyJzZWxlY3RlZExpbmVDb3VudCI6ODUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFlYTc1NThiZWJjYmVjMzAxMjIzOTlhZjE1MmM0ZjQ1MzBiZDdiMTc4ZTQ3MGM4NzY4YjU4Njg2OTljNWQ4YTgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4Njg1MmY3MmU1MTQzZDM1OWE1ODM1YzQyNmM0OTViNzM5NTYzMzE4ZTJjNGRhZDFlYmRiYTIzMzA5NTIwMTIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_8c181002fae040b899c686075ac80260",
+      "statement": "The OpenWiki update workflow runs daily and manually, checks out with fetch-depth 0 so the update can diff against the previously documented commit, installs openwiki with optional mermaid and jsdom, removes openwiki/.run.json before committing, includes CLAUDE.md in the staged paths only when it exists, and opens a pull request while re-raising any OpenWiki failure.",
+      "evidence": [
+        {
+          "resource": "repo://.github/workflows/openwiki-update.yml#L1-L88",
+          "version": "repo-lines-v1:sha256:0c3567da8887d16fa5adfde23e9106efc87060d3495e473e9399d2e12fd6905e:eyJzZWxlY3RlZExpbmVDb3VudCI6ODgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA2MDI3ODdhZjZkY2MwODM0ZGUxMjFjYmIxY2I5NWY5NDU5YjcyMWVhYjAzNDlmMTA1MDFiOTk2YzFjNzdmZmYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM2NzE4ZjA2N2I1ZTVjMWYwOTkxYTZlNzQ3MjZmZTJhMjNkMjY0MzQ1ZTA4ZTRlYWQwNGZhZjczYzI3ZWQ0NDMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_1e9204b947154c3b8a283b20468d2cdc",
+      "statement": "check-version.sh compares the Cargo.toml version with the churn entry in Cargo.lock, optionally asserts the release tag matches v plus that version, and fails with a message telling the operator to run cargo check when the lockfile is stale.",
+      "evidence": [
+        {
+          "resource": "repo://scripts/check-version.sh#L1-L41",
+          "version": "repo-lines-v1:sha256:53260ef9fc7e133b061ac6a1ac11eef19a15a372ba3a24317e61d6638db0aee2:eyJzZWxlY3RlZExpbmVDb3VudCI6NDEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFkOTVmYzA0YTgwYzk1MmY0OWNlNDE4ODYyN2M1M2IwZmJlOGM0NDA0MWI5NTJkNTkyYWNkMWRlOTk4NjE0NjYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ4ZTY4YmVmYTM0OTBmNmQxNTdlOGE0YzllM2QyNDQzMGY2ZTI1NDI5YWQzMTg2Nzk0NWI2YjRjYzFlMTg3NjIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_e8bef0fc3a0d4725903ce0fc7470c333",
+      "statement": "tests/jellyfin.rs provides a hand-rolled mock HTTP server bound to an ephemeral loopback port whose Drop implementation stops a non-blocking accept loop via an AtomicBool and joins the thread, parsing requests into a Request struct with case-insensitive header lookup and a query-stripped path.",
+      "evidence": [
+        {
+          "resource": "repo://tests/jellyfin.rs#L1-L130",
+          "version": "repo-lines-v1:sha256:8397a498c922dd28d6d5293fd4cd6c529fc37d49c524024bd8d8a217beb2db3d:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMwLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiIyZTUzZWYyYjZmYzViZTRjZjYxYTNhOWY0MzAxYjg1ZGM5MDNiYTkxNTc1M2ViYTg2MTRiNzliYWFjZDE1YWM4IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiJjMDdjNmQ4MWM3OThlZDI0OTdmMzU2ZTQ2M2Y1NGRkNDFiZTRkYmY4NDhiY2RjMTFhYmEzYWU0NTZlZmQyMmZjIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MCwicHJlY2VkaW5nQ29udGV4dEhhc2giOiJlM2IwYzQ0Mjk4ZmMxYzE0OWFmYmY0Yzg5OTZmYjkyNDI3YWU0MWU0NjQ5YjkzNGNhNDk1OTkxYjc4NTJiODU1IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiI3YzAxMzMwM2Q2YWFmN2NmM2U1Yzk0OWJmZjQ2YjdlMDYwYWE2ZTQwNjM1MWU5NTk5MDA5YzNhMmU3NzExYzE1In0"
+        }
+      ]
+    },
+    {
+      "id": "claim_b9b106635f1945f9a30eb555242765ad",
+      "statement": "tests/migrate.rs proves the rsync progress plumbing by prepending a fake rsync to PATH through a PathGuard that restores the original value on Drop, and asserts both that progress frames reach the callback and that progress never crowds out the rsync failure message.",
+      "evidence": [
+        {
+          "resource": "repo://tests/migrate.rs#L1-L40",
+          "version": "repo-lines-v1:sha256:19af7ee73ba3146eaef56a74d8d82bf8f1ea74f13b40a5feec4cc6ca621e16f7:eyJzZWxlY3RlZExpbmVDb3VudCI6NDAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY3NzY5MjI2MjMxY2IxZTg5NjQ5ZTViODAzNGQwNDhiNTJkOWQ2NTU3MjRmM2UyMjFmMjliNThlZjc2OWM4MWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk4NzkwOGE0MjE3Yzk0NTllNzA5YzgxM2EzNzUyNjQzOGE4YmZmNmMzOWE2YWQzY2JhZGQyNzY1NTQ2YzA2YmEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjcwMWE0OTZkYzI3ODVlNzkwYWNiZjljYjZlMGJjMWExZWMxZjA4MWE2OGUwZTY4M2QxYjE2MWJjOGFjM2NmZmUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_15a8ce34a63e4486bca690e41569ff8e",
+      "statement": "tests/installer.rs drives question collection and deduplication without network or Docker, asserting that DataDir is asked once when both stacks are selected, that VPN questions precede storage, and that WireGuard credential prompts are replaced by the archive prompt.",
+      "evidence": [
+        {
+          "resource": "repo://tests/installer.rs#L1-L40",
+          "version": "repo-lines-v1:sha256:7edaf5e3d14fc2a06edf3ee3df48a4a1664b88587a5f94f53db31c4457931f5c:eyJzZWxlY3RlZExpbmVDb3VudCI6NDAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJlNTNlZjJiNmZjNWJlNGNmNjFhM2E5ZjQzMDFiODVkYzkwM2JhOTE1NzUzZWJhODYxNGI3OWJhYWNkMTVhYzgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJhYWU4YTBjYTc2Zjk4ZjdiN2RjNzk4NDk1MWQ2M2U1N2RiM2M2NDU1NzljYTUxYmFkNmE1MzlkNjE0ZWRiYmUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImE1OTM3Njc5MWU2OTQ3NmY3YTA3MTg5NmRjMjViOTEzN2VmODQyM2UzZTk2MzQwY2NmYWMzMzIzZDQyY2E1MWUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_16c595e162c04c14aad8a689f7b10508",
+      "statement": "tests/system.rs covers distro detection including ID_LIKE derivatives and quoted values, unsupported IDs reported by name, the invariant that every supported distro has docker install steps, and parse_uid for root, non-root and absent Uid.",
+      "evidence": [
+        {
+          "resource": "repo://tests/system.rs#L1-L87",
+          "version": "repo-lines-v1:sha256:b209c221ba33bb9860ee737aa789cd398cd2fab78561c5b7875a13984c266e24:eyJzZWxlY3RlZExpbmVDb3VudCI6ODcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRkYmZhOGU5YzM0MThmNzc3OGRlYjQzOGQwYjM0NjRmYWU1YTRjOTRhMWY3MzNmMzQ4NjZkZmNhOGViODY3OGUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_53a614ab864c42509e197ba358df60e2",
+      "statement": "The server workspace root typechecks and tests the backend then the frontend, builds the frontend before the backend, and runs the backend on port 4001 alongside Vite in dev.",
+      "evidence": [
+        {
+          "resource": "repo://server/package.json#L1-L23",
+          "version": "repo-lines-v1:sha256:d137cfc8bf02323ef66928cafc5bab01816b0d472630bdcd83e2efcca741a10c:eyJzZWxlY3RlZExpbmVDb3VudCI6MjMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE2ZmIwOGZkYTFhY2I5NTdiNjExNmJkMzc4MTFhMWZlNDFhMDE2MTFjMDYzMWVkYmY3ODZkNjg4OWEyN2E1NWMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_ce8fb1320ce14f1b9666e0be37ec0383",
+      "statement": "The Vite dev server binds all interfaces on port 5173 and proxies /api to the backend with changeOrigin false so the backend same-origin CSRF check sees the dev origin.",
+      "evidence": [
+        {
+          "resource": "repo://server/frontend/vite.config.ts#L1-L30",
+          "version": "repo-lines-v1:sha256:aec435582384464d6a3ecaa09328e9fbf8655b909d2b7e97550834a778dbe114:eyJzZWxlY3RlZExpbmVDb3VudCI6MzAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNlN2NiNmQwNDAzMWE3MTNhYjdkY2ExYTczMWYyOTcwY2U3N2MyODliY2ZkMzc0ZjJjZDA2ZmUxODk1ZDcwYmEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY2ZjViNDBiMTU4NDU3ZDE3ODY0ZjIxNzkwNzg2ZGQ1YTJlY2RiNjRiNjZhNjUxZjc4OGQ0ZTI1Y2QzMzAzZDIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_22bc066571e4440cb5fcd8d35a98d5d1",
+      "statement": "Backend route tests build the real Fastify server through buildServer with an AppConfig whose service URLs use unresolvable .test hostnames and whose state directory is namespaced by process id and a per-file counter, with upstream calls replaced by vi.fn().",
+      "evidence": [
+        {
+          "resource": "repo://server/backend/test/routes.test.ts#L1-L40",
+          "version": "repo-lines-v1:sha256:3e80ad80bf28c9c47463af3bb6ddff71e336188cbb86afa3f8cb5a31d7c7add7:eyJzZWxlY3RlZExpbmVDb3VudCI6NDAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRmMTJmMGE2MzRhNDkzZmIwN2E5OGIzNjI2M2Y5NTg1ZjA4ZjMzYTA2NzUwMDQzODQ4MDBiMmZlZGQ2MTFmYmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhjMTY4MTVkYWE2YTIzOWVmZmU4N2FjNGRiNTE5ZjQwNDdjZGU2MTAzM2ZjNjBlZGYwMTM4NzQ1YTcwYzIwZDQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjM5YzkyMzU1ZWQ2MGQ2NjE4YzgwOTYxMzU3MTVlODRiZTZlODk0NDg5NzgyMTUxMzk4M2IyYzY1NzA5MTcwZWEifQ"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-07T17:42:22.982Z"
+  }
+}

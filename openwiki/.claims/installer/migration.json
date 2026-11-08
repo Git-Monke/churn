@@ -1,0 +1,128 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:76722e25d4c826dd6fc1d56a7dbc5eae22c1fa54f18b59a74af1760c0954a456",
+  "claims": [
+    {
+      "id": "claim_45fdeceb1f934b9e90aba496acc6ad8c",
+      "statement": "Migration requires both .env and docker-compose.yml per stack, reads DATA_DIR from every installed stack, normalizes it, and refuses to proceed when the stacks disagree or no DATA_DIR exists.",
+      "evidence": [
+        {
+          "resource": "repo://src/migrate.rs#L136-L197",
+          "version": "repo-lines-v1:sha256:de89f39cf435a92fb5736f38e9b10c7c3bbed52f326d9425fbdf1633fb4187a1:eyJzZWxlY3RlZExpbmVDb3VudCI6NjIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk3MmQ3YjFlMzE5YTA4MDAwMzk0ODEyOGE0ODMzZjkyNzc4YmE5NGZiY2M0MzljNzM2NjhhY2I3NjBjYjM2YmYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQ1ZmYxZWI4NjM0MTJkZDkzNGVmYTJkYTkzNDFjNzJjYzk2ZDZjMjQzMWJhNjg4MmMwZWIyMWYzNTdlYjQ5MzEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQ0Y2U3NWM1ZTY3OWEzZmM2OWE2YWYwZDFjYzM5NTU3MjFmNWZmMTc1OGRlZjNmODAwYmFkMzk0NzYzMDkzMmYifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_84c363301cd34b72baa44c5d2811ea85",
+      "statement": "churn migrate refuses a stack subset or an uninstalled stack because all installed stacks share DATA_DIR, requires Docker for real runs, and resolves the destination from --to or an autocompleted path prompt.",
+      "evidence": [
+        {
+          "resource": "repo://src/main.rs#L1058-L1120",
+          "version": "repo-lines-v1:sha256:e2d9d556ca73951eb3309d0ed8b21f3a994f494491ac26b1f8bdd71f89b2b604:eyJzZWxlY3RlZExpbmVDb3VudCI6NjMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQzZjUwMGE4YzBlY2EyMDkxZTY1M2JmM2RlZmU4MDc2N2ZmNDBhNDkzNjE5ZGViOGY3NzI3MzY5MTQyZTVkZmMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImYyMTFjNWI1MzI0ODAwMTA1MzAwM2FkYjhlOTRkY2IwNWM2MjczMmE0ZjM5NDUyNmMwN2FlNmUzNzE0NmFkNTAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjNlNGQ2YzNiYjI5NTlhOTM3NzQxNzAyNjFkM2YxZGUwZDU5ZmFhZmI5MDM5MzVlZDM4NmMxZWRmNTU1MDBlMDAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjkzMTQ5YTUwOTk1YzhmNjUzNzExZDAzNmIwMDJhOTRkMWU0ZTkzMWIxNzYwZDY4YWZmMGQwZmVkOTg4MWI1YzUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_ba5613f960fe42f2ac9d0936d49a7058",
+      "statement": "plan canonicalizes the source and rejects relative or parent-traversal destinations, unwritable targets, identical or nested paths, read-only filesystems, unmet network-filesystem acknowledgement, and insufficient free space, accounting for resumable bytes.",
+      "evidence": [
+        {
+          "resource": "repo://src/migrate.rs#L200-L317",
+          "version": "repo-lines-v1:sha256:64880fb64aea247e22331c4fcb1bb746445f7ce7ed16aca7a5f622b3dc73427c:eyJzZWxlY3RlZExpbmVDb3VudCI6MTE4LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiJkZDc2MTBmMDM0MjQ3OGZkM2Q4MWIyMzE2NzhiMmJiMjM3NmM3ZTEzOTU0OTk4YmJkZWJhNzE3MTVkZTIwMGZkIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiIwMWJhNDcxOWM4MGI2ZmU5MTFiMDkxYTdjMDUxMjRiNjRlZWVjZTk2NGUwOWMwNThlZjhmOTgwNWRhY2E1NDZiIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI5YTc5ZDljZjFkMzQ4ZmUzMjZhZjdhMDRkYmM0OGE0ZTMzYTRkNjgyMTk2NDFlOWVkNDY4NmZhZDU2MDI3NWQ2IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiJmYWFkNmU1YmVkYjVkYzk4ZWU5N2FkZmM0NDE4ZDZiYmQyN2E1YzQzMzUxY2Q5OGYyZDNkNDg2YWFiOTg0MDhhIn0"
+        }
+      ]
+    },
+    {
+      "id": "claim_4f48c67d46454a3e9f383e8a6953c01e",
+      "statement": "A destination is resumable only when its .churn-migrate.json marker names the same source; a marker from another source, a non-empty unmarked directory, or a non-directory is refused, and marker size is excluded from copied bytes.",
+      "evidence": [
+        {
+          "resource": "repo://src/migrate.rs#L366-L440",
+          "version": "repo-lines-v1:sha256:7aa2eb19b9d24c36f4eca6e5ab913dcb361209faa525f9e6d4dc23ff39d3989f:eyJzZWxlY3RlZExpbmVDb3VudCI6NzUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImMyM2IwN2I3MzhiZWNjMDhhNjdiMTgzMTEwMzBiNmRhNzcwMGQ4NjQyZTVlMmZiM2NlMDBhY2U3MGRiMmNmYWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjliODE0MjNjZDU4ODBkYmM5N2NhZDI1OTlkN2Y3ZjVlM2NkOTA1MzQ3NWRlZTIyMDU5ZGI2MTRmNzI0MDZjMTciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjAyY2UwZDgxZmQ3ZGRiM2Q3YWY5MzkyOGJlMjU3OWFlYmEzZjI5OWI1YmRlZDdlMjNmNDljYjY2ODdlOTdhZjMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImIwNjIwZDdlOTMyN2RiZDM4M2MwNmEzZmIxMmI3OTBmNzgzNDY4MWEwNDk4ZGM5YmE5N2U0NTI3Yzc5YzI0MTMifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_0e2e6d5c2b674b8db2b3a396ecf5226f",
+      "statement": "copy prefers rsync with archive/hard-link preservation, numeric ids, --partial, --delete and progress2 while excluding the marker, and falls back to cp -a when rsync is absent.",
+      "evidence": [
+        {
+          "resource": "repo://src/migrate.rs#L563-L611",
+          "version": "repo-lines-v1:sha256:10aebb0fe44b63344644f949a3cf7cb082b7894cca72ce3a6facb0b9b5f70b58:eyJzZWxlY3RlZExpbmVDb3VudCI6NDksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY3YzIwM2YyYzExYTg0ZWY2OTk3MmRkOWQ4NWI1MGY5ZmY0NDAyNWFhMzg1OTEyNDlhN2JkYThhZDJkZDM2ZWMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVmODZkMmI5NTM4ZWZmNDczNzRkMzlkZDkxOWVkODcxOGIzMmQ4YWFkNDRjOWU0ZDZjZDJjZjY0MjkzNTIxMGYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjcyNWIyMzJmNWZhMDhlNTY1MzRmYWU2OGQ5MWE0YWQ5ZTUyZjlkZGMwYmVjMmRlNDBiNzUxOWQwZGIzOGE2NmQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjI2NzFmZDRlZDkzOTFlMTg4MTcyZTY0OWQxMWNkOTU2NmFmNGM0MGZiMjRjZWRmMzdkNmU1NGQxNmRmNWMwMGUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_133d713a569843ec85bf2c1545612b09",
+      "statement": "Only strict progress2 records become progress callbacks; other rsync output stays as text, and progress frames are stripped from the retained failure tail.",
+      "evidence": [
+        {
+          "resource": "repo://src/migrate.rs#L613-L700",
+          "version": "repo-lines-v1:sha256:07d68e53b265da07e14d2854991e2422b606b406073851fc519e63b4617d723f:eyJzZWxlY3RlZExpbmVDb3VudCI6ODgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImYxNTVhNDkxODU5ZWU5NDhlMGU4OGQ2MGVkNGYxYjFiNzVlZjU0ZjE2NWJiZjQyZDVkMGMwMzIxYjhlMWM3YjYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY2NWQ0ODYyMDMwNjc2NTQ2NTNiN2EwNzkzNTM2MTZlMjY1MWM4MjE0NzU4NmZmNTdlNzcxYWNlNjhiYmM2YzMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjgxNzFlYmVlZmQ4MjE3NTM2Y2ZiYjU0ZjEzNjM3N2UwM2FmZjJlM2M3YjVmODgyNzk0ZWU4ZmI2MmY1Zjg5MzkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdmZmQyY2Q3MmNhY2QxMmU3ZDk1NGM4ODkwNmJhMjJjOGUxMjdmMGY5M2Y0YzgzN2NlNmQ2NzVlMmViY2JmNmIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_9b5398ae84c34e97a99465c3f2694d3f",
+      "statement": "Before stopping anything churn writes the marker, and a failed stop or copy restarts the original stacks; a successful copy is followed by PUID/PGID chown, size-and-symlink verification, and only then .env updates.",
+      "evidence": [
+        {
+          "resource": "repo://src/main.rs#L1146-L1240",
+          "version": "repo-lines-v1:sha256:18c8caa8213c6e13af63eed8ac8b28572c2a904ef976728c10731c230cf162f1:eyJzZWxlY3RlZExpbmVDb3VudCI6OTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVjZTdmYzU3ZGM3YzU2YzcxOTBkNGM1NmJkZGI3OTMzOGNjMjM5OTAzNWNlNmZiZDRhNmI4OGNlYzk1YzBlNTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImUzMTc2NDY5MWVjNzc4MGUxODNjMjEyMTM2Mzc2NTlkN2FiZDY4MDJhZWRjYWIwMzY4NjY4OGFiODViMmFkZjIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijk3M2NkMWJhMjRlZTMzZGYxMDUzOTUwMmRlMDE2YzQxMjA5Njk1YTJiYTAxNGZjZWQ4YjA1MDJhNjc5ZDBmZWEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjFmMDJmNDY1YTYyNGFhZjY3ZjllMTk4ZDhmZDg5OTllNWYxYzc2NzI5NzIyMjhkZTlhMDM3MWNiZjM3MjZmZjIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_32c8c494358740969c132204655631b7",
+      "statement": "write_envs backs up each .env to .env.churn-migrate.bak, atomically updates DATA_DIR/PUID/PGID while preserving other keys, restores changed files on failure, and remove_old_data empties the source while keeping the directory itself.",
+      "evidence": [
+        {
+          "resource": "repo://src/migrate.rs#L771-L860",
+          "version": "repo-lines-v1:sha256:40caf695ea418736bd059f9419d6be2e5c161a61caf9a7568f61391b26986906:eyJzZWxlY3RlZExpbmVDb3VudCI6OTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI0OTdkYWRjNDBhN2EyNzdkN2ZkMzUxZjU1ZWFlMmZiN2ZhNmRlZTc1NWJhMjEwNzIwOGIwYjE1Y2VlOTgzMzciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU2YjA0NDkxNDY5NzIyZTgzNjNhOTRlNDA0NDUzOGUwMTNhMmEyMTdlMzZiMWU1NjhiYTYwYWNiN2I0YzhmMmUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjE0NDQ0MzcyNzE0ODIwZmFjMjZjNzA1NzcyYjFlOWIxMDUxMjhhY2U1ZDkwMDVjNDVjZmUxNWM5OTk3YThhNWMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImE2NzQxZDVkYmQ4MzFjM2MxM2FmYmZlNmY4N2I5OWJhNmQzYTI4YTZhMTYzYzdlZDE5NzZiY2FkNGQzZWJiNjIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_a6083e67a969468ba4ef54c5c6251fa6",
+      "statement": "A failed start with the new location restores the .env backups and restarts the original stacks; after success churn runs Jellyfin setup for the server stack and qBittorrent/Prowlarr TCP checks for the torrent stack, printing rollback commands on health failures.",
+      "evidence": [
+        {
+          "resource": "repo://src/main.rs#L1240-L1320",
+          "version": "repo-lines-v1:sha256:dcce28ef3ab19f935332980e31d4ab8a65f6cf965747442da71d7e700b0e44f8:eyJzZWxlY3RlZExpbmVDb3VudCI6ODEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImUzMTc2NDY5MWVjNzc4MGUxODNjMjEyMTM2Mzc2NTlkN2FiZDY4MDJhZWRjYWIwMzY4NjY4OGFiODViMmFkZjIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc4NzZjOTQxNjkzOGM1MjZjODM5ZTQxNzE1NzhlZWYxYjM0OGEzMTFhYWZlM2FkNWZhODhkMTgxM2NkY2E2ZDQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImE3YjZjN2JjNTVhOTFhMmYzMzYxYzQ4MzIyMDFjNGVjM2NmY2ExYThkYjJiOTBlYzhhMmM0N2Q3YzE5MzE2ZTgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjNjZTVmMDBjZjI1OTU1MGEwZmFkYzE2ZjU0MWE3ODUxM2Q5YzliMjkzZjAxMzE2MGQyODVhZTAyZTU2MGI4ZjIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_389b3c8667cc4478a78bf01a2a9b899f",
+      "statement": "Network filesystems are detected from statfs types covering NFS, SMB, SMB2, CIFS, FUSE, AFS and 9p, and are rejected unless --allow-network-fs acknowledges the SQLite and playback risk.",
+      "evidence": [
+        {
+          "resource": "repo://src/migrate.rs#L30-L43",
+          "version": "repo-lines-v1:sha256:7565bb71eb46963a4feb2d1514ba00f1e13b281b60d0d2ee0248bdc7303fb1ae:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRlODlmYTY2MjIyMzQ4ZTc1ZGYwZWQyNzQ5M2Q3YzdkMGMyYzU5ZTQ4MWY2Nzg1YmE5NmQzZTIxZDMxYzAxMWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjlhMDkxZjg2MTQ4NDdiOTQ3N2RjODA5OTI1ZGEwYzA5MjlkNDgyMGNjNTIyM2U3YzMyMTkzY2ZmMzY3YTVkZWUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImJlNjViOTEyMDc1MDI0YTlmYzE1ZDVlYWM1ZGM0MGUzZTg2ZjFiNmNjNWEyOGVhZGU1MzM4YWNjNGVmMDJkMzUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImJjZGExMzBiYWE5YzFiYzU1YzhkYzEyZmFhOWVjNTQ3M2VlNDllNmFkNmQxN2Y3Y2I5NWRmOWE4ZWMxMzQ4ZDYifQ"
+        },
+        {
+          "resource": "repo://src/migrate.rs#L880-L905",
+          "version": "repo-lines-v1:sha256:2ea34ef15e10eb291c2830263686af0b7b55975f5319a12e6a69bc3d0c7938cf:eyJzZWxlY3RlZExpbmVDb3VudCI6MjYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI1Y2Y1ZmMyM2YyYTZkMjNjM2VhNTFlNzJmNWU4OTZjNzU1NWZiYWEwNWNkNWIxZWExODJiZjk2MThhOGU4MWIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQ1N2IzNWFkNjQyZjNkNGU5NWQ3YzBkNzQxOGNhZWQ4MjhjNjI1ODBmNWU0YTg5OWM4ZGQzM2RjNTBkZWIzYzUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY0NmM3YTg4MzliOTExMTgxYjlhZDgyNWI4YzExMDk3YTBmM2FlMjg5N2I5MjExNjBkMDM3ZmY3ZTZjZGFkNGEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_656781d163374a9c9d2e37748ec3f4fc",
+      "statement": "Tests cover DATA_DIR agreement, nested and non-empty destination refusal, same-source resume markers, copy/verify/remove round trips, symlink scanning, truncation detection, env preservation and restore, progress parsing, and fake-rsync failure reporting.",
+      "evidence": [
+        {
+          "resource": "repo://src/migrate.rs#L945-L1180",
+          "version": "repo-lines-v1:sha256:eb9e45a13a9e74ff1a27f904998d2391a81f9622f02697ae7ca7ca34bd7eec61:eyJzZWxlY3RlZExpbmVDb3VudCI6MjM2LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI5MmI1ZWRmNTk0OWNmZWE2NzgyMmNmNjkxMTMyMzYzZDY4ZDZmMWUxNjlmNWUwZDRmN2MxNGU1ZmExZTZkNGU1IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiIwZTU2MGYwMzY5OTM4YjJlOGY1NTEwOWVlMTc5NDZmZGVlMmQ5ZTQ4NjQzYzUyMmQ3N2IwZWMxZjVmYzk0NTc1IiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJiODY3NzFmZWM5ZWM2NzMwMWRiZTBlMGM3NTk3YmMxODJkODViOWJiNDBlZDYzNmZjM2FiNDViM2VmMDUyNjI4IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiIzMjk1ZDY4YmFhNzFjODUzYWMyNzQ3MWY0MmJmZGRjMDU5ZmNkNmIxNjQ3YzgwOTRhOTVlNTVmMTQ4MWYxYWMwIn0"
+        },
+        {
+          "resource": "repo://tests/migrate.rs#L50-L98",
+          "version": "repo-lines-v1:sha256:af8e92af02aedfe9a8be1c425d8a640b7c0ac68cb3023cf4127f2bc9a45fad7c:eyJzZWxlY3RlZExpbmVDb3VudCI6NDksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM1NDZlYThiMTdhOWM2MTgxYjgzYTI5ZWE0NTBiNmVhNzc0M2U0ZGY2MzliOTdlNWViN2YzYjVjZDQ2NTc2ODQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjdmOWFkNDYzYmU3MWM1ZjQyMDk0NmFmYmYwN2QwZmU5ZjVmMTFkYTgyZjFlOTQ5MDNjYzMzOTVkOGMxYTBiMzgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-07T17:42:22.982Z"
+  }
+}

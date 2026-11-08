@@ -1,0 +1,164 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:213ee3e454b20ac5fb01fae6b592dd36e83634d667b403b2078b7df2acaee6e0",
+  "claims": [
+    {
+      "id": "claim_4e1ccac67d1648958b7b6f30fb3e1bb3",
+      "statement": "Gluetun is the only service with its own network namespace and the only one holding NET_ADMIN and /dev/net/tun; it disables IPv6 via sysctls and publishes the qBittorrent, Prowlarr and loopback-only VPN status ports.",
+      "evidence": [
+        {
+          "resource": "repo://torrent/docker-compose.yml#L1-L60",
+          "version": "repo-lines-v1:sha256:f11a341067e30562f1f5ef3b194c6ad60694bc5091f82e31201fd99baeadd92b:eyJzZWxlY3RlZExpbmVDb3VudCI6NjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA0N2E4ZTJmODc1MjMxNWIzYTdhNzJkNWFmODZiMjQyMjRmNDk3MjFiZmY3Nzc2MDFiMGE5Y2E1ZTkzMTdiMDQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk5ZmM2ODU1MTliNzViYzdkMzc3ZTUzNjcyY2FjNjVlYzE4NjIyYTBkZmZhMTM0NDVmMWQxODBkZWNhMWVjNmEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjMwNDM5YzA5NjM5OWEzODNmZWQzYmI4MTNlYzEzOTIzYzc5NTc3MjM1NTg0NDNlNmUzNTM3ODdmMDIwZGVmZGIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_e0193fe424a24fad9b32ff9be7dc66f1",
+      "statement": "Gluetun enforces mullvad plus wireguard, the FIREWALL_ENABLED_DISABLING_IT_SHOOTS_YOU_IN_YOUR_FOOT kill switch, a FIREWALL_OUTBOUND_SUBNETS exception built from HOST_IP limited to a /32, DNS_SERVER on with DNS_ADDRESS 127.0.0.1, DNS_KEEP_NAMESERVER off and DNS_UPSTREAM_RESOLVER_TYPE dot.",
+      "evidence": [
+        {
+          "resource": "repo://torrent/docker-compose.yml#L1-L60",
+          "version": "repo-lines-v1:sha256:f11a341067e30562f1f5ef3b194c6ad60694bc5091f82e31201fd99baeadd92b:eyJzZWxlY3RlZExpbmVDb3VudCI6NjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA0N2E4ZTJmODc1MjMxNWIzYTdhNzJkNWFmODZiMjQyMjRmNDk3MjFiZmY3Nzc2MDFiMGE5Y2E1ZTkzMTdiMDQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk5ZmM2ODU1MTliNzViYzdkMzc3ZTUzNjcyY2FjNjVlYzE4NjIyYTBkZmZhMTM0NDVmMWQxODBkZWNhMWVjNmEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjMwNDM5YzA5NjM5OWEzODNmZWQzYmI4MTNlYzEzOTIzYzc5NTc3MjM1NTg0NDNlNmUzNTM3ODdmMDIwZGVmZGIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_7012a91e1d43468ba2f8aeca5ded112c",
+      "statement": "vpn-check runs in Gluetun's namespace and fails closed unless the firewall exception is a local address, every nameserver is 127.0.0.1, Mullvad's exit checker reports a Mullvad exit, eth0 exists, and direct egress through eth0 is blocked.",
+      "evidence": [
+        {
+          "resource": "repo://torrent/scripts/vpn-check.sh#L1-L87",
+          "version": "repo-lines-v1:sha256:140df1080304fae292438c2c5504166cf742c210fb1527618d23992b55b02e07:eyJzZWxlY3RlZExpbmVDb3VudCI6ODcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE4MDc2ZDNkMjhkMjFlMDIwMTJiMjBlYWY3ZGJmNzU0MDlhNjI3NzEzNDQzOTAyNWYyODJlMzY4ZTMzMDVhYmYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA3MGI0OTc2YmYxOTgyZWU1ZjUxODk0ZWIyMDAwZjllMjAzNGE4ZTcxMjM1ZDAwMTQxNjRhNjE1MjNlZDFjNDUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_d70f7236b4bc4829993454cdf1b2ffd5",
+      "statement": "Every networked torrent service depends on vpn-check with condition service_completed_successfully, so a failed gate prevents qBittorrent, Prowlarr, FlareSolverr and prowlarr-init from starting.",
+      "evidence": [
+        {
+          "resource": "repo://torrent/docker-compose.yml#L44-L120",
+          "version": "repo-lines-v1:sha256:dfb9954059729ae009b87510cc932d361ccdefd68afc80f4f1d01be9017627ca:eyJzZWxlY3RlZExpbmVDb3VudCI6NzcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJiMDljNGU2OTZhZDQ3ZThjZmY1MTc3ZDA2ZmE3MzlkZDQ3NDFiNGY1YjlkZTA1ODE3Y2RkNGFiOTE1MjE3Y2IiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJmZGQ1NWVmMmFlM2NhNjc0YTRjM2E1NmRhYjM0Zjg5MDhkNzQwNDMyM2RiNTRlYWRkYzRlNGNmMTg5ZThmY2QiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImJiMTY1OTkyMTkxNjE0OTYwZmUyMWU5Njk2MjhjZTE1YjI1YzQxNGFmMGQ4MjhjODY4ODEzNmRkY2YyMGUwYjUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjFiMzZlOGEwOGZiMGZlNTA1YzRkZmM0OGJhNTU0Yzg1ZjU2OTNlMDVhYjBhYTVlOGExNjAyODA5M2ZlMjUzMTIifQ"
+        },
+        {
+          "resource": "repo://torrent/scripts/vpn-check.sh#L1-L87",
+          "version": "repo-lines-v1:sha256:140df1080304fae292438c2c5504166cf742c210fb1527618d23992b55b02e07:eyJzZWxlY3RlZExpbmVDb3VudCI6ODcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE4MDc2ZDNkMjhkMjFlMDIwMTJiMjBlYWY3ZGJmNzU0MDlhNjI3NzEzNDQzOTAyNWYyODJlMzY4ZTMzMDVhYmYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA3MGI0OTc2YmYxOTgyZWU1ZjUxODk0ZWIyMDAwZjllMjAzNGE4ZTcxMjM1ZDAwMTQxNjRhNjE1MjNlZDFjNDUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_cf36df23d9db4545a277168d6360afe3",
+      "statement": "All individual VPN predicates live in vpn-lib.sh and are shared by the startup gate and the live dashboard agent, covering local-IPv4 classification, the DNS resolver check, the Mullvad exit check, the direct eth0 egress probe, IPv6 disabled, service reachability, timing helpers and JSON token sanitising.",
+      "evidence": [
+        {
+          "resource": "repo://torrent/scripts/vpn-lib.sh#L1-L116",
+          "version": "repo-lines-v1:sha256:3b3b6a6d47b0968c316f87706b304f536cb95fb54cb0be197fd6e6c05854edc5:eyJzZWxlY3RlZExpbmVDb3VudCI6MTE2LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiJhODA3NmQzZDI4ZDIxZTAyMDEyYjIwZWFmN2RiZjc1NDA5YTYyNzcxMzQ0MzkwMjVmMjgyZTM2OGUzMzA1YWJmIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI0MTJjYTM0NWNjZjc1YmY5YzA4MDZiY2U2OTViZThkZTgwOGI3OTk4NDI1MWE3YTU0ZDIwMmNmNjEwMWRkNDUxIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MCwicHJlY2VkaW5nQ29udGV4dEhhc2giOiJlM2IwYzQ0Mjk4ZmMxYzE0OWFmYmY0Yzg5OTZmYjkyNDI3YWU0MWU0NjQ5YjkzNGNhNDk1OTkxYjc4NTJiODU1IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MCwiZm9sbG93aW5nQ29udGV4dEhhc2giOiJlM2IwYzQ0Mjk4ZmMxYzE0OWFmYmY0Yzg5OTZmYjkyNDI3YWU0MWU0NjQ5YjkzNGNhNDk1OTkxYjc4NTJiODU1In0"
+        }
+      ]
+    },
+    {
+      "id": "claim_89fe7fe3ea724bda8ae59a7e3db4169f",
+      "statement": "vpn-status serves one HTTP response per connection through busybox nc from inside Gluetun's namespace, reports secure only when mullvadExit, killSwitch, dns, ipv6 and firewallException all hold, sanitises the Mullvad body, and publishes coverage of qBittorrent, Prowlarr and FlareSolverr.",
+      "evidence": [
+        {
+          "resource": "repo://torrent/scripts/vpn-status.sh#L1-L162",
+          "version": "repo-lines-v1:sha256:430d8a37a8819d396302b3599510ca1aef0c514a0324a6f669fecf25ba32ae62:eyJzZWxlY3RlZExpbmVDb3VudCI6MTYyLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiJhODA3NmQzZDI4ZDIxZTAyMDEyYjIwZWFmN2RiZjc1NDA5YTYyNzcxMzQ0MzkwMjVmMjgyZTM2OGUzMzA1YWJmIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiIyYTIxYzViM2JmZjAyOTljMDE2MTQ3MDQ2OGYzNTVlNWI0YWZjZjE3YTVmNTkzYWI2ODM5NGVmN2FmMzE5Y2RjIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MCwicHJlY2VkaW5nQ29udGV4dEhhc2giOiJlM2IwYzQ0Mjk4ZmMxYzE0OWFmYmY0Yzg5OTZmYjkyNDI3YWU0MWU0NjQ5YjkzNGNhNDk1OTkxYjc4NTJiODU1IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MCwiZm9sbG93aW5nQ29udGV4dEhhc2giOiJlM2IwYzQ0Mjk4ZmMxYzE0OWFmYmY0Yzg5OTZmYjkyNDI3YWU0MWU0NjQ5YjkzNGNhNDk1OTkxYjc4NTJiODU1In0"
+        }
+      ]
+    },
+    {
+      "id": "claim_a7e9c5badb2046689ee06e30787b08ca",
+      "statement": "system::verify_torrent_isolation renders docker compose config --format json, parses it, and converts security failures into a refusing to start the torrent stack error listing every problem.",
+      "evidence": [
+        {
+          "resource": "repo://src/system.rs#L238-L275",
+          "version": "repo-lines-v1:sha256:56a792cdc0cc75c1220a4c4df8841f22bbe093300bd0f57019dc49e1c6f65e76:eyJzZWxlY3RlZExpbmVDb3VudCI6MzgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE5ZDUzYmFjZjM3NWYzZTZhNGJjZDk2YjQwOGJjNjA3MDRhYzk1NmU0MTA0MDg5YzA1MTQ2ZWY4YTExZjA0YTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjJkNDZmNTFmZmMwOTJiM2I2NThhYjBjZjQxODBjOGZjY2NhODU1NGE1OWJiNzdmODA1YWFiMmIwYTZkMjk0ZjkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjAzYmUyZmI0N2RlNjExODE4NzQxZTg4Yzk2M2NkMzZiYWU2YzliZmU3MTg3ZTJkZDUwMmQ2MTFkODQzZjA4NGQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_50780190715742e0accfae8ff1aa373f",
+      "statement": "security::verify_torrent_isolation collects all problems rather than stopping at the first, dispatching to check_gluetun, check_status_port, check_vpn_gate, check_vpn_status and check_sidecar for every non-Gluetun service.",
+      "evidence": [
+        {
+          "resource": "repo://src/security.rs#L17-L51",
+          "version": "repo-lines-v1:sha256:1282a07c3287f8be8ca9143acf5c9ee73c1c5826b3b1efb48f1c1f63bf01cb65:eyJzZWxlY3RlZExpbmVDb3VudCI6MzUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZlNTI5N2Y3Y2Q5MjU3OTM5MDVhYzkxOGFlNjhlYTVjYjE1NDZiZWYwNmZjOWI2ZTcyZTEwMjU0YjMzNDUyNWQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImExYmM0NDJlNjMxZWRlZGJjNWFiNzZkYTU1ZGIyYzc3NzE5ZjVmNTNlYmFkY2ViYmI4NjIyMGQ5ZWU2ZDU1YjciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjA2NTRjZGI4MTRlYTgyOTA5MWJiMGFiMTZiMmIxZmU4MDg4ZTE0YWE4ZTFlOGExNTBjYmJkOTE2OGRlNmQyNzMifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_a8b65979902d4f5caa1b970b00b8ddb0",
+      "statement": "check_gluetun rejects its own network_mode, privileged mode, non-default networks, a provider other than mullvad, a type other than wireguard, a disabled firewall flag, DNS_SERVER off, DNS_ADDRESS other than 127.0.0.1, a truthy DNS_KEEP_NAMESERVER, a plaintext upstream resolver and missing IPv6 sysctls.",
+      "evidence": [
+        {
+          "resource": "repo://src/security.rs#L53-L115",
+          "version": "repo-lines-v1:sha256:26fb238f0574f1394d377fbd89ae224163fb883ead27e178822446acf17f66d2:eyJzZWxlY3RlZExpbmVDb3VudCI6NjMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNlMjk5ZGZhZjM3OTZiOThmY2IwNjgxMTNmZTU1ZTczYzRiYWFmNzg0OGFiNmY5MzJhYjMwMTNjZjAxMDNjMWEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjE5ZTc2MzU1Y2YxMTk5NDgwYzNmOTk4MzZiMTQ4NmM4NDFkODkxZmFhZDkwNGM2MDhlMDkzMDIyZDM3NTdhZWUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImU3MWNjNjE5ZTQyZGY2MWM1MDI4ZGEyMDQ4OGIxMTA1YTMyMjI2NTQ3ZjgwY2E4MzU5ZDM1ZTEwMjBiNTQ3M2IifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_ee5aaf1b097d4bc48e3ae23741843a65",
+      "statement": "check_sidecar requires network_mode service:gluetun or none, forbids privileged mode, a dns key, own ports and own networks, and requires a read-only mount of torrent/resolv.conf for namespace-sharing services; has_read_only_mount matches target, read_only and a source suffix in the resolved Compose JSON.",
+      "evidence": [
+        {
+          "resource": "repo://src/security.rs#L116-L178",
+          "version": "repo-lines-v1:sha256:74f87d8e356bf722e64470aa3d0bfc8283066605aaacf8599a04b5b28aa13182:eyJzZWxlY3RlZExpbmVDb3VudCI6NjMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImMwNTM5NmEwNTkwOTE5YWY5NGI3YmVhMDA5ZGY4YTY4MjQ2NDA5MGUzOWIxOWJlOTc4ZThhNGRjMDUwMDdhYTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjE5ZTc2MzU1Y2YxMTk5NDgwYzNmOTk4MzZiMTQ4NmM4NDFkODkxZmFhZDkwNGM2MDhlMDkzMDIyZDM3NTdhZWUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjI2Zjc2YWFmZTJkNzY1YTE2OGNkM2ZmODYzYTJiMzBiNzJjZDBhYWY0Yzc3OTAwNTRhODY1ZGNmNGRiNjc0MmEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_37e15e21090e4d1c8fd8613e80b18ee6",
+      "statement": "check_vpn_gate requires vpn-check with its scripts mounted read-only and requires every namespace-sharing sidecar except gluetun, vpn-check and qbittorrent-init to wait for vpn-check with service_completed_successfully; check_vpn_status and check_status_port require the status agent to share the namespace and its published port to bind 127.0.0.1.",
+      "evidence": [
+        {
+          "resource": "repo://src/security.rs#L179-L265",
+          "version": "repo-lines-v1:sha256:79a2d50aea5160de244feda3f4394d6677aabbf1a3a3372c80b4270b977e10df:eyJzZWxlY3RlZExpbmVDb3VudCI6ODcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU4YzllYjhmYjkxMjA0Y2YyYjg1Y2Y5YmNiMmU1YjI1NTQxMGIwOGI5NDY4ZmY0ZTI1ZjMwYjg2ODA1YTEzMGQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImRkNmI1NWM2ODQyOGJkOWU4ZDZiNGU0Y2YwYmJmYmI4Mjc4MWEzMjU4NjEwYWU5ZTAxMjI3NzA0NjM1MGQwN2IiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImI0Y2Q3ZjVjOTgxZGEzODM5NzQwMjM1YzRlYjMzMDJjMDc5NDMxNmU0ZDkyYTkwMTU2OTJmMjZkYTNjYWIyNzcifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_03b2a495edee4fc49370cc76932c26da",
+      "statement": "check_firewall_exceptions requires at least one single-host CIDR that is not 0.0.0.0 or ::, and is_local_ipv4 accepts only loopback, RFC1918, link-local and CGNAT ranges.",
+      "evidence": [
+        {
+          "resource": "repo://src/security.rs#L266-L322",
+          "version": "repo-lines-v1:sha256:a3e5dcf9d47dff9360efada28c6007653e87be4f7b9155def8b0db1838ddbd7a:eyJzZWxlY3RlZExpbmVDb3VudCI6NTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU3ZGNmYzNlYzFiZTNlYWUxOTgyNWM5YWY2M2U2ODUyYWQ5NWVhZmNhMzRiNWE5NWI2NTk2MDFjY2ZiZGNmNWIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjJlYmRkOWExYjdkZjkzMTM5MDViNzJmYzc4MTY5YTlmYTA4MDQ0NzYyNjNmYzlmMTE3M2FhZjQwY2Q4NjBjZGUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImMyYzE1Nzg2MDg0MzE1N2Q5MGQwMDQyNjcyMTJmNTc1MzFlOGI5MTQyZjI0YmM1NjEyZDdkOWY5ZTAwOTg4YTYifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_aacb9339318945a0ac00cc396724fefd",
+      "statement": "system::verify_compose_default_route runs a throwaway docker compose run probe without ports or dependencies to prove the project network has an IPv4 default route before Gluetun would fail with default route not found.",
+      "evidence": [
+        {
+          "resource": "repo://src/system.rs#L263-L300",
+          "version": "repo-lines-v1:sha256:33f5fb3438028cdd084aac1b6c66aca8da26d6c4b25de145ac6248a0cc2ec615:eyJzZWxlY3RlZExpbmVDb3VudCI6MzgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjgwMDM1M2FkNTliY2EwNTJhYTg0NmU4MTExOTYxMGZhMjE1YWQ0ZDFiN2IxNjZhN2Q2MWRkNTgxYjJjZDZkOWIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJhMjNkYjgzZDk1ZTEzZDJjNDVkYjkxYzFkYzkwNDQwMzc3NWEyNjkxNjkzNjEyZGQwMTc5NmU5MDdiOTdmNGEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjNjZmEzMGMxYzEzNWYxMjhhZDFiYWJkZmNkM2NlNDcxOTg4YWE4NWZjOTk3MzA4MjRkZjUyMzBjMmE3ODRmMTMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImJlOTFlNGVhZGZiMWJmZGI4YmFmNzEzZDUyNmY5Y2M5ZDQzYjNmOGI2ZTMwZTJkYjI5ZWNlNzU4NDk0MTQ0ZTAifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_5af419c6ab4e493cbe36d3e37e71e8ef",
+      "statement": "mullvad::country_for_entry maps a two-letter filename prefix through a 50-entry ISO table and returns None for unparseable entries, while entries/select_config/load/parse extract and validate the WireGuard private key and address from the zip archive.",
+      "evidence": [
+        {
+          "resource": "repo://src/mullvad.rs#L78-L196",
+          "version": "repo-lines-v1:sha256:263975350d2f9c4d6914cf1b89e9de20d97a4031d2b57e3b5230082b8c9d3920:eyJzZWxlY3RlZExpbmVDb3VudCI6MTE5LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiJkMzdmOTRmZWFlZmZlZWJjYzM1YzI0ZTdjNmYxOWNlMGRiMjA2NGExNGVkMjdhM2EwYTA1MGQyMDQzZDc0OWViIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI0MTJjYTM0NWNjZjc1YmY5YzA4MDZiY2U2OTViZThkZTgwOGI3OTk4NDI1MWE3YTU0ZDIwMmNmNjEwMWRkNDUxIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI1M2ZiZGU1ZTYxOWQxM2U4NmUzNDUxZWFmNzU1YWQxYzAxYmE0NjU3MjQ3OWY4MzBhYmY5ZDkzNzJkMmZhM2Q4IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MCwiZm9sbG93aW5nQ29udGV4dEhhc2giOiJlM2IwYzQ0Mjk4ZmMxYzE0OWFmYmY0Yzg5OTZmYjkyNDI3YWU0MWU0NjQ5YjkzNGNhNDk1OTkxYjc4NTJiODU1In0"
+        }
+      ]
+    },
+    {
+      "id": "claim_ec1c3dad141a4f7d8dd2eadbe1a47728",
+      "statement": "Stack::Torrent::apply writes VPN_SERVICE_PROVIDER mullvad, VPN_TYPE wireguard, the four WIREGUARD_* answers and the derived SERVER_COUNTRIES into torrent/.env, keeping a hand-edited HOST_IP when loopback detection fails.",
+      "evidence": [
+        {
+          "resource": "repo://src/stack.rs#L225-L260",
+          "version": "repo-lines-v1:sha256:1486a6ac0c8c9fcb5abd78981adf759822e97240952acd8ef5de461c4b53006c:eyJzZWxlY3RlZExpbmVDb3VudCI6MzYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU2YjA0NDkxNDY5NzIyZTgzNjNhOTRlNDA0NDUzOGUwMTNhMmEyMTdlMzZiMWU1NjhiYTYwYWNiN2I0YzhmMmUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU1MjJjNDJjZDE5YzZkMDNkODA4YzQ1MjcyMDU1MjgyNWI3ZWExYzViNDkxYjIxODUxMWNhYzc0MTVjZjlkOWIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjI4MDNmNmIwZWM5ZGU4YTAwYjE2MmZlNzA3YTliZjYwYzZiN2Q2YWQyMmI2ZDNkZWIyMzE4MzM4OTA0NDc4ZTEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjFhZWZiMmE4ODJmNGQyY2NhZGY5Y2NiODUyYjczMWZlNjQyZDFmOWY1NmIzYTE3YWI0OWU1NzViYjJiNDJjMzYifQ"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-07T17:42:22.982Z"
+  }
+}

@@ -1,0 +1,110 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:c957112f4b02364ff4e9447fa73e3f91e2e6c468b068f7da456639817b327887",
+  "claims": [
+    {
+      "id": "claim_51d1bb28218f46419e5a9b6653680735",
+      "statement": "Jellyfin setup runs after the server stack starts, resolves the base URL from JELLYFIN_URL or the configured port, waits up to 120 seconds for readiness, validates or creates an API key, configures libraries and tailnet access, restarts Jellyfin when network settings changed, then recreates the dashboard.",
+      "evidence": [
+        {
+          "resource": "repo://src/main.rs#L560-L688",
+          "version": "repo-lines-v1:sha256:0ee884c371c8644f3acbc1779e6e1440b013b858112dc203c982708a26ab0f9a:eyJzZWxlY3RlZExpbmVDb3VudCI6MTI5LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiIwZTJkNTg0ZTJkZDJiNDE4Y2JjODllYTkwNzJiNmRlZTg4ZGY5MWZiZGQ3MGNlYjRhYTRkYTdmMTFiOGZjNTMxIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiJjMWVjZjkxN2U3NjljZWM4ZmZkN2M0MDkyOWY5N2RmOGQ2NjRhMmNhMzI2YjUxNTljYmJkN2I0NDA4ODZhNGJhIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJiNTYzMTU4YzQzZTMwZjI4MjgwMmE3ZmRjY2ZkNDUyNjkzNGM5ZjhiYmZmZjE3YzU2M2YxOGNmZDYxYjM5Y2MzIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiI0NWQ2OGMxMzBmYTY0NGY1OTNiOTA3MTEzODRmMzdlZGIyZmUzYzJjNGY4ZDI3NzI3MmQyNDgxMDU2NDNmNDQ3In0"
+        }
+      ]
+    },
+    {
+      "id": "claim_65e2aa6b75e84befb5ec845abb5f969c",
+      "statement": "provision completes the startup wizard when needed, authenticates, creates or reuses a Jellyfin API key named churn, validates it, and atomically writes JELLYFIN_API_KEY into server/.env.",
+      "evidence": [
+        {
+          "resource": "repo://src/jellyfin.rs#L204-L228",
+          "version": "repo-lines-v1:sha256:a079758cfa732fbb78f96c5c91b2fd4ba0569cfdc6a380c0773466833d552598:eyJzZWxlY3RlZExpbmVDb3VudCI6MjUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ0ZWY5N2Y1ZjlhNGI5ZWNhMDYzNTIxYmE5MWQ1OTgyMTUwYzZiMmNkMWNhMWNiYTQ2MTkwMmM0MTFlZGU1YmUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjYxNTAxOTdhNTFiM2QzOGE2ZjM5ZWE2Y2YzNjA5MGFjYTczY2MwZjVhZWNjZWIxMjFhNWFkYTBkNTI5ODA3ZjAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjMzOWZhMTRmMjExNTljOTM3MTk2NmIwMDljZWNiZmZkNmUyMmM3YTU5YzdmYmQyOWRiYzk1MTViYTMzMGIxNjQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_8e8c610e479e4020b59e8618a620d79f",
+      "statement": "First-run setup obtains the lazily created initial user, sets the admin name/password (tolerating a 403 from a previous partial run), configures the server, disables remote access and automatic port mapping, then completes the wizard.",
+      "evidence": [
+        {
+          "resource": "repo://src/jellyfin.rs#L229-L283",
+          "version": "repo-lines-v1:sha256:5ca5d24187b0db592784ccce0ab0d3bc0cf7d5e9eb279abf66ee8eff3eae4daa:eyJzZWxlY3RlZExpbmVDb3VudCI6NTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFkMzA1YjFmNzM2NmNhNmMyM2VhN2FjNDMyNjE2MzVjYmNiODNmNTVlNzBjMDM0ODBlMjEwNDY4ODNhNGI0ZGEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImViOWEwOGJjMjlmNmViZWJlOWE1ZjAxOTAzZDk4NDVkYmNiNTg0MmE0NTVmMDdkNWY0MDAyZGFjMzJhNWM2MDUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjU5MGQzOTIyNTVkNzQyMmQ4ODAxMDQyYmZkNTliNWM0Nzk0MWMyOTAzZmYzOWM3OGNhMDYwOGUyN2VkMDI2N2YifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_eeb249eba24a4b44948fda29164eadd5",
+      "statement": "Authentication uses a MediaBrowser installer header; ensure_api_key reuses an unreleased churn key or creates one, accepts both 200-with-JSON and 204-without-body responses, and falls back to re-listing keys to find the newest one.",
+      "evidence": [
+        {
+          "resource": "repo://src/jellyfin.rs#L285-L348",
+          "version": "repo-lines-v1:sha256:bbc49b48e733964df5faa6338e39c9243289d42d3ca9f607dcb24f9dbdf6ff54:eyJzZWxlY3RlZExpbmVDb3VudCI6NjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjExMGI0ZDMzOWQyZjYyMDUzYjQ5YTdkMDdkOTJhZGQ2NjQ2ZTM3NzA4OGQyYzc0N2YxOTgwMWZmZGE3M2JkZjUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNhODIyYTJmNDUzYzY1N2JlZTkzNDAzOTFiNmM0OTRiMzhhMzU3YTMyODBhMjcxZDAzYTY3ZDRjN2ZmYzM5NjciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImZmMGQ3NTk1MGRmMGZmOWEzZWU5NjYzOWRjYzhmZjVlYWVkYjQwZDY4MmJlYTkyNjIyYjUyMGRkODg3ZDkzZTkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQ5NTcyOWIyZTJjYzNkYmU0ODI5MzJiZmJhNzI1YzgxZWM3YjAxMGQwOTM5NzVkYmYyZjg0MzIwYzIxNzUzNmIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_e535146e401c4a738a9a6c2d1419d234",
+      "statement": "ensure_libraries creates Movies at /data/media/movies and Shows at /data/media/tv, adds missing paths, removes any /data library path, refreshes when changed, and enables real-time monitoring while preserving all other LibraryOptions fields.",
+      "evidence": [
+        {
+          "resource": "repo://src/jellyfin.rs#L349-L436",
+          "version": "repo-lines-v1:sha256:813b596b61d000deaed6964bc8faa9ca71cfb55c2e7b59935047879801923e3d:eyJzZWxlY3RlZExpbmVDb3VudCI6ODgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI0NGMyZmFjYzlkNWI3MTA2YTg0MGYxN2JhNjMxODRlMTBkN2FmNDkzZTkxYzQ3NWUxYWQzYzQ0ZmM2OWMwYzgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAzNWMyYTRlYmU1NjJiZjU0MWVkYThkZTRhNmUzZTlmOWZkMmI1M2FjZWVhODQ1ZWFlODFlODkyMmJjZWRhZDciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjM4OWY0M2IwODRjMDE2MWJlNTI3MGQzOThhMDExMjc0MTVlYjJmMjBhMTc5YmJhZDUyNzUxNjdhZTNiZDk4MDciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjI1MzZmMzVkZWQyMDQyOWU2NWMzNDJjNzU5ODJiZGFiOTI1NWM5ODA3Mzk1ZmNhYjc3M2QyZGNhMzk4NjhhYTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_1fe962d386a64553b496be2d2628c849",
+      "statement": "ensure_tailnet_access appends loopback, RFC1918, link-local, CGNAT, Tailscale IPv4-derived IPv6 and other private subnets to LocalNetworkSubnets and returns false when no change is needed.",
+      "evidence": [
+        {
+          "resource": "repo://src/jellyfin.rs#L437-L490",
+          "version": "repo-lines-v1:sha256:bfc5042ebe41e7dc5f5c4d7c707628b5526363161b07664ad03ab4b88ec906f1:eyJzZWxlY3RlZExpbmVDb3VudCI6NTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjliZTlkODRiNGY2ZTAyYzMxMzdhNmRkMmEzNGU3MmVjMDI1MDFjZTA1MGJiODlmNTRjZGRlMGM4MzRhMmNjODAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkwODZiNTdiM2FiZDBhN2QwNGJhN2UwMmE2YjBhM2RjMTY3NGI2ZTk3OTQyMTc2ODE1ZTkyNTg0NDlmODRmZGMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjFhMzI0OWExZTA4NGJjZWVmNjdmMGExNWU3MWQyMjhkODU3Y2VhNGI0YjVlNDY3ZDA4ZjExYWZmZTdhOGViMGMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjRkMGFlOTMwMGYwZWI0NmI5YjZiOWJjNzgxMDAyMzI0MmZlYmQ0MzJhY2UyMzkzZTliMDM3YjkwYWU3NDlkOWQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_0d1844e62e5940718a5e6a8a41a0b0fc",
+      "statement": "restart_and_wait posts /System/Restart and only succeeds after observing Jellyfin go down and then answer again, within a 120-second budget.",
+      "evidence": [
+        {
+          "resource": "repo://src/jellyfin.rs#L167-L191",
+          "version": "repo-lines-v1:sha256:f7d403fa5e4ae6fa6a934feae31a9ac60e018154809f2d5feaecac20c667079f:eyJzZWxlY3RlZExpbmVDb3VudCI6MjUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjgzOWFiNGI4NTY3NmFhNjM2MWRlN2M5MTA2MjY2NjIxZjRjYzUxZTJmZTNiNzU0ZTRlMGVkOTU3ZDkyNzlmMDYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjlkMjQ1YzJlNDc2YzRkZDY2YTU3M2YzZmVhZTVjNGY2OTYyMDVmN2I2NDUzNTE3NDMzYmE1ZjljZGM1NzkyNDkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjI1MzFjOGNjMTg1NmQ3YzM1ZmEyNjU2MzdiM2ZjNTEwYjczZjhjOWZhNjZmYzZkMzY1ZmM5NTA3ZDc4NjA1MzMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQxNzY0Y2Q2ZmEzYzkyZmMxNDdjZDM0MDQwNDY4OGFjNTFjZGUyMWIxNTYxMzU1NGI5YzUwOTJiOTgyOTIwMDQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_c93a1f8b29504c83b3e7cc3b167635f8",
+      "statement": "Admin usernames must be non-empty, at most 64 characters and free of /, \\ and :, and passwords must be at least 8 characters; the password is never persisted by churn.",
+      "evidence": [
+        {
+          "resource": "repo://src/jellyfin.rs#L679-L704",
+          "version": "repo-lines-v1:sha256:07bf2fe716f0527c0ca899152be1094c09dde4308c07c5f469366ce781f95b5e:eyJzZWxlY3RlZExpbmVDb3VudCI6MjYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjliYjg2NDFiZjRjODNjMGEzOTQ1ZmQyNzU5Njk5M2NjOWZjNmYwMjZiNDQ3ODAzNjdiNzU0Y2Q5Zjg4ZGExMzMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkyYjVlZGY1OTQ5Y2ZlYTY3ODIyY2Y2OTExMzIzNjNkNjhkNmYxZTE2OWY1ZTBkNGY3YzE0ZTVmYTFlNmQ0ZTUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjN2Q4ZjEyYzI2OTdhMGUyNDRhOTQzZWU1MWZjMDIzNTQ4Y2IxNDQ4NzI4ZWM3MmM3MDQzYTg2ZmExOTBiODgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjNkOTk0NzA1NDEwMGY5NzI2MjMyMWZlZGIyYTQ3YWFiMjBlYWU0NTkzMDdiMjgzNjRkY2EyMmIzNmZlYWRiZjIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_ea41efdd2a4644c185da99c818963664",
+      "statement": "After setup, churn force-recreates only the dashboard Compose service so the container starts with the newly written Jellyfin API key.",
+      "evidence": [
+        {
+          "resource": "repo://src/main.rs#L689-L706",
+          "version": "repo-lines-v1:sha256:b861407a256d07b77807b084d3fb2bc228412e43234b76fff3e6d38cd9473885:eyJzZWxlY3RlZExpbmVDb3VudCI6MTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJjMjNlY2RmNGMwYzMyMjZiNTYyNTU3NTUwM2U2MDUzZWI0NTVhNDQzZTY4ZjdkNzhjNTAyNGRjMDQwNDgwZDQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQ1ZmE5YjZiMWI4NGM4NTUyZGM1MDc2YWE2OWVjNTZkYzU5ODVjMmE4NTYxYTkwMzQyZWU2Nzg2MmE0OGQzYjgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjhlMDI2NWUzOThmOWU2NGJiMjMwZDAwYmFiZmNlNTQ5MTViNmMyOWI5NmE5ZGFmOTNlOThhYTU0ODdhNWNhZmUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_635db2298e3b433ca659e5b4ca75d3c9",
+      "statement": "The Jellyfin integration tests cover fresh setup and key writing, key reuse, library creation and /data removal, idempotent library setup, one-time real-time monitoring, tailnet subnet preservation and restart readiness.",
+      "evidence": [
+        {
+          "resource": "repo://tests/jellyfin.rs#L186-L600",
+          "version": "repo-lines-v1:sha256:7c90e094197b237bf66df47f3dc8a07b89aee0693bf9e61777c0164a4a08008b:eyJzZWxlY3RlZExpbmVDb3VudCI6NDE1LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiJkOWY3NzVhZjM2OTNiMTI2YTVlMTFiOGU0OTJlMTRhNGRiY2NmMGIxZmRmYjY2YmQ1ODI2NTAyZTA3OWI4ZTU4IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiJmZDJiYzYzZTczNjNhMTZjZjZjZjBjYjkyYmI4NjlhNTcyZWZiYTVkMmM4Mjg1MzNmN2ZmMmJiODc3NjhlYjcxIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI3ZjlhZDQ2M2JlNzFjNWY0MjA5NDZhZmJmMDdkMGZlOWY1ZjExZGE4MmYxZTk0OTAzY2MzMzk1ZDhjMWEwYjM4IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiJlMzY0MDE3YWVhMTZjOTFhMWFlNzMwY2VkODMxOWMzM2VjYWI3ZTQ1NmRmZDY4ODQ0MDIzNTc0MTlkMzVhOGU4In0"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-07T17:42:22.982Z"
+  }
+}

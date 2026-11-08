@@ -1,0 +1,168 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:1a512f815a8a609123dd4f190d0cf55456b95b3edaa9746c6dfd0b7d7cce134f",
+  "claims": [
+    {
+      "id": "claim_abf05e6ec0be49a1b89daa512dc79f6b",
+      "statement": "Opening a movie or season starts one Prowlarr search per enabled indexer, all in parallel, with per-indexer pending/searching/finished/error state and a shared job per target so duplicate opens do not re-search.",
+      "evidence": [
+        {
+          "resource": "repo://server/backend/src/release-search.ts#L298-L427",
+          "version": "repo-lines-v1:sha256:804e4a262fcbc1c4792d33c20a11eeca68f3ebceb183dc104c57589e324cc2db:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMwLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI5NDM1ZGNhMmRjZDY3YzMzYTc3NzA1OGFiOTAxOGM0MjkzMTU5YWNjZTI4N2M0MGVhODE4YWE3MGI3N2ZlYTljIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiIwMWJhNDcxOWM4MGI2ZmU5MTFiMDkxYTdjMDUxMjRiNjRlZWVjZTk2NGUwOWMwNThlZjhmOTgwNWRhY2E1NDZiIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJiZWVlZmRkNTExM2Q5OTA1NmYxZTE5ZGUxYjdkNWJlZGU2ZTBhMzAxZjllOGY3YmU0ZWFkM2Y4ZjhkYTg2NmM4IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiIzN2JkZDE1OTVkZjRmMzA0NzI5YzQwM2I0MWI0N2FlOWY2MTNkNGM1ZmE1ZDE1Y2E1OGNiYTYxMWQ0NDI5YmI1In0"
+        }
+      ]
+    },
+    {
+      "id": "claim_6c5a6a46c64c4fcbad4ecee0a71674e7",
+      "statement": "Finished searches persist version-2 snapshots as JSON through a temporary file and rename, and state becomes ready only after the snapshot is written; at most 100 jobs are kept in memory.",
+      "evidence": [
+        {
+          "resource": "repo://server/backend/src/release-search.ts#L44-L46",
+          "version": "repo-lines-v1:sha256:7359796f0bf152ecd01737ccc67111ec827414de5dd41c81dfd7bc48a294db1b:eyJzZWxlY3RlZExpbmVDb3VudCI6MywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiOTdmMWNhOTMyMGNhMTcxZTg0NDBlN2RmMzQ3ODE4ZGIxYTNmZjQyOTAyZjY2OWViOWRhMWJiNDAxODIwZWExYiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMTdlMjAwYmY0OWIzN2U5ZWFmMDUwMjJkNjJlNjY2OWQ5YjZlODliY2ZjOWZhMGE1ZThkNWJkZjg1OTAyMjZhMCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiY2MzNGZkM2UwNmNkOTJlNGU0YWI3YjczM2E5ZTFjMjA0MjMzYWRhZjgxNjEzMmJlZWE3OGM5Zjg3NDc1NWNkYiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiOTE5M2RjYzRjN2UzZjhhYmI0NjM2ODVkNWU0NmNjMTI3ZmM3MDAxMTllYTk1ZjAwNGE4YThhMjc5MmI1ZWM2YiJ9"
+        },
+        {
+          "resource": "repo://server/backend/src/release-search.ts#L446-L463",
+          "version": "repo-lines-v1:sha256:f40e65fd952e7750c4b91569f6097dee3ae8566d5c5ff919505277ed239b369c:eyJzZWxlY3RlZExpbmVDb3VudCI6MTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBjMjIwNGRkODA2MDc1ZjE4MzliZGFkMWMyODE2NjIwZDFlMDlkODE3MjdkNzIxNWRlNjg5MDQzMThjMDhkMzQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijk3ZDg2MzJlNTRlOTI5OGFiYjk1ODcyN2UyZDUxNDA4YWJhZjEzNjYwMzUzNzkxMDE0MGFiZjY1YjMwYWI2MTMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjI5ZjNiMDk2YTA3MDQwYWVlYmFlZDIxZGYzZDc0YWI5ZTliZDQyODBlODgyODY0MmM4MTRiYzA4MWIyYzllNDEifQ"
+        },
+        {
+          "resource": "repo://server/backend/src/release-search.ts#L529-L570",
+          "version": "repo-lines-v1:sha256:c43163278829aba14d7fe538c32bce3be4d8f3536bf41392fd69fa6cfb0c6590:eyJzZWxlY3RlZExpbmVDb3VudCI6NDIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU0ZGNjOGNlYzEwZmViOGUxY2E4OGNlZmRlNzhmYzQwMjNjZTk4NmRmZjJiN2Y5NzYyYWU5ZTljOTk1ZTcxYzgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI3ZTU3ODhkNWQ5ZDczZDI0YTgxZGJjMGE1YTc0YmZhODJjOWMzYjNhZjk5ZTUyYWY3OTZlOTBiNDY4YThhM2QiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQ2ZjE1YzNlZGM3OTgzMGRhZTEyYzYzNzg4YzhkYjQwNzdiMTBlZmNiZGNjMDc2NjUyYWVlYTE4ODZmZDc4NGQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjRjNzMyMjAzMDFkZWMwY2E5ZDI2MWIxMDllNjg4MWM2MDRlMThhYWE3Yjc0NzY5ZWRjODIxOGVmMDJkMjJiYTMifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_26373f3f9f134ffd8e837738dd855bb0",
+      "statement": "Search media metadata comes from the cache with an arr fallback, and queries use the title plus year for movies or Sxx for seasons with Prowlarr categories 2000 and 5000.",
+      "evidence": [
+        {
+          "resource": "repo://server/backend/src/release-name.ts#L276-L290",
+          "version": "repo-lines-v1:sha256:248ddd7b8efd97e98c3e46ca80095f6c63ddc3ff0e62e1ccb0c18d2d431d3d34:eyJzZWxlY3RlZExpbmVDb3VudCI6MTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFiNjcxMTZlMWNiOGE3ZjA4OTM5YzlmYTg4YTFkNmEyNzJjY2UxMTdhMzZlNDZmNWM5ZTI5M2M3OTY4NTM3ZDYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkwMDI4NjJjMzVlY2I2ODhjOGUyYjljNTNlODhiMjQ4ODIyMDkyMzAyOTVmY2MxNmUwOGEyNzAzY2IxOGVjMTgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijg0MjExZTZiYjRkMzJmNzZjZWNiODQwZTlhM2RiOWM4MzMwNTNlN2YxMDI4MDgwYzc0ZDNhNWU3M2NjZWJkMDciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQ1YTMxOTYyMmM1MjAyMGEyYWM4NzU3MTkyZTczOGVlYTBjMDVkODUwOGIyMzlmN2U4MzMzZWU0NjUyNzIzYjkifQ"
+        },
+        {
+          "resource": "repo://server/backend/src/release-search.ts#L193-L263",
+          "version": "repo-lines-v1:sha256:611b9b9d81fa7f5f4db0c3c715ce1ca3a7ba4d2daf90ddbf4286c9ca7039e3e8:eyJzZWxlY3RlZExpbmVDb3VudCI6NzEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU2MjU1YTIyNjZmNmEzYjhkMGI5ODc1YzMxMDY1MWFhYTMzNjc5YjM4NjA3Yzg0MzdhM2JkY2JiZDZjZjRhMmMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImM1ZTM0NGQwMGZhOWMxM2RmMjMzYzY2ZjVkOWRkYmRmNGM3MGFiOGUwOGY4NmYxNmE3NTQzYmU0MTIzMDlhNDMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImU0YzU1NjUxZjFlNjU3ZDM3MWRhNWQyZDkzZTAxNmYxZDA1OGRkMjdiOThmYjE5N2RkMmQ3NTY3YjA0YjY0MTEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_48c19d450648488b878cc7bc09365aa2",
+      "statement": "Release titles are parsed by the matching arr's /parse endpoint with a capped cache and coalesced in-flight requests, then filtered by exact title tokens, year when present, season and episode coverage.",
+      "evidence": [
+        {
+          "resource": "repo://server/backend/src/release-name.ts#L183-L240",
+          "version": "repo-lines-v1:sha256:b46b9deec465784546cd5d70e02643948009c4ac53f6d969c67a539ccb2c7bc3:eyJzZWxlY3RlZExpbmVDb3VudCI6NTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFhYTJiMDc0NmZmYzdmOTRkZDNiYjM1OGIzNzExZjE2ZjNjMDhhNTEyNjU2MDBlZjczYmRlOTRkZGU0MjE5NWIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRkNWQ2YTNjNmJhMmMyY2NhYzFiY2NhNzczOTRkNjJlZjZlZTg2NmVhM2M0ZDRlOGNmNGQ4NDM4OWZjMzgwYTUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImY5OWU0ZTBmZjE2YTMwYmI3MmJhYTQ5MDc2MTY3ZTQ2YTRmNmUwMWZkMWM3Y2JkMzU4NWQ2YWMzYzA1ZDY2NGEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY0ZDZmNDM2OTI4ZDA1OGM0NDY2ZmEzNTlkNTUwY2E1MTQ4MTkzYzdkMTk5NmM0ODFjYTU0ZjkzODg0MmZlZTcifQ"
+        },
+        {
+          "resource": "repo://server/backend/src/release-name.ts#L41-L100",
+          "version": "repo-lines-v1:sha256:63c0354cacb96d2b03b7a0031f6c69e7ee7d50b5f9dd43d2990b20c1676ac2be:eyJzZWxlY3RlZExpbmVDb3VudCI6NjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI5ZmQxYjg3ODljNzhjOWNlNDExYzM0ZmVmYTA0NWYyMDE1ZDg0MzM5MGM0YTgzNDU3NjViZmVmZWEyOGIyMjIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY1YjZiYWJjMGVlOWQ0YzQ1NzUxNWRmNDM5ZTExNTIwNDExOWYwYjZkNzUxMWQ4ZjVmZjMxNmMyOWIwZDYzMGEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQyMDM0NmVkYmY2ZjQ4M2QxNjA2OGE3ODZkYjM4Y2U0MTZmMzljYjY0ZWE1ODgxM2UwNzBkMTMxYjkzZjAyN2QiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImNiZjI5MDFmNDU1Nzk4MDA3NGUzMDEyM2ZiNjA4ODEzODI4NjdlODE0OTJjYjA0ZDI2MzNkMjMyYmQ4YTI4MDEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_c092d33eb7434a75bba890ef2f79d89a",
+      "statement": "Release results are deduplicated by info hash (or indexer plus guid) keeping the highest seeders, grouped by quality tier, sorted by seeders then size, and flagged lowSeeders below 50.",
+      "evidence": [
+        {
+          "resource": "repo://server/backend/src/release-search.ts#L572-L640",
+          "version": "repo-lines-v1:sha256:1e8d7bc5c11956d81f6633fd67ba127aa76a1d019b30162a6f9b05e44f4ed216:eyJzZWxlY3RlZExpbmVDb3VudCI6NjksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRjMjljZTM1N2JkYTQ0MzliZDMwNjZhZGE3MzAzMDIxNGJkNmUwYTExMTc5ODgwNzMwMDE2YzIxZTEwY2MwYTEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU3ZWRlY2M4OTBjMWZhODY4ZGQ3YmM1Yzc2ZjY4YmVmNDY1NWE5MTcyMjEzOTcyM2M2ZmNhZWM1OWRmNTJlNTciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImJlZWVmZGQ1MTEzZDk5MDU2ZjFlMTlkZTFiN2Q1YmVkZTZlMGEzMDFmOWU4ZjdiZTRlYWQzZjhmOGRhODY2YzgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjE3MGU3MTY0OGE5ODYwNWU0YTU0NTA2ZDY1NGJiM2QwOTY4NTA2YjkxMzA5ZTUxOTUwYzQ3ZjQ5MzQzNjlkMGUifQ"
+        },
+        {
+          "resource": "repo://server/backend/src/releases.ts#L435-L470",
+          "version": "repo-lines-v1:sha256:3db15bed981925caff9d33e601fd4614acce4bd0668b434e8b3985c262f69eb0:eyJzZWxlY3RlZExpbmVDb3VudCI6MzYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY3ODhjMzMzM2M4MjMyNTVkYzM2NzE0Mjg5ZDc5Y2E2Nzc2ZThmMmExNjdkNjU3NzU4MjYxMWViMzk2ZTU1YTEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIyZDExY2FmNDNlOTdlZjM2OWU2YmVlZDFhMjY4YmQwNTgzOGYyOWI5ZGQyNTRiZjY5YmE2NDg4NDE0NzIzNGEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImMyY2VjNWUwMTQ4ZDE0YWIxYzAyZDFhMzY5YTI1NjAzMGRhMjJiNTgyM2Q2ZTNkNTlhNTIwNzNiZmYxZGFjMDQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_343554cdda114c909f5fe4f6102816fd",
+      "statement": "The picker requires five seeders for torrents, prefers the requested quality tier and may climb one tier when it is dead, and only overrides rejections that are exclusively about quality.",
+      "evidence": [
+        {
+          "resource": "repo://server/backend/src/release-pick.ts#L122-L170",
+          "version": "repo-lines-v1:sha256:12d49dc084edcf668fb731b0c6c974882534ba12da49fa8a6d9e68bfefe688d0:eyJzZWxlY3RlZExpbmVDb3VudCI6NDksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVmYzNlYzQ5MzQ4MDcwMmIzOWRjOWNlOTRmM2M1OGZhZjVhZWZhNTM3YTY3MmNlZmY1YjMwOWE1MGFjZmI3MzAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQzM2IzNDVkZjI0MjhhNTQyZDBjODkwOTZmZGE4NDk3MTFjNjExYTEzMzBkMThlYmIwYzgyNzY1Mzk0YTE4MjkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjE3NDdmOGZjOGIzZThjOTZiZDU4MzhmMzQ4OWJiNGZhNjgwMTBkODI1OTM4ZTFlNzFhOWQ1NWE2M2FjZGJjYzAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjkyMDQwZTA5NWE5NGUyYWRhNzRlNDIxZjM3MTg3NTFhOTFhODEwYmZkNjZmNDhmNGU5MzljN2I3NDgwZWI2NzAifQ"
+        },
+        {
+          "resource": "repo://server/backend/src/release-pick.ts#L186-L260",
+          "version": "repo-lines-v1:sha256:772a1237f3b3f8caab36001921df88f960afae104f0e242cfab48962bad29926:eyJzZWxlY3RlZExpbmVDb3VudCI6NzUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjczODAwMmZjMjdhZTZjODc0OTM1ZTNmMTJkZmJhZTEzOTk4NzdhMjFkNDE0N2JiNGVkNWFjYmZjMjYyYjM3YTEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY1Yjc3MTQ5ZmNkYmMyNzVkNjNjOWYyZjYxM2EwZmE1MjBiNGI1YzAyMjE3Y2MzNzVlMjhlM2Y4ZmVkYWRhNmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjA1NjNjYzdjNDc4YWYwZWY1NjIyNTM4YmI2MDhiNTFmNThjNzE3MWIzZWY4NWQ5MzU5OWUwNzNjNGIzZjE1ZTQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImFlMTA2YzEwZTYwOTI0MzUwMWU3MDBjNDlhYjMyYmVmZTgxM2ZlYWUxNTgwNzM3NGY3OTdlOWVlNWUyOGJiOGQifQ"
+        },
+        {
+          "resource": "repo://server/backend/src/release-pick.ts#L9-L14",
+          "version": "repo-lines-v1:sha256:d12c6f64fd69527d27f55a8b3000dfaea5ffd2e70157d51ea2ba29b68c48b7ba:eyJzZWxlY3RlZExpbmVDb3VudCI6NiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYjc4MjkzMGJjMjRlZmUxYjc2NDhmZTVjNGM2ZGI1MzNkNzU2MTYwNzEwN2QyZWU2M2I4NDgzYTQzMzY3ZDFhZiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZjFmOGNlYjQ0M2IxOTI5NDg1M2ZhNjZiNzRlYmQyMGIxYjk4MTQxYWFkYTczOTFiZjA2ZDQwNGIxYmYzMTc4MCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNzFmNzYyOGQ5NGZkZTA2ZTQ5MzkwYTg5YTUyMTc3MWIxMzA2NTgzNmZiMWY2OWZhOGJhMzhlMzIyZjFmYjg5OCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNmQ1ZDIwMzRjYzFjMDc3YjVjZGJmMGM5MDFhYjU3ZjI4MGVlN2MyNmU2OTQ0MmEwYjQwNWI5N2MxM2Y3MzkxOCJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_5c294aceff174e5b9c3357bb7fe6eee4",
+      "statement": "A chosen release is sent directly to qBittorrent preferring magnet links over download URLs, tagged churn-direct and churn-<kind>-<arrId>, saved into the arr folder or /data/media fallback with Season N for single seasons, and existing torrents are tagged instead of failing.",
+      "evidence": [
+        {
+          "resource": "repo://server/backend/src/direct-grab.ts#L182-L260",
+          "version": "repo-lines-v1:sha256:330b0bd1a2a903debe29f691417bb6241ae150a6dd1c66bd0a6560591ff1d1d3:eyJzZWxlY3RlZExpbmVDb3VudCI6NzksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQwMWQzNWQwNjQ2M2JiMjFhMGM4NGNiNWU1NmFkNDMyMTcwOGJkOGM5NDdmMzcwN2M2NmIxYjFkYTYyMThmYzIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjlkMDE2MzNiNTZkZThhOWM4Y2JkODNlM2E4M2M4ODdhYWQ1NWUyNzYwYjRkNDZjZmM5NjcxOWMzNTBhNTQzZTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjA5NGZjMGMxNzNkMWVjM2ZjNTAxZDdkZmE5Mjg1NTAxYzUyN2NmYjQ3MTI1ODNkYTNjYzM2MTgwNTY2YjRiZTMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjE3YWM4ZTJkZTI0OGRlNTk5NzdkMjExODIxMmQyMzI4MDY2MTc1Y2IyMjgzYjMxMzZmMGI2MmJkMWU1OWE1MGUifQ"
+        },
+        {
+          "resource": "repo://server/backend/src/direct-grab.ts#L85-L165",
+          "version": "repo-lines-v1:sha256:8ff9a40f37fc8d8ffa2807f5ff2109e5ae907e5b34a5c597fa4161e2b3ac9da3:eyJzZWxlY3RlZExpbmVDb3VudCI6ODEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMzMjUxZDhkZmRiMWRjYzc0ODVhNWNiMjhhOTE3MTViNjgwYjIzM2Y2NzE1MGZjZmUyN2YyM2Y0NjAzNmMwNjUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRhODg0NjRhZjc3OGVhZWEzZTU3NTVmM2E0YTI5NTViOGZlYmEwZDM5YmJiZTVkMzFkZjU1N2E3ZmQ1M2QzZTciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjY4MTQyMTRmNDlkNjBlNGQ2YjBjMGE0YjZkN2IxYTEzYzAzZTMwNjM1NzAyNjI3ZGY5NTJjNmQwYTk2NmNjZWUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJlNTFhMDBjZDQ0MzAyNGI3MDVmMWNkYzIyN2IzYjE2NzIwNDI1NjY1Yjc0ZDhlZTcxY2UzZTM0MTc2NjJmNzQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_34d0611a8c8d4dcb81eb8acda111fe1d",
+      "statement": "The show and movie grab routes resolve the cached release and call grabTorrentDirect directly; they do not run a second Sonarr/Radarr release search or an arr grab.",
+      "evidence": [
+        {
+          "resource": "repo://server/backend/src/routes/movies.ts#L430-L455",
+          "version": "repo-lines-v1:sha256:fcdda7d3c132f7ebf2d300d38f490cf4954bbf687c3aec4fd2d85bd741ecc787:eyJzZWxlY3RlZExpbmVDb3VudCI6MjYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNmOTg1ZjBjYzE3MmVlMTdkNjdhODg5NDY0NTg4ZTkzODlkOTk5MDk3ODllMWY0Zjg2OTM4MmJkY2ZmZTY5YzIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImEzM2E2YWZiYTgyOWQ3N2MyNGE3NzJkNDY0MTg3ZWQyZDVmNTViOTZjZjQyOTk1ZjliNDY5OTM0NzFmZDcwZTAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImZiNTgwZTk2NGY4M2E0NzNmNDNkNDQzODQ2Mjk0OWQ2OGI1NjAwZmRhNzg3ZjE2Mzc0NWQwMGRlODljYmYzNmEifQ"
+        },
+        {
+          "resource": "repo://server/backend/src/routes/shows.ts#L375-L405",
+          "version": "repo-lines-v1:sha256:5a6babc81dd2dd05e94111ace4189bd77dcda37e6370a1b1af0726d51ffca6ae:eyJzZWxlY3RlZExpbmVDb3VudCI6MzEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRhNjIwMDI3ZjcwZTQ5YWJkZjlhMzEzNzE0M2ViZWQ3Njg2ZjVkZGQ4NjZkYjI3OTJlZWVmOWNlZjgzM2RhMGUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImVlOTI2OWU2ZTRlYTAxOGQ3YzVmMmUzYjJhZDM3ZjdjMmRhZWJhNjcxNGQyNDE0MmM1ZjMzNzcyNzlmYzZhODAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijg3ODhjMTNiMjEzNWM5YzNkNzVjYjRjNzM1ZmRkN2I4NDk2YzQ2ZTNjZmQ5Njg5NGZkMGVkZjZiNjI1Y2M5ZjEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUwMDVmZGI3YzkwMGJmN2QzOGNlOWE3YjEwYWRhYjg2ZWZjN2FmZjM1OWY0ODk0ZTE3OGU3MjgxZDhkZmYwYWIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_b47f7d9c19f84bd9ba20491f67dd5016",
+      "statement": "swarm-watch provides a policy-driven re-pick watcher and download-recovery provides duplicate-torrent repair, both with tests but neither invoked from the current grab routes.",
+      "evidence": [
+        {
+          "resource": "repo://server/backend/src/download-recovery.ts#L25-L100",
+          "version": "repo-lines-v1:sha256:f580b7a00ecea21f786697a7396bfed2c70cfa15b9d38e6eee3c3a4360ab1e86:eyJzZWxlY3RlZExpbmVDb3VudCI6NzYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImYzZDBhYWY0YzBmOTllZTdhN2UxMWIwMmYwMjQxMjJjZTA0NGM5YTc2MGYzNzQ2Y2RlNmU1YzZiZmE0Y2E1ODYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEwYzdhNGUzYTJjN2JhOTliOTZiMDRjNmNhMzZhYzUxZGQ1ZTM2MzAzMzY3MjI3ODIwNzgzMzIyNTlhNTUxYWUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjM3YWExYmUzYmFkMzEwMTQzZDQ3ZmM3MTliZDlkZmM0NDg0ZTFjODg3YTgzZTMyYjA2NTk2MzdhMmJhODNjMzkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzMGZiMDQwODcwMWU1MDczMzBmZjdiYzI1MGU0M2ZmZDZhZWM4MGI4YzA4ZGU4MDkwNTgzM2MzNzUzN2QxMjMifQ"
+        },
+        {
+          "resource": "repo://server/backend/src/swarm-watch.ts#L253-L345",
+          "version": "repo-lines-v1:sha256:40142d1ff14900f5346c0a782b2ac2de97d621b2b224afbb898ac1c75024acd7:eyJzZWxlY3RlZExpbmVDb3VudCI6OTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJiNDg3YzU5MzA3Zjg1NzUzZjYyMzBkYzY1NjAxZTBjNzRjYWJhMzIwODM1YjY3ZjdmOWFkNDkzOTIyMGNlMzgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjZkMmY4OGFjYWQ5MjFkYjNkN2U4ZmY0MjM4MmNhN2I5OTUxOTY2NDJhYjMxNjIxMTdmOTYyZmY2MDk3ZDYxMzAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjY5MTE0M2IwYTIxMzA3MDZlMmE1OTJhNGE2NGVhMWU2MTlkZWI3MGY4NDhhMzhlMTAzMzgyYThjZjc4OGEwN2EifQ"
+        },
+        {
+          "resource": "repo://server/backend/src/swarm-watch.ts#L38-L52",
+          "version": "repo-lines-v1:sha256:59d4ca10fe6df3130033aded25a1b424480ee084acae614462982b4d212ab60b:eyJzZWxlY3RlZExpbmVDb3VudCI6MTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ1ZjdmZjA5ZTZkMWUwOTBlZWY3ZDdjMjM0MDJiOTM1MGQ3YzI1NzU1ZGI1ODQ1M2NkZDU1ZGFiZWZlN2NkMGYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImFmZDE4MTNjYTZmY2Q0ODc1ZjM0MDM4YWE2NGQ5MmZmZWU4MThlNTAzMTg1N2FiNjVlNTI0YmVlZDVlZTBkZmIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQzMmEyYmE3MGIzNTQ3MDljYTJiMGI2MzVjOTJkZGVhMGViZWIzMGI4YmJiZmNiOTNmOTA1M2UwMWE2YzkzNjcifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_f1ed5308bde14a498c38fbda48772adb",
+      "statement": "A 20-entry in-memory release-event ring is exposed as repicks by GET /api/activity, but no current production route records events into it.",
+      "evidence": [
+        {
+          "resource": "repo://server/backend/src/release-events.ts#L1-L45",
+          "version": "repo-lines-v1:sha256:a3e0eb3288dbfa0e3ee3f83d3f886077ffb8dcc65d96ded5ecadd86fbd10c28b:eyJzZWxlY3RlZExpbmVDb3VudCI6NDUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZlMjc5N2FhMjIwMWQ2ODNmMDljZjIwZmY4ZDBiZTYwNDk3NzUzN2MxNDU5ODc5NzcwOTk5NTBmMDgyMjNiYTkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFmMGNkYjk3MmE3YmZiN2VkMjQ2ZjlmZjY3MjM4NWU1NWY0OTY4ZmMxMTA0M2RjNWI2ODRkNTFkZmEzMWRiY2IiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjYyNzkwYTA0MTc0ZTIwMDhkZTc1Y2QyOTQyY2IzZjIwMzk0ODcyMjM0NWM1OGQ4MjJiMzRhMDNhZTg0ZjkyM2QifQ"
+        },
+        {
+          "resource": "repo://server/backend/src/routes/activity.ts#L10-L18",
+          "version": "repo-lines-v1:sha256:9ae31728b2ccf273135566341ea1a9b1617fe38ec79948d0b4bfc998e886c6f8:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYTNlNjBmMjgyYjc0MGYwODE4NGFiNDJkZjI1YzhkMDdjNGU1Y2JjYTNhYzdlZjI0YjMzMjA4NDBjN2MxYzcyZiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiM2EzZTQ2Zjk0Mjc2YjZmNmY0ZWQxZjAyYWY3OGJlZjZhMmVlMWM0MzlkZDU1ODRiOTczOTQ4MzEzMjE0ZDJiNyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZGYwOWNlOWY1YTA5OTMxZTBlMWMxNjQwMzBkZGZiYzM4Nzk1YzM2YTIyMThkOGE2MmM3MTlkMGJjMzY2Zjk1NiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjEsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNDEyY2EzNDVjY2Y3NWJmOWMwODA2YmNlNjk1YmU4ZGU4MDhiNzk5ODQyNTFhN2E1NGQyMDJjZjYxMDFkZDQ1MSJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_f5841730e37f435c946c88502e7c1e70",
+      "statement": "Background series warm-up queues seasons in ascending order, skips seasons Sonarr reports complete or that already have snapshots, waits for in-flight seasons and runs one at a time.",
+      "evidence": [
+        {
+          "resource": "repo://server/backend/src/release-search.ts#L763-L857",
+          "version": "repo-lines-v1:sha256:8825a797598b9e75b8a9268a513f69b50f57e6328122fbbe116120074690941c:eyJzZWxlY3RlZExpbmVDb3VudCI6OTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImMyNDI5YzdiYjVjNjhjOTZlY2Y2YjlmNmNkNzRlYTMxZjQzNmVjMTEwMDk2MTg0NzVkZDk2ZDVjYzQ2NWEzNjQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQyYTJjYjI1YTEyMmI0NDIyMWE2MjM0ZWM2NjBhN2I1ZmI3ZjliZGU3YjNiOWUyYjNjNTU5YTBkOTZmYWM3MzkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImJhOWI2MzE0ZDYyYWIzOGM2NzZlODVhODU5ZTI4MzQwYzQxZmJjOTQ3NTAwNmFjNThlYWFkMjA1M2VjYmRjODciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImNlMGNiNWUyYzgzMTQzYmNkY2Q1MjljMTEwNDYyNTc0OGVlOTMxY2M2OTdkMmEwZDFhNDIyOGQ5ZGExNjU2ZjYifQ"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-07T17:42:22.982Z"
+  }
+}

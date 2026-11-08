@@ -1,0 +1,144 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:5e9036da12b38a4ee45acf67ba60c84f2dd30e9336d040eb3883620f5aed055b",
+  "claims": [
+    {
+      "id": "claim_5861c0c4f545432c8869d76451231f1f",
+      "statement": "The CLI accepts install, show, update, migrate and uninstall modes plus stack filters and mode-specific flags; validation rejects incompatible combinations and unknown options, and invalid arguments exit with code 2.",
+      "evidence": [
+        {
+          "resource": "repo://src/main.rs#L107-L210",
+          "version": "repo-lines-v1:sha256:784615c0b1a177bf264b6ff7692b52a287037f0b1eb699a0952771056a27d2fc:eyJzZWxlY3RlZExpbmVDb3VudCI6MTA0LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI3NzhjNmJjNjNiNTE5ODJhZTcyNTg5M2I1MGU1YTJhOTIzYWIwMzRlNmI0NWY5ZGM1Zjk5MmZmZmJmNjQwNmYzIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiJlYjYyYTgzOTc3NWNkMzQ3MDA1MzRiZmI3YjNhYTRiOWVlYTdmYjUzMDFmNDgwODI4YjZhMzhhYjBhYThiMzJmIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJkNWQxNmEyYmQyNzJkYjI3MWFjZTZiMGViMDYyYzdlOTFjZDU2Yjk2YzkzOWNkNGQzNDBhMjU4NGFkMTMxZmEzIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiI2YjJkYzJlMjk1MmY4MTFkYmYzODMzNmQ4Njg3NDE0YzU1ODVlMTQ5MWY5ODgyYTMwYmI5OTc1NDRmMmVhNGVmIn0"
+        }
+      ]
+    },
+    {
+      "id": "claim_df7cec0902ef4e918749459f8bc1fe7f",
+      "statement": "main dispatches by mode and maps success to 0, failure/not-up-to-date to 1, and interrupted cancellations to 130, printing a concluding message for failures.",
+      "evidence": [
+        {
+          "resource": "repo://src/main.rs#L1875-L1943",
+          "version": "repo-lines-v1:sha256:0be5b5ce4f6402336e68a5a95da1c200af604ed7c39d4143d8398bf4349ea8e8:eyJzZWxlY3RlZExpbmVDb3VudCI6NjksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhlYzkzNmQ2OGQ0YTNlMzIyMzBkNGZiYWI1ODVmZTI0MTA5ODAwNzQzM2Y0YTI5NjliNmEyNWE0YTlhMjdkMDQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImI5ZGU3NjNlOGYwODJkYTk4Y2Y2N2RkYTcxNjk0ZDFjZTQxODJjNmYxNmQzYmJkNjFhNTY3N2JhNDExZDI3ZmEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_3c350c92d9224182b71b85344bc691df",
+      "statement": "Interactive install runs root and Docker preflight, stack selection, port discovery, deduplicated questions, data-directory creation, plan confirmation, asset/.env writes, stack startup and Jellyfin setup when the server stack is selected.",
+      "evidence": [
+        {
+          "resource": "repo://src/main.rs#L1822-L1872",
+          "version": "repo-lines-v1:sha256:f25944087c94492a91e6e916c60713630ed9202c6a9df2e80af51b87669fc66b:eyJzZWxlY3RlZExpbmVDb3VudCI6NTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjczNTM0MWZlODQ2Yjk2NDQzYjQ1YjM1NjllMDVhOGFiNTQyZjllYWEwZGFmMTBkMDA2MjdhNGEwMDA1ZWU5N2QiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImMzNTFmMzFmMGEwMDc3NWIxNjk1YzMwZTAwODY4OTA3OThjNTI2ZWY5YjZkMzU3NTEyZTEwNzU5M2I4Y2YwMWUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjM0ZWQzMWE4NDQwNmI0YjQyNjU0YmFiMDZhZDk1ZTE0OTg0MjFiNjlmYjE0ZTNkOWMwM2U4YTNhN2NkYzVjZDkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjU4NGI2MWIzOWExZDkzZTQ4NTYzMjFiZWViNmI2Y2FlMGRmNzhlM2YwOWEzODVmNTAxNWM4MTEyMjc3NTZlNTEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_c4cf4d5636624666ac7cf9d0ec7eb30b",
+      "statement": "Root is detected from the uid in /proc/self/status, and Docker is considered ready only when the docker binary and compose plugin work; missing Docker can be installed with the detected Ubuntu/Debian/Fedora/Arch recipe.",
+      "evidence": [
+        {
+          "resource": "repo://src/main.rs#L491-L558",
+          "version": "repo-lines-v1:sha256:bcac021d7db1a21944613ebadf9b5bfd4be6cee2d4f1f0bb3362ce3b9e89f0c3:eyJzZWxlY3RlZExpbmVDb3VudCI6NjgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJhODM5OWYyZmVmOGE1ZDRjYWFlMGFmMTQxYTU4Yzc0ZjBiYTc4MjE5ODcwYTljODk0NzkzYWFiZmJmNzliODQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU3ZjQ0NGRmOGI4OWZiODZiNWE0NmJhZGY0MTQ1NGRhZjU5OGQzYWYwZDEzMGQ3ODg3ZmNmODQ2OTBiNDJmZTIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjNjMDM2M2QyZWRkNTI0ZTExNjcwNTFjMzg3NDI2MjQxM2U5NDgwNjI4OWQzMmU2NWJkNTZmYmRiZjk3ZTAyOGQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY1YjFmM2Q5OTQ0YjhlODJmMThmOGNkY2I5NWRjMjBjNzAyY2FlOTNkOTJkYjIxZjliZWM0MWE5MTFiYjc5MDQifQ"
+        },
+        {
+          "resource": "repo://src/system.rs#L16-L60",
+          "version": "repo-lines-v1:sha256:afa79faf8297ca701f23359706a9eb9028305ee0e6207b7c1046041f2990bcce:eyJzZWxlY3RlZExpbmVDb3VudCI6NDUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE3NjRhN2U0ODM3ODcyN2NjZjA4MzFkMDliYzdkMDZjYzUwNDVmZWYxNzJhODc5ZjM3ZTJlOGU3NTYyMGMwZDUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU0YWVjZmNkZWI4OTU4NGY2YzEzOWViMTI2MjJlNGUxMGE2MGJmMjI5MTI5YzA2NzU1NDU3MDYyMzM4OTQ3ZGQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijc0OTZkMzNkMzFmYjhhOTQ0MDMzZDM1NDZlNDI0MWY0MGZlOTI2ZjMzYjk0MDllMzA1NTI0Y2RlNDMyYjkxZDIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_abde3161098244bdbf1dc7aa88f91abf",
+      "statement": "Preflight reports missing /dev/net/tun and invalid HOST_IP findings, and only inspects Compose projects that already have generated .env files so a fresh install stays offline while a rerun reuses its own published ports.",
+      "evidence": [
+        {
+          "resource": "repo://src/main.rs#L425-L489",
+          "version": "repo-lines-v1:sha256:0d46c8dae3d87f3cac1bd36728e41164367866db176b719ec6c0ce73cdce61d4:eyJzZWxlY3RlZExpbmVDb3VudCI6NjUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhjODhmZjlmMmZjZThlMTgwYWViNzQzZjYwZDAwNmIwZmUxMDZmZWVlMzNjMGIxNGYxZjFjNTM1MTViNDdmYmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRiM2Q3MmQ5NDVlOTFkZWI5NzQ4YjE3Yjg1MjAxMmYzYzBmNWM5NjIyZWU4NDRjNmQzZWRmOGZhYTI2OWVmYzgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImNiN2RjNDFlYTQ5NGFhZTVkOWRjNDY4YTkxNGQyZWU5ZGI1ZmI3ZDBjMmI2MGI3NTIzOWUxNjY0OGVlZDNlZmMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijc5MTlmOWQyODAzZWE5YzMxYTM3OTQ0ZmU2OWJiMzFiYjVlZmRlZDdkYzBlNDJiMDNkOTM2MWMwMGQ4NDE2MWYifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_08fae1ea11f94281af8579fb8b1bba58",
+      "statement": "Stack selection is sorted so the server stack always starts before the torrent stack, because prowlarr-init depends on the Sonarr/Radarr API keys the server stack writes at startup.",
+      "evidence": [
+        {
+          "resource": "repo://src/main.rs#L214-L227",
+          "version": "repo-lines-v1:sha256:fe8a2b3736e5ccde520cbc7f752dfeafc3afd66ae32aceec08c3560ffad6d4d7:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMyZTY5YTExOWJlNjA2YTJkOWM0ZWM0M2IwOTI0MDQzODE3ODdlYzE4ZmY5MWYxZmJlYzQyZGU1MDA5ZjNlMjciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjZiMmRjMmUyOTUyZjgxMWRiZjM4MzM2ZDg2ODc0MTRjNTU4NWUxNDkxZjk4ODJhMzBiYjk5NzU0NGYyZWE0ZWYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImNhY2FhZTEzMTdmNGY0NmE3ZmE0YWVjNjI5NTQ3ZGVjYjY3ZjE5ODIxZDg4NmEwODQ2Njg2MDZmN2U2NGJjYTgifQ"
+        },
+        {
+          "resource": "repo://src/stack.rs#L273-L280",
+          "version": "repo-lines-v1:sha256:933b88679704b93a4b503ca33e777a1d735b845c3ab1cc786e5c8c84fc90bfe8:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNzAzNGJjNTczMjRlNTY1MGI0NmNjZTFjNDBmZjJhZDBlM2RjNWZlOTQxMjlkODYwNWM5ZmQ5ZGUxNjgxNjZiZCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNGI4YTUwYTdkZjI3MGU5MThiZWY4MWNhZGI3ZjY2MjQzMDIyNWUzY2E3Yjg1ODFjYmY0YmRmMjc5Y2VkYjc3YiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMTNiODRhNGQwYjg2NGFmMGNmYzM3MDU0MTFhYjM4YWMwNTlkMjk5MjIzYWRlNTFlZmVmYWQ4NzNlNjkzOGU0MSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYjBmZTU0ZGVmYmY5Y2RmM2IxNjAzMWIyNDgzNmZhNjZlN2NlNGE0ZmRkYzQzY2IzYmI5MDU0NzUwOWIzYTI5NiJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_af352c60e58f45ab999c168001eedb23",
+      "statement": "The installer writes each stack's assets before starting it, and the torrent stack is started only after the effective Compose config passes VPN isolation checks and a probe proves the Compose network has an IPv4 default route.",
+      "evidence": [
+        {
+          "resource": "repo://src/main.rs#L756-L827",
+          "version": "repo-lines-v1:sha256:bc5b7ccc5cdefd11a638695cc23c834664c1fc012280dde63c1f8061a83cc499:eyJzZWxlY3RlZExpbmVDb3VudCI6NzIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEwNmY5ZjdlMjA4NjNlNGU0MTI0YzU3YzU0YjU2MTMxNGYxNDZkNjRkZWIzYjkyNmE0MDE0ZTg3NzkyYzg2ZWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjFiMmYyYjVjOTE2MmQ0NTEzNDYxYmE1YWFjYmIxMjJhM2QwNDgxZmFmMThjYWMxYmMwZDJhYTBjYTQ4YTA2YzgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijk2ZGZjMTFjYTQyZTQyZjBhMTFlNzYzMTExYTEwYzMyZmFhN2U4ODgyMzk1MWU1Y2VmZDJmZDk4YWRmNTAzYTEifQ"
+        },
+        {
+          "resource": "repo://src/system.rs#L241-L300",
+          "version": "repo-lines-v1:sha256:869f46ffcb17f7b3b54695c837b287cb56988591e1cdcd4ea600cb77154cdf0f:eyJzZWxlY3RlZExpbmVDb3VudCI6NjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU3NDhlMjU1ZGNkMjQ3NzA0MDQyNjhkNGM3ZjEzYTdlMzBkODJlYzNmZjM1NWMwMGRiZDBlNTM1MTA0MjA5ZWUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJhMjNkYjgzZDk1ZTEzZDJjNDVkYjkxYzFkYzkwNDQwMzc3NWEyNjkxNjkzNjEyZGQwMTc5NmU5MDdiOTdmNGEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU5ZmMyNTU3YzY0MGI3OGE0OTE4YjQ2NGM2ZTc5MDM2YjdhZTk2NzlkNTFmOTg0Mjc3MDJkZTE4ZmQwY2NiMDkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImJlOTFlNGVhZGZiMWJmZGI4YmFmNzEzZDUyNmY5Y2M5ZDQzYjNmOGI2ZTMwZTJkYjI5ZWNlNzU4NDk0MTQ0ZTAifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_6303c4ffa1d6448688455be2428ce083",
+      "statement": "Uninstall defaults to both stacks, requires confirmation, runs docker compose down per stack, aborts before deleting configuration if any removal fails, then deletes only server/config, server/cache, torrent/config and each stack's .env.",
+      "evidence": [
+        {
+          "resource": "repo://src/main.rs#L829-L920",
+          "version": "repo-lines-v1:sha256:c15355a9f7ebfcbfa3a1a939e83638f6bc6ca791abfd21a296f7c367d911abf0:eyJzZWxlY3RlZExpbmVDb3VudCI6OTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjYyMjIwNjZiMTgzNGM3NDFkZTA1YWVmZmZjNTFiMTIyNDk3MmEwMzA2M2U4N2NhMzA0NTljODRmZjcyM2FiMjgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImMyYzVhMjJhMTc4NzY1MDU2NGY2ZGY5ZTBhYzkwYmRhMmJjZmNhOTRhOTMyM2Q1MGE5N2VlN2U3MGZiZTVjNzYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjFlOTNlOGM1MWVjOWEzY2ZjMDVmNTQzNWM2MDA5NTVlNDYyNTEzYzcyMzI4ZjRjNjc1ZDQwNWQwYjNiNjdkZDQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQ0ZmU3NGJhODdjNGFkZmU5ZWE2ZDkyZjhiMDIyYjU1YjdkY2IyMGQxMDNhYjEzZGIyYWVjNWQ5ODVjMTE3MTcifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_4203a4a8bdb945298e2135cfef0ab93c",
+      "statement": "churn show treats a stack as installed only when its .env exists, prefers CHURN_HOST_IP then the stored HOST_IP, prints service URLs from configured ports and always keeps the VPN status agent on 127.0.0.1.",
+      "evidence": [
+        {
+          "resource": "repo://src/main.rs#L1807-L1821",
+          "version": "repo-lines-v1:sha256:c09f1777bc4dbd8a7fa7f4f83e72bce15864a729799cba41bb48c034fc08e6f8:eyJzZWxlY3RlZExpbmVDb3VudCI6MTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU3YWQwNWQ5MTE1YTEzMWNmODUzODY2MjA1NzBlNDcwYTBiNmI2OWZlYmZlZWNhMmQ5NDY4YjQ3MjA0ZDQ5MDUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRkZTMzZDgxYzAzZjQwN2I5ODk4ZTA0NjAyODg4ZjU2MjAyNmQ3MjRiODg2YmNlNTk5YjllZWE2MTdmMjk4ZmQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImM2MTlmZTIzZDkyNmMzNDI3OTAwNWU3ODBiNjMwMmIzNTYyOGFjNjAyNTcyMmE0ZGViM2E2ODNhMmE4ZmM3ZjMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjExNTFmZWVjMWVjZGJmODQ2ZDJkZDY0YjFhZjNlZWJlYTljODZmZjJiMjYwMDc4NDQ0ZjkwNTcxYmY4ODk5YjQifQ"
+        },
+        {
+          "resource": "repo://src/show.rs#L28-L75",
+          "version": "repo-lines-v1:sha256:e2074ec8558aaa0c75dfaa81d03fca7c0760e2136b1abee5ce791f9024a2aa7a:eyJzZWxlY3RlZExpbmVDb3VudCI6NDgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZlNTE0ZTBiMmZiYjVkNDBlNTI0Yjg3ZmZhZTQxODIzZjU1YTVhYzZhOWQ4ZWQ5NWE3MjcxNjAyYWUwZTMxZTgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjliZmI5ZWJlNTA2MWFlODk5OTU3NWY3Mzc3MTAwMWRjYzNkNzc2OTBmNzNkMWE2MjZhNTViY2EzNmJlNDE4ODMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjYyZGVhNzU1YzkzYzZkNzU3MGZjNDBiN2ExZGYxZGIyZGI4YjhhZDQwNzE0ODJlYTRiOWFlMWZmZjY4Y2Q2MDIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_ed854e9a56fd4e5f843e27fc772e7854",
+      "statement": "Compose JSON progress is parsed into per-process events grouped under their parent image, and LiveLog keeps one latest line per process, prints plainly when stderr is not a terminal, and limits determinate output to one line per 10%.",
+      "evidence": [
+        {
+          "resource": "repo://src/compose.rs#L1-L70",
+          "version": "repo-lines-v1:sha256:5416a9ed6d32714751f5cedd33dece10e9baacb45f3504ba98083c79eee24a06:eyJzZWxlY3RlZExpbmVDb3VudCI6NzAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBiN2Q4MmE3ZDMyMGM5OTgzOTExNWIwYTdiMTIwNWRjNTA3NmI0MDNkYTkwZTdhZWE1NWUwMmFiODVjMjdkOTYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQzOTNlMmRlNTMxZjkwMjMzNzJjNTEwOTYzODFiNzNiN2Q5ODdkMWY3Yjk4YjJjNDRiODJiMjJmYWJkZjVjZWMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjFkOGE5MzQyYWNkNDY3NzU2NDZhZTczYTE0ZjMyZTU5NjExYjFkNmM0YmI1NzI4YWIxMTU1MjU0ODA1MGJjZGUifQ"
+        },
+        {
+          "resource": "repo://src/live.rs#L1-L120",
+          "version": "repo-lines-v1:sha256:def7d0235f334f855633b7f9b7be40858bea933588b69611785cd4c23ba2e755:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIwLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI3MWIzMDM0NjFhZjZjYjM4MDdmNGY0MmVjZmY1NGRlMWE4MTY1NjdkNzMzNDk2ZmYzY2M0MDJlNDA4MThjZmI3IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiJlNmIwNDQ5MTQ2OTcyMmU4MzYzYTk0ZTQwNDQ1MzhlMDEzYTJhMjE3ZTM2YjFlNTY4YmE2MGFjYjdiNGM4ZjJlIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MCwicHJlY2VkaW5nQ29udGV4dEhhc2giOiJlM2IwYzQ0Mjk4ZmMxYzE0OWFmYmY0Yzg5OTZmYjkyNDI3YWU0MWU0NjQ5YjkzNGNhNDk1OTkxYjc4NTJiODU1IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiJjNTFhMGEwYmQ2MTk3ODYzZDc2MTc4OWFlNjVhOGU4MDJlMjcwZWY3ODQzYWQ4ZDM3Mzk4NGViODk2NzQ4YTgwIn0"
+        }
+      ]
+    },
+    {
+      "id": "claim_549237c29459400aa71501a3db0bde0e",
+      "statement": "Compose commands run with --ansi never --progress json, streaming stdout and stderr on separate threads while retaining a 200-line normalized tail for error messages.",
+      "evidence": [
+        {
+          "resource": "repo://src/system.rs#L419-L455",
+          "version": "repo-lines-v1:sha256:6b8025a9ad7e0c9a946634e95534d92becf73f2b11a8728a9918180f485ee887:eyJzZWxlY3RlZExpbmVDb3VudCI6MzcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImUzYjNkYzMxZGQzZTMzNGFhMzQxZmU1MGI5NTk1OGFmNTAwNzAyYzkxYmZhODg5OTRlNWY1NGY1MTgzZWYzNjQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxYzg3Yjk3OWJjNzI3YTY2MzVjNmE5NmZiOTk5MzMyYmIyM2Q2MmJjYzRjOGIyYjMxYmIwY2RmNjliNjE3ZjkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU5NmY4Y2IwODNmYTgwMGE0ZGNkMjk2OTcyMmQ3YjkyNjg2YWRkOWViZTM2NTU0OTJmYTY3MmIxYTdjZWQyNDIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjEwYjcwMzAwZmJkYmY3MjA2NzVkMjE1MDY4ZTUzZmU1Y2MwMzU5MDY3N2ZmZjI0YjZkODcwNDkzNDhhYmZkODcifQ"
+        },
+        {
+          "resource": "repo://src/system.rs#L456-L470",
+          "version": "repo-lines-v1:sha256:8496c832f1743e146ea936b2b6b81f62f3b0f7e0d1260eee2c0edc9e27752be7:eyJzZWxlY3RlZExpbmVDb3VudCI6MTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkxMmFkZjFjMmU5YjdlMTA3OWJlMWEyMzU5MmZhNWVjNGVlZjZmNGFhNDlhZjU0YzIxNjMxY2FkMmY3NjVmMzQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjdjMTkyZmE5NDBhNmIzZjcyMzdjOTMyM2RkMzg3YWVlOGJiZTJkY2RkMDY0NDUyMTFkZmQyZWZhODkxMmM1MDciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU4OGExN2VhMmUxZWQ1OWNmOGY2M2U1YjI5MWQxYThlNjlmMDNiZDE2ZWM2ZmJkMjlhYzY4NDM1NjQ3ZjRjOGQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjFhM2U3ZDhhMGQ2ZGZlMjhmOTRjNDlhZjdiYTUwZTNmOWY1ZDNlMDBmMTgwNWJhZGU3MTAyMWIzOWZmYTc2ZGIifQ"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-07T17:42:22.982Z"
+  }
+}

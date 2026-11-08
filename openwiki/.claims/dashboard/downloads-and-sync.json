@@ -1,0 +1,130 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:d8ab2e3418d3b4bcac95a608ff0545750e61caf976d134ab344c98c70967481d",
+  "claims": [
+    {
+      "id": "claim_3d5f89bed9d64a8fbca9ab4faf4e4647",
+      "statement": "The library-scan watcher polls every 5 seconds, starts with a 10-minute recent-import window, overlaps history queries by 60 seconds, and is enabled only when Jellyfin plus at least one arr or direct-download capability is configured.",
+      "evidence": [
+        {
+          "resource": "repo://server/backend/src/library-scan.ts#L103-L145",
+          "version": "repo-lines-v1:sha256:27044d7f4697a164cae5e91c62ca5aea45cb0b7f87188545a6e03ea203a7482c:eyJzZWxlY3RlZExpbmVDb3VudCI6NDMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBjYjI3Nzk0NDM5OTU1Yzg4NWFkMzdiNTg3ZTEwZGQ4MDFjNjVkNDc2M2M2YjQ3N2E1OTVjOWIxYWMxNWZlYjkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImM4MThiZTg2N2I5YWZiMWJkZmFmNWRlNjkzZTIwMjI2MDY3Y2FkZGM0OThjNjdmNTM2ZTM2MGQxNjk0ZGEwMjMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjZlMTQzNTA0ZTkzNmI0MGYwNGQ2NTJlOThlYjEwMGNkNDZkOThmMjM2NjIwYzY4YWJiNDQzMDQ1M2Q3ZDFlMGUifQ"
+        },
+        {
+          "resource": "repo://server/backend/src/library-scan.ts#L19-L37",
+          "version": "repo-lines-v1:sha256:319ef6ad5cc15df4f3e867e0c367cdcc5b3b1a67e818c2e00df092c7b85f84d7:eyJzZWxlY3RlZExpbmVDb3VudCI6MTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjUwYWRmNzA1ZTU1MzdkNmUyZjk0NjczOGNkYzk5NGFjMTU5ZWRmOTM5YTUwOTBlNzc2NmNhZDQyZTBlOTRiYTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRiNTA2OWIyZjBlN2I5MTQ5NzBkMjAzYjNjZTk3YjIzNWM1YjNjMGZiMDEzNjg5MjJmYzkxMjVjNDc2ZGJmM2YiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImEzMDM1YmYyZTM1ZmQ0YjQwYzViMTZhZGVjNmY1NGUxMDFkMmM0NGM0ODMyYzg5ZWM3OTFlOTk0YTFjY2NkYTQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImRhMzc5NDE4MWFlNmQ1M2RjNDEwMGM4YzAxNWE5OThjNDlkNjhkZTFkYjYwN2U3NDBlMzQxMTViZjQ3Y2MxMDQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_b3586e3d1c884077a45f939dd0777d19",
+      "statement": "Jellyfin scans trigger on Sonarr/Radarr downloadFolderImported history events rather than torrent completion, and the watcher verifies visibility for up to 90 seconds and retries the refresh once before giving up.",
+      "evidence": [
+        {
+          "resource": "repo://server/backend/src/library-scan.ts#L264-L300",
+          "version": "repo-lines-v1:sha256:d440abe59996f052c3ef13ae9cb93498706b9593a13893e8ca19362eadaffa49:eyJzZWxlY3RlZExpbmVDb3VudCI6MzcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFjNzg1MzZkNzNjYmFlYWY5ZGIwMmIwYTJjMDdhOWM1MjViMGQyMWJkZGI4MDRhYTBmNThhM2QzMTQ2ZjE2M2MiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQyZGY4NmI0NzZiMGQ2ZGJiZDE2ZmExOWZlMTdhOGJlNzc1MWFiZTNlZTgwN2I1MTBmYjVmOGNkZDBkYWQxNGUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjMwNzRkN2NkYTRiZjA5MGY4MmI4NTA1MWYwZDdlMmQ5MTE0MWI5ZmQwZGQwMjk0YzAwZjViNzA5NGU3M2FlYzUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImU3ZTM4ODM5ZDg5MjIxZDQwNDMzNDAyNDU2NWU0ZTYwYjIzOGFiMDFlNTdiNjNkYWQzYzQ0ZWU3ODcyNTM2MzIifQ"
+        },
+        {
+          "resource": "repo://server/backend/src/library-scan.ts#L53-L99",
+          "version": "repo-lines-v1:sha256:6611159f6c320bf62a151bc43bfafb2c658e11289bbe3f165a2f2488ff8269b0:eyJzZWxlY3RlZExpbmVDb3VudCI6NDcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjEzZjMzNmI5MTM0MGM4MDc4Nzk3NzU4YTA0MTE5YzI4ZjZjYTUzNTE3ODMxNjQ1OGVjZGM2YTMwYjY2MGRjOWMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjYyM2NiNGMxM2Q2Nzc1OWQ1NGY3NjcxZDQ0MDM0OTcyZDA5MDNhMzlkMDhhZmFlNzNiYjk4MWViOWFiMGRjZjMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjFlMmI0OWM3ZTU0MDMwN2NiOGE1NTE1MjY4YTIwNDE5MWIxNmNlZTEwYzBlMzJiMjc5ZDQ5MDIyMjZlODA2MzMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImM4MThiZTg2N2I5YWZiMWJkZmFmNWRlNjkzZTIwMjI2MDY3Y2FkZGM0OThjNjdmNTM2ZTM2MGQxNjk0ZGEwMjMifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_5ca037d376ac49989df8892021293d48",
+      "statement": "Completed churn-direct torrents are refreshed every 15 seconds until Jellyfin exposes them or a 10-minute retry window expires, using Jellyfin series/episode or movie data to confirm visibility.",
+      "evidence": [
+        {
+          "resource": "repo://server/backend/src/library-scan.ts#L187-L262",
+          "version": "repo-lines-v1:sha256:8266415e3618417e46d863c5d52ddb0684b60ff150817ec71633d1a4b916abaf:eyJzZWxlY3RlZExpbmVDb3VudCI6NzYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAzNmY1NjFmYjNlODUxMzA3YmVhMjkyNDUzNWNlMzkyMzA5ODhhOTY0ODBiMmQzNWQ0MGFjZDYwMjI4YjQzZjciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijk2YWI4MmUzMDMwMWJiYjI3YjA0MjY2OTQ0NDlhOTJkY2E3ZTg5NmZhZDljNWRmMzE5OWMxOGIzOTlhMWUzY2YiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImI5Nzc0YzVkNjMyZWEyNTFkMDZkZTIzMjM1OWQyNmE5NDQ0MTJlNTJkMjRiYzliMTA3NzBiMzJjZmZjZDQ4NDkifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_eadb061abac245378e6da5b8b16e1d1a",
+      "statement": "recoverCompletedShowDownloads asks Sonarr to run DownloadedEpisodesScan for a completed torrent whose queue record disappeared, at most once per minute per series and content path, and marks the fallback download rows as importing.",
+      "evidence": [
+        {
+          "resource": "repo://server/backend/src/download-import.ts#L1-L100",
+          "version": "repo-lines-v1:sha256:00b704aec1f8f186cb2746045d30bee3614ea3fad7a21c915d60b002de9b25f0:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAwLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiJmZGU1ZDhhOWIxOTlkNjE5Yzg0NGU0ZmVkNGQ2MDQwOGQ2ZmM1YzMzYzVmNjIxYTI5MmEyMDdiYWQ0NzYxNGRhIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI0MTJjYTM0NWNjZjc1YmY5YzA4MDZiY2U2OTViZThkZTgwOGI3OTk4NDI1MWE3YTU0ZDIwMmNmNjEwMWRkNDUxIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MCwicHJlY2VkaW5nQ29udGV4dEhhc2giOiJlM2IwYzQ0Mjk4ZmMxYzE0OWFmYmY0Yzg5OTZmYjkyNDI3YWU0MWU0NjQ5YjkzNGNhNDk1OTkxYjc4NTJiODU1IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiJjNmEyZWVkOTRkYTQxYmU0NTYzZGYwOGYwMDVkOGVlODU3ZWQ4YjZjMTJkNDA4ZmJjYmNiYTUxODRmNzI3YTg2In0"
+        }
+      ]
+    },
+    {
+      "id": "claim_670d66143e4048f4a00642b1884a18b7",
+      "statement": "The live download store caches movie/show identities for five minutes so fast download endpoints only read qBittorrent, using a two-second qBittorrent timeout and suppressing importing rows once Jellyfin already has the episode.",
+      "evidence": [
+        {
+          "resource": "repo://server/backend/src/live-downloads.ts#L45-L90",
+          "version": "repo-lines-v1:sha256:e3e36f59ec645e692e38f09bbb5a7901484e2b2b6c886fbe268ea618e2e0e8f6:eyJzZWxlY3RlZExpbmVDb3VudCI6NDYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNkZWQ0MjZiODQ4YzNlNTg4YTg0NDAwM2Q2MGY3ZmY2ODVhMGUwODE2OTBiYTczMjM1NTlhYjExYTA2NDQ5MzUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU1YjljZDRiZGEwNGY2ODkxNDNjYTYzZGQyZTU0Nzg3NTY2NjlhZjhmOTI4MDIwYTQ5NDU1ZTcxYTliNDM4YjEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQzNDhmZjAyOGE3NTA0MmI0NTZjNGY0MmI3OGJjMTcyOTVjYzE2YWZkMTc5ODc2MWU1MzRhZjgxZjk3OThkYTIifQ"
+        },
+        {
+          "resource": "repo://server/backend/src/live-downloads.ts#L93-L139",
+          "version": "repo-lines-v1:sha256:d131e27b4ab3dc6c5bdaf2e576bdebc3193f2e191a7239126989f6199228c6a6:eyJzZWxlY3RlZExpbmVDb3VudCI6NDcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJkNmY0OGJhNDJlYmFiY2Y5NDBhYjU4ZDgyYzU5ZGZlNTQ0ZWFkYjM2MGQzYjJiODhhYzc4ZDhhMjE5NjlkYTkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImE5ZjljYmM2ZTA1NDYzYWZlZWQ0MjZkMjI3ZTQxODEwYjg2NmJhMGNiNTcwOGUwYWFiNjgxYzgxZmQ0ZmM4YmYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_464bdda86cdb4392ba9c77ec9fb0544b",
+      "statement": "Show torrents are matched by exact title-token prefix plus an Sxx/SxxExx marker, allowing only a year or US/UK/AU/CA qualifier between them, and then mapped to the episodes covered by the season or episode.",
+      "evidence": [
+        {
+          "resource": "repo://server/backend/src/qbittorrent-show.ts#L28-L100",
+          "version": "repo-lines-v1:sha256:e9455e350990ee4c070b5b6f3ef8bfe75fef88aa4109c43d7333d9ed1292a8b3:eyJzZWxlY3RlZExpbmVDb3VudCI6NzMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImIwZTYyZGIxMmU3NWUwODlkZTQyYjk2Yzg2MjdjMDcyZjQyM2YzOTc3MGNkZjVhM2M0YTVkNjY4NDBjYmU5ZTYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA5Nzc0NmRhOGM2NTlhYTcwNzRmMjVhZGM1YTdmNjU1Yjg3MTU4NTA4YWJmMTg2MGYwOWQ1ODQzZTU4MzJkNmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjI4Y2UxYTU2OWNiMTYwZWM0NmEwM2JmOGViZjdkNmYyZDAyMTI1YmY2Y2IwMGYyZTQ4ZDFkMzZmNmEyYzJkNzUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJlYmRjNDc5NTBlZTJlNjI1N2I3ZDdhZmZmNGNlMWU1OWViNzY2MTA2ZDgxZDcyMzk3NjVhZTYyMzZlODIwYzAifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_d4f721bb73f54032a79dfa2a196d918a",
+      "statement": "Activity includes only active torrents, grouped by an explicit churn movie/series tag, then catalog title matching, then movie save-path matching; movie title matching requires the full title followed by the year or a release marker.",
+      "evidence": [
+        {
+          "resource": "repo://server/backend/src/qbittorrent-activity.ts#L244-L313",
+          "version": "repo-lines-v1:sha256:93c4a67867732c662b53fa693874ac4c2e8c4fd5ada7ac55f73fefc25f273d12:eyJzZWxlY3RlZExpbmVDb3VudCI6NzAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFiYmU5NjY5MjcyYmU3MGEyZTU3MTM5YWIzYzJiOWUwYTYxMDk0M2M4ZjMyZGJmNzUwNjQ3NmRiYWFkOTBjZjAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU5NWEwODEyNWNhNWIyMTg0NzBlOTQxYTBiZjA1N2IwYjFiMTdiNDU1YTM3ZWIzOTgyNzdlNGNhN2M2NGQ1MDQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImRmY2YyNDZjNmYyOTU4MzE4YjI3MmExNmNmNTRjM2NjN2E3NzZmZWY3ODZhNjdhMGRmMjU1NGU2OWE2MmRkZDkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjcwZjBjOTc2MDdhNzljOWZkNmVlMmY1OGExZWY2YWRiYWE4YjA1N2JkYjc0YWM5OWNkNmFjMDYyZTYwMzgzNTMifQ"
+        },
+        {
+          "resource": "repo://server/backend/src/qbittorrent-activity.ts#L63-L152",
+          "version": "repo-lines-v1:sha256:b968844c64a769830fd41151a4809be0c301c0299bfaf6b7a91408cefc71f74e:eyJzZWxlY3RlZExpbmVDb3VudCI6OTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJlZWI5NWVkZDliZGEyZjY0ODFmODA2ZDQyMzcxNzhiNjM1Mzk2YjZiNzk1MzJkYTBiNWU3YjhhMDc5NDI0N2EiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijk3ZDFlM2FhZGMxOWI2ODEzOWExNTAxYzNmYTcwMWQzODgxZmI0M2RkNjgzNzUxZjBhNmVhOGE1MjJiMzVkOGMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImRiMTdiNmVhYmJlOGQ0ZWNkOTJmODI1OWE1ZDM4NzNmNTgzZDZhNzBjZWIyYTMyNGE2NWI3ZTE4Y2NmMjcxMDcifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_468eaf6a81c44feba0b87d62fb87baee",
+      "statement": "Activity status precedence is warning over downloading over queued; warnings come from error/missingfiles, stalled downloads or metadata that has not arrived after five seconds, and aggregate progress is byte-weighted when sizes are known.",
+      "evidence": [
+        {
+          "resource": "repo://server/backend/src/qbittorrent-activity.ts#L366-L481",
+          "version": "repo-lines-v1:sha256:3039087e206d72d33c9602eca7acc6a19bf48fe982ab0a751a0b400926092113:eyJzZWxlY3RlZExpbmVDb3VudCI6MTE2LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiJmNDVmMjU5MzM3YWI5YjJjNDUzNWI2ODRmNmNmZTFjODQ2MjgyNmNkODdhMzBiOGFkZGI5MTNiMjg1MGNkNDY4IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI0MTJjYTM0NWNjZjc1YmY5YzA4MDZiY2U2OTViZThkZTgwOGI3OTk4NDI1MWE3YTU0ZDIwMmNmNjEwMWRkNDUxIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJhMmUzZTQ5NDM3OWU2NWE1Mzg5M2YyYjU0ODEyNGEwMWJlMTY1YjI1ZDAwMjc3OGQ1MTYwZmQ0YzUwZDEwZjRkIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiIzNDRmYzg1ODY2NTI2YzljOTAzZmJmMDcwZWQ0NWFjZTViNWE2MmEyMTUxM2I4MjQ4YWIxZTA1OGE3Nzg4MTI3In0"
+        }
+      ]
+    },
+    {
+      "id": "claim_8b5868e774e9450f926a4a29a1c1fc89",
+      "statement": "The activity feed reuses a qBittorrent snapshot for 400 ms and caches the Sonarr/Radarr title catalog for five minutes, coalescing concurrent requests through a single in-flight promise.",
+      "evidence": [
+        {
+          "resource": "repo://server/backend/src/activity-feed.ts#L38-L105",
+          "version": "repo-lines-v1:sha256:75c8115bfe45bc02786543d823a1d248041446b513412207cf14fb8301bf8f8f:eyJzZWxlY3RlZExpbmVDb3VudCI6NjgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU2YTgzNjkyZDM1NjQ5MjY2NWNjNDE4MGNjY2IwMjJhMWQwZjdmNzY4YjFkNTcwNmYzM2Y5ODZiODg3NjEzMjUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg0ZjkxYzYwODU4NzYyNTJjMmQ4ODAwMWQ0N2E0MDBmZWQyNjkzNzg0ODJjNzEwZjVjMGI3YzJlM2QyNjQwNjkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImI1MmJkZDk5MTgyMWNmYzY3MTNlNDQ5NzFhYjM5MmI3NjExOWQ3MWNiMTRjMTdmNzdkNDEyNmFiM2NlMzZiNTYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY0MjBmZTEzNzYwZjZmNTg4NmZkOGVkYzNjOTUwY2E3ODk2NDVjN2ExMDU4MzAyMThhNzc5MzYzZGY5NTA3YmUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_0e974172bd56493a9d5accf014271e57",
+      "statement": "A magnet awaiting metadata is warned about after five seconds, and arr queue records are overlaid with qBittorrent size/progress/ETA/speed by indexing every hash variant while preserving arr import state.",
+      "evidence": [
+        {
+          "resource": "repo://server/backend/src/metadata-wait.ts#L1-L42",
+          "version": "repo-lines-v1:sha256:ed8ab52d614a31ad348a0821e58009e078df324042eb22d88a0eabf4aa1c14cb:eyJzZWxlY3RlZExpbmVDb3VudCI6NDIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImExOGU2NTI0NjEzYmQyYTJiZmFkOTEzY2NiNTI2MDQzYTE0YzYwNzQyOGVmMjE2YjYzZTljOWMxZTk3YWY4MjYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://server/backend/src/torrent-progress.ts#L1-L75",
+          "version": "repo-lines-v1:sha256:1a3127e34fa9e1f466f36b23586b645656922b26c47873aafc4f3c1a1f1917e3:eyJzZWxlY3RlZExpbmVDb3VudCI6NzUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImExOGU2NTI0NjEzYmQyYTJiZmFkOTEzY2NiNTI2MDQzYTE0YzYwNzQyOGVmMjE2YjYzZTljOWMxZTk3YWY4MjYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI4ZGEwMjQzOTUyM2M2ZDllZGJiOTQ3YjU2NTcwYzVlYmY0M2IwYzM3YjhhYjBmYjQ0NWYwYzNlMzRlY2IzMzQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjUxMTY3ZTY2ZjZkN2VhZWI3NGVkNTk4MDk3NDkxMTVhYzA3M2NjZWY1OGY4NDJjOWNmNGJkYTljOGE3NThjZTEifQ"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-07T17:42:22.982Z"
+  }
+}

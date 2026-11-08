@@ -1,0 +1,130 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:e5c18203eff2a4129a06eddeef54c2e20771b72a90a3755f99ea4f392fea0ece",
+  "claims": [
+    {
+      "id": "claim_48c16066223a4596b289025a78448305",
+      "statement": "All upstream calls use a hard timeout and classify failures as unreachable, unauthorized, http or invalid_response; status helpers reduce them to unauthorized or unreachable and expose only UpstreamError messages.",
+      "evidence": [
+        {
+          "resource": "repo://server/backend/src/http.ts#L1-L95",
+          "version": "repo-lines-v1:sha256:dbf9f55b9149421c50b8f7e77c94840279ec3e9c3011e6d9a54f42799a05f436:eyJzZWxlY3RlZExpbmVDb3VudCI6OTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImMzNjg4Yjc2MGJhZDdhNDA4ZTVjZmQ0ZDUxN2I3ZTk3MTI3ZDExNWUyMGM1YzJjZGNjOWYwMjM3M2E3YTQ5NzEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAyZDk3NWY2NjZiMWE5ZTQwMzY3NjIzMTk2OWEyZWNmYjA3YmRhOTU4MTRjODUxOTJmN2VlNjM2ZDgxYTIyZTkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjM0OGM5M2ZkMGYwNGFjMTEyY2YwN2M3MWFhN2QzODcyN2RmZmQ5NmQ2MTIwZGE3MGUzNGE5ZTA4MDZiNTQ5YjEifQ"
+        },
+        {
+          "resource": "repo://server/backend/src/upstream/states.ts#L1-L10",
+          "version": "repo-lines-v1:sha256:f39406ed4880d1ffab4c1008adfafb63c47525061ab00271dd9d850339978e45:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImYwM2Y4MTBkNGViMTI5ZWQwNzMyN2NhMWFkNjNjNmI2YzczNWExMWM3MTZhMWVkYzJkNGY1NzJjODEzYmRhOGMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_bf18a3b504f146799a6897bd0c390fbb",
+      "statement": "API keys come from environment overrides first, then generated config files: Jellyfin/JELLYFIN_API_KEY, Sonarr/Radarr config.xml, Prowlarr config.xml and qBittorrent's WebUI APIKey.",
+      "evidence": [
+        {
+          "resource": "repo://server/backend/src/config.ts#L122-L202",
+          "version": "repo-lines-v1:sha256:858925cfe37f3c7817c64eda9e8cf5b8c025671bb3010841bf5bf8e2d8b09348:eyJzZWxlY3RlZExpbmVDb3VudCI6ODEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFiYjI2ZDY3YmMzZmRhYmVlZWE5ZWU5MjBkMWI0NTBhZWYyNTA1MjE1M2M4ZmUzZTViZTMyYWE2OGVmZWU0NmYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQwNjVhZjY2YTljZjc0YmYzNDM3NjY0YTk0ZDZiZDFlMDNkZDRiZDc5OGFmMDcxMzQxNzRmNzBmZDg1Y2ZkMDEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjM3NmNmZWI4MGE0NTY0YTdlMGFhMGMyODM1ZmJhNDY5MGEwNjk5YzBhMmU1NDZiNTE5ZjdlYmJjN2E0ZWE3YzIifQ"
+        },
+        {
+          "resource": "repo://server/backend/src/config.ts#L204-L283",
+          "version": "repo-lines-v1:sha256:cb229626794537a63cf9dcb9738acd919f0544cd72c4760418e2374339c2b800:eyJzZWxlY3RlZExpbmVDb3VudCI6ODAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI2N2FmYmU1ZWIzMWM2MGYxYjc1NWVlZTdkMmUxMzYxYTA2MDFjMjIzMDZkOWYxMWI1N2ZmZDJhOGRmYTNiNDUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImZiNTgwZTk2NGY4M2E0NzNmNDNkNDQzODQ2Mjk0OWQ2OGI1NjAwZmRhNzg3ZjE2Mzc0NWQwMGRlODljYmYzNmEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImU4NGY0OTAxNDk0N2QzYjFkYWQ3ZjRmZGQ4ZTA0MmIyNzI5MTNkYTc1YjMzYzJmMDQxZWUzMTAwMmQyNmE0MWUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_d2657c3ee8a94c45b582fe07ad1f2a06",
+      "statement": "The Jellyfin client sends X-Emby-Token plus client/device headers on authenticated calls and a MediaBrowser Authorization header for username/password login, with a per-session device id so logins do not revoke each other.",
+      "evidence": [
+        {
+          "resource": "repo://server/backend/src/upstream/jellyfin.ts#L140-L205",
+          "version": "repo-lines-v1:sha256:eb0bef2aa7475687a2557c5b123b731b83cf7d42385b8ef092c1b13fa6e5b35c:eyJzZWxlY3RlZExpbmVDb3VudCI6NjYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkwN2QxZjI1MjY5MzAyNjY1MDE3NzlmN2E2NWQ4ZjJjZmNkYTU0OWVjNWVlYTQ4MGQwYWY5NzY3NDViYmIwYzAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFkMmE3ZDU3MDY1NjgxOTQyZDkxY2RhYzNmNGQ3NDZlNDUyMzAzZjRhYjc1MDhjZWZhZDhkNGE2ZTM0MmNmMzIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjM2ZTllNTZjMzE5NTdkNWJiMTljOTBlZTFkOGJkYTdhMWUwNTg2NTRjYzM4ZWI5MmRlNjlhYTJmOTI1MTZmNTQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjU5MTRiYzcxOTM1ZmVlNjQ1NzZjMDg5ZWMwYjUyZDgyOGUyNTc0YWJmMmI4NzRjNTY3ZmVjMzE0YWYwNTkxZWEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_130069b04a524b9aa96db89f1e8c5358",
+      "statement": "Jellyfin library listing enumerates the signed-in user's views and queries items only inside those views, deduplicating results so orphaned Jellyfin records are excluded.",
+      "evidence": [
+        {
+          "resource": "repo://server/backend/src/upstream/jellyfin.ts#L294-L350",
+          "version": "repo-lines-v1:sha256:0e26896c5590a0ad6919167b51fdaa724ffe1d3169c37df1fc8630959245984d:eyJzZWxlY3RlZExpbmVDb3VudCI6NTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg5OTUzOTQxNWQ5YjU1NTM4MjM4NjMwODI3NzEwMDVlNWYzOTQwZGI3ODkwMDY3Y2Q0NTJlMGU5ZmJjYzFlM2MiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjdjOTc1NjBiMmEwOGVhNTAzOTc1ZGQ3MjA1MzI5OTcxOGIyNTk2MWU2Y2QyZjVmNmFhNGM3ODM3MTc3NjQ4YTIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjJiYTg3MGFjODQzNzgyMTA5NjdlZjdkM2RmZDkzNGNjMDE0MTk4MmIxNTNjYTkyYjg5M2JiMGRlOWNjYWYwNTMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImEwODdiMDlmY2U1NDAxMGQwZmIzM2M4YjM2OGE1YjcxOWMxYjc0YjNkOTUwNjM5Yzg3MTM2OWNjNDBhMjA5ZTMifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_08a5c455b6884bf7a05336d7a5f31a49",
+      "statement": "Sonarr and Radarr share one X-Api-Key client over /api/v3 covering status, lookup, parse, library, queue, history, episodes/releases, commands, grabs and add/update/delete.",
+      "evidence": [
+        {
+          "resource": "repo://server/backend/src/upstream/servarr.ts#L282-L300",
+          "version": "repo-lines-v1:sha256:2b43e107a06175b4066733aa8624d51470599eb0d9aace30d33393e8bab0e289:eyJzZWxlY3RlZExpbmVDb3VudCI6MTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg3MjdiMWEyYjE4ZTg5ODM4NGUyMjk4MDNiMmNlNjQxYzM2ZGY1NzYzZmUyZjFiNjE5ZWE0ZjQzMTkxNjFkN2IiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFiNTczNGFiOTVkMWFhZGFjYjg3ODk5YTgyNTM0NzQ1YjYwNzEyMTI2ZDNlNzI0MWFkYTRkOTk4NTMxODY3ZTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImNkMzk4YWZjNmJiNTM4MTRlNmY5MDY4OGQ5OWE1ZTYwMTY5M2M5MDI1ZmEzOWM5NGQyYTAyOTJkYzVjNWU0ZTEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImYzZjJkYzZhN2VlMzg3YjZkOTE4OTIyOWFjMjAxYTc2MzgwODgxNjFhZDJiOTc3M2EwYzY1NDdhYzk0ODZkMWQifQ"
+        },
+        {
+          "resource": "repo://server/backend/src/upstream/servarr.ts#L355-L400",
+          "version": "repo-lines-v1:sha256:0d4ec723d726f8dbb265a09109fd7968b12d790f0659baeca2d0b68e5ff126a3:eyJzZWxlY3RlZExpbmVDb3VudCI6NDYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjlkOGRhMDI0ZjUwMTJiM2QwMmI5NjFkZTAxZGMzMTIyMzBmOTg1MWQ1MDJiMmNhNmQ5NjMzZWY3OTQxZGZmMzgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY1YmU5ZGU4NWRiMzM1MzQ4ZDNjODAzOWM2NWIyMWEwZTMxN2Y4NmI0YjRhZDg0OTUwNzdlZmQ0MjhkYmRkZjIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjM4OTg1N2Y2M2RjZTgyZDUyOTcwZjEwOWMxMTg4MDQ1NzQxYjhhMmI0N2RlMDZkMTdmODBmMzg5NWZmNDAwNmQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImQ4MDljY2UxMmQ0OGJjZWU2Zjg1NGUwODMzY2Q5NDNjNmY2NmU3OTRmMDIwNzc4NGFhZWMwMjVjNGEwMjlhYjYifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_c1896226d15a4f4683666a7a34d4faa3",
+      "statement": "The Prowlarr client uses X-Api-Key and searches one indexer per request via indexerIds, leaving fan-out and per-indexer progress to the release-search service.",
+      "evidence": [
+        {
+          "resource": "repo://server/backend/src/upstream/prowlarr.ts#L36-L60",
+          "version": "repo-lines-v1:sha256:a270867be8f87ead0eb547c20ab12713f9350700265790a2025b3867d32f3118:eyJzZWxlY3RlZExpbmVDb3VudCI6MjUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU0MWEwNjBlM2QwZDQ4NDcwMmQxZDZhN2IzY2M1YTQxNTBlOGUxY2RiNDRhNWE5MjVjNjM3ZmEwNGNkOTJkOGIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjliYTAyYjc2YTQ0YjlhMmViZTM2ZDIzMzAzNmY2OGQ0YjAwNjIxMWQzNTBiZGE3OGJiNzEzZDFiNmI1ZDg0NjMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijk1MzVjZDJiNGJhNjE3MWQ1YWQxN2Y5Y2JhM2RhNTI2MmU0ZGU2YjU1ZWYyYjk1MmZjZmE0YTE4NDhlMjk3ZGUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_41a517899c944690bde34429b10f6056",
+      "statement": "The qBittorrent client authenticates with a Bearer API key and wraps torrents/info, sync/maindata, form-encoded torrent adds, tag updates and delete operations; adds accept Ok. or JSON count responses.",
+      "evidence": [
+        {
+          "resource": "repo://server/backend/src/upstream/qbittorrent.ts#L200-L280",
+          "version": "repo-lines-v1:sha256:45069ea6d2b5d2bc3f271b6dc6806e715ce09d1fec6b41e52feb6520696104ab:eyJzZWxlY3RlZExpbmVDb3VudCI6ODEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjUyNTI1NWVjMWFmN2YwNTcxYzY4NzYxMTMzMzA2NzA3NTdkNmYzOWRjNjg4MmM0Njg2YTVjZGQ2N2ExNDE1NTQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImViZTMwNmQyZDdiMDA5MzMxYjMzOGI0ODBhYzhmYjIxMjY2NDBjNmMxZmI1YjRhOGIzOTBhYjU2NWQ4NDRhNzIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://server/backend/src/upstream/qbittorrent.ts#L89-L180",
+          "version": "repo-lines-v1:sha256:7e22ab3bfc1c031ad33d94dc76af59990762f312c391baea106807b5bc19482c:eyJzZWxlY3RlZExpbmVDb3VudCI6OTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM3NDU2MGQ2NWI3NDI3NTI3ZGQyZDYxMjdjMjFkM2ZjY2U1OThkYjBkMTgzOTEyZTI1NjY0NmM2MGEzZTQyMTciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjliNjJmNjBkODU5MGE1NzljZjQ2ZjhkNjczNzhjNGM1NzJiOTYyY2VjY2RiOTBjN2E1ZjdiNDJiOTYwNzgyYTQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjNhMTQ2ZWEzYTg3N2QyNGQ1NTNhNmZkOWJiNTkyYjEzYjFkZjgyYzY3ZGNhMWZiNTUyZDIxZGViMzFhOTY4YTgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjYwMDIyNzU3NGE3NDA3OTM2YWNiZDg2ZTA3YWNmYWMxNDY2NWY4ZTIzMGJkNmY5Nzk2NjBlOWU0YTQ1ZjRkODgifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_00445af3e1624badbedc316d68ab1b8c",
+      "statement": "The VPN client requires every field of the agent payload and maps a malformed payload to an invalid_response UpstreamError, producing five ordered checks and coverage for qBittorrent, Prowlarr and FlareSolverr.",
+      "evidence": [
+        {
+          "resource": "repo://server/backend/src/upstream/vpn.ts#L1-L175",
+          "version": "repo-lines-v1:sha256:0080d4703bd1765c9b40b110d1d35f411fdb139e280b971a5ecf048022048229:eyJzZWxlY3RlZExpbmVDb3VudCI6MTc1LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI3MDcxNDFmNTc0YmEwYmVkYjcxNDliMjZjNWJlM2JlOTdiYTBiMzg3N2NmMzYwMzU2NTQ1N2NmZDRhMGYzZjQ3IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiIyM2IyZmRmYTgxOTE2MjliZWYyYTA0MzE4NmZmMTQxOTc3ZmUzZjBlNmZiZmUwYzdjYTM3ZDhlMzRiNWRlOGE2IiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MCwicHJlY2VkaW5nQ29udGV4dEhhc2giOiJlM2IwYzQ0Mjk4ZmMxYzE0OWFmYmY0Yzg5OTZmYjkyNDI3YWU0MWU0NjQ5YjkzNGNhNDk1OTkxYjc4NTJiODU1IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiIyMjdkMGEzZjJkMTFjM2FiYzA4ODI3MGQ3NzNkMGIyMDYwNzE0M2QxYWJjMDQ5MTFmYWNmYmUwMWViNzMzODgyIn0"
+        }
+      ]
+    },
+    {
+      "id": "claim_e01ea1df2f274674842c3f81e094067f",
+      "statement": "Status probes Jellyfin public/system info and Sonarr/Radarr system status in parallel, reports ok/unconfigured/unauthorized/unreachable with latency, and rewrites service URLs for the browser.",
+      "evidence": [
+        {
+          "resource": "repo://server/backend/src/routes/status.ts#L14-L120",
+          "version": "repo-lines-v1:sha256:b6494c2e87a96335b30361aa5784c0e487e201b2c3a5281c42f7c2a87ff1e0c8:eyJzZWxlY3RlZExpbmVDb3VudCI6MTA3LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI3ZDE4NTgzZWNhMDIwOWNlOTUxMjcwMmNkODA1ZTJkY2RhYjRhNjg1YzhhOWRlNDA4OGFiZWI1NDM2OTZlZjk5IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI3ZTAyNTY5MGU5OGU1NzY4OWU5NDVlOTljZTIwY2NiNWIwN2MyZGZlN2Q4ZDBlMDkzY2QxMmRkYjFiZDIwZDNjIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI5M2Y3NDU5YmI0YWUyMjYyZTllNmU4ZDk3Y2YxMTNhZjczMWIyMTQxZTAxNjM5NmU2NGYyMGZhM2E2NmUzODNkIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiI1NjNiZmQyMzA5MDczMDI4N2YzYzIyMjJjNTVmYWNlMzkxOTMyNWYxZGFhZjU4NzBhODc3NTdjZDY4NjYyZjRkIn0"
+        }
+      ]
+    },
+    {
+      "id": "claim_152695746896483db471224e751adbff",
+      "statement": "Stats combine qBittorrent all-time totals/free space with arr disk space and root folders, prefer a mount containing a root folder, prefer qBittorrent free space when valid, and return partial data with per-source errors.",
+      "evidence": [
+        {
+          "resource": "repo://server/backend/src/routes/stats.ts#L20-L105",
+          "version": "repo-lines-v1:sha256:9ebc0ac983d16dd035f1da0ed20e7d6aed7bc1dbec443cabfc3d7f47e7162856:eyJzZWxlY3RlZExpbmVDb3VudCI6ODYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk4Y2RlODBjNTJmOWVjZTc0MmQ5ZDU3ZmI4ODI5Mzc3NWEzM2IyODhmYTEwNzdlMDQ1MjFhNTQwNjBiNmFlNzAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjYwNDJmNzY2Y2MzZTFlMTBkODI4NTViMWNiYjk5ZTBmYjJiZGM0YWNlNzBlYzQ3N2RhYzk0NTAzOWMzZjVhZDIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://server/backend/src/stats.ts#L24-L115",
+          "version": "repo-lines-v1:sha256:776325c8b6d55313ad1dc80e83daef0942ed87f2b4ba6eb26e77d71e8111a322:eyJzZWxlY3RlZExpbmVDb3VudCI6OTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZjY2NmNjgyOTU2NmU5ZTZjNmI1NDdjNWE5YzkzMDA2MTZjYjI4MGZiMzliYjEzOTZjMjFjZDIyYTE0ZTA4MzQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhlZjAxYTQ3MjEwYTI5Nzc3MWJhMGQzYWQ3ZTljNTJhNGNiZTAzMTEyNDJmMWRiMWYzMmI4ZWY4MmI5MmNkNTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjAyMzkzZmIyMWNjMTU4MzA3OTA0ZTNmMjk1OTFkMjU2YzcxOGMyMzA1YTgxMGY1YzA4YWUxYmY4MjExZjc5N2UifQ"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-07T17:42:22.982Z"
+  }
+}

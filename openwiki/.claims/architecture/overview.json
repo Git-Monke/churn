@@ -1,0 +1,116 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:2a5ae6cfd163a4f6ba727caf00f52f48643601d6abc02ecb0278abbfce8d682e",
+  "claims": [
+    {
+      "id": "claim_0c80258d5dfd44fdb1e5ec9b36ec4d34",
+      "statement": "The churn binary embeds the server and torrent Compose files and scripts via include_str! and materializes them into the stack root on every install, so a released binary needs no source checkout.",
+      "evidence": [
+        {
+          "resource": "repo://src/assets.rs#L1-L10",
+          "version": "repo-lines-v1:sha256:5d298f0e0a1c771a48e5900e997dd2e5683d931cf4a5e1e919cb920c21801e6f:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU2ZDI0NjdiOTc5NzZjNzg3ZDFlNDZmNGM1Nzg2Yjg1YTEyYzc5MzUzMWViY2VmNzJjYjRhNWQyMTdiNTAzNTIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhjN2E2NDEwMmU3MTJmZDJlZjY1ZDE2N2I1ZjkwYjRjMjUwYjI3ZjI0YmNjNDY5NWVjZGFmY2VlOTRiNDBhZDgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImRiOWU5OTQ4MmM0Yjk1NWE2M2U2NjNiNzIwZjNmNjE0MDQyNzE5NDBhN2JhNGZmODUzYTk2NGI0NmYxYWJkYmUifQ"
+        },
+        {
+          "resource": "repo://src/assets.rs#L22-L70",
+          "version": "repo-lines-v1:sha256:fb3d17522277d8efad7d63769fc9577fcbbb9625bfec2840517acc4177770e2e:eyJzZWxlY3RlZExpbmVDb3VudCI6NDksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImIxYzEwZTEyYzY5ZWZjYzc0ZGI3NDJkNWQ4ZTcyMjBlNzY3Y2YxMDI0MDJiYTRlNGZmZmIwZGE5OWU5ZjEyOTYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFmMGNkYjk3MmE3YmZiN2VkMjQ2ZjlmZjY3MjM4NWU1NWY0OTY4ZmMxMTA0M2RjNWI2ODRkNTFkZmEzMWRiY2IiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjgzYTZkYjM1ZjY3YzQ4OWM0ZGY5OGI3N2RjZDdiNzliMDY1MDU4MjBmODJlYWJjNmJlZDVkNzQxZWRjZTEyMTgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImZjZWYwNGNjY2E1YzViZDNiNWRjODk0ODgyN2NmMDViNjUyMmZlMzg1N2JkMWViNmYwYTEyMzBiYjZlNDg0YjMifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_53fa69ba3ac24d1bbdd82b54958195ed",
+      "statement": "Generated stack state defaults to /var/lib/churn, but churn uses the current directory when it contains both server/docker-compose.yml and torrent/docker-compose.yml, and CHURN_ROOT overrides both.",
+      "evidence": [
+        {
+          "resource": "repo://src/envfile.rs#L13-L42",
+          "version": "repo-lines-v1:sha256:2e05be25fce6cdf1c729386d686251b4e78d890034c79371f2a29c3a51ea8672:eyJzZWxlY3RlZExpbmVDb3VudCI6MzAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY2MTcyYWU2NWI1ZTNiZTg3YTZmYWJjNTQyMjNiNjA3MDk2NjUyZWM5NmU4N2UyMjhiYWU0ZTViOWJjYjdkZTkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk4OGM2MTY4YmEzMDU0MzUyYzE0ZTc5YWM5N2JiYzM0NDE1OWJjYjkyMGQzOGE3ZDhiNGE4NTNiNzY3NjA0YzUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjkxZTBiYzI4ZTQxYTBmYTc5NDFlNTk3NTRlNGNkNjc3Yzc2YTU0MWNhODY4NGJlZTMwMDk4ZGNiOThkYjZjYzMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImI5ZGFlNDEwMTZjZjU1M2E3YmEyNDRmMzgxMzRlY2M3YmE0MTljMDFjOTA0ZjQyZmE4M2Y2ZDI4N2YwOTViMTkifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_b0720fde3e49440bae8695983d0ecef8",
+      "statement": "The seven host ports and their defaults are defined once in the Port enum: Jellyfin 8096, Sonarr 8989, Radarr 7878, dashboard 4000, qBittorrent 8080, Prowlarr 9696 and VPN status 8098.",
+      "evidence": [
+        {
+          "resource": "repo://src/ports.rs#L24-L43",
+          "version": "repo-lines-v1:sha256:c5074ca1cb18e63864cbe77a971eef41f42f5b1b2aa1444cfd9913ba3593b8b6:eyJzZWxlY3RlZExpbmVDb3VudCI6MjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjUzYjA4N2U1NzFiYmIzMzExY2QwOGJiMDIwNzVmNmY2NDIyNmJmYzE2Mjc1OTJmMzQ2ZTlmMjEwMDMzZTEzYzciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU2YjA0NDkxNDY5NzIyZTgzNjNhOTRlNDA0NDUzOGUwMTNhMmEyMTdlMzZiMWU1NjhiYTYwYWNiN2I0YzhmMmUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjE4NjgyYmI5YWI1MWM2ZTVkN2Y0ZWEzMjdjMDE5ZjE2MzZkNjljZDRkYWE3ZDEzMzk5OTI0MmQ4Y2QzOTYyYmEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjA1NmVkZDgxMzFjZTI0NWJmNDJmZTBiMmFjOTJmZWQwOWZlNjhjNzc2MzUwYzY0OTMyMGVhODlkYTA0ZTMxOWEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_0c1da366fd114713ad6f1ae834d72f57",
+      "statement": "Host port values are written to both stacks' .env files because the dashboard and prowlarr-init need ports owned by the other stack.",
+      "evidence": [
+        {
+          "resource": "repo://src/stack.rs#L206-L212",
+          "version": "repo-lines-v1:sha256:be8b7cfa9172c13d505f9a99cb971867b476c636c50f3a4f5f868fc2770d92b6:eyJzZWxlY3RlZExpbmVDb3VudCI6NywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYzEwZWNjMTUzYmYxN2NiYzMzZjE3MmMxY2I2ODU0NTNmYjNmMjNlM2QyOTE1ZDg5MzczZGE0ODNjN2QyODJjOSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYjg4Y2EzZDcwZGNjMmEwZmZmNGIzYWJkNTBjNjQ2NTMwMzFjZjA3NmU4OGJiMWMzZDRlMjUzNzA1ZDE0YjM1ZCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMGU2MDY1MjVhMTZlY2FhYjIyMDYwZjAxNzM5MGNkM2FmNmU1OWI0MzU0MWU1OGY3ODYxODViMDdmY2M3ODExNiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMzgyZDJiMjg4ZjM4NmMwYTQ0NmU4YTdkZGQ0NzY3YjI1MDg2YzE1NjljYTE4OTY0NDg3YjYwMmUxMmQ3Y2Y4YyJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_ffc59e2aacd94cda8b202d3a6f0090ac",
+      "statement": "The dashboard container runs on the host network as uid 1000 with a read-only root filesystem, all capabilities dropped and no-new-privileges, and mounts server/.env plus cache and state volumes.",
+      "evidence": [
+        {
+          "resource": "repo://server/docker-compose.yml#L64-L101",
+          "version": "repo-lines-v1:sha256:90685c954d63b40909dd05cfda08ad0b1c8f105bc30846d49d92c2561c3aec10:eyJzZWxlY3RlZExpbmVDb3VudCI6MzgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJhNWRjZGUxMzhhNmFiMjBmNTJkY2FkNjE3OTVhYWFhN2E4MGJiOWNjOTZhMDIxMWIyNTkwMWZiZWYzMGVkYTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjJiMmI4ZWZkNTQ5OGM4ZGE2MTJmNDFkNjU1NWJkMzAwMDUyMTIyODQ2MTJlZWM5NmUxMTUwZmViNmQxNDI4NWYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJjOGE2NGM5NDc3ODViMDhkYjhlOTlmYWYyMzE1ZmExM2IwYjNmMmYwMDI5YTI1MjI4YWZlYWI1ZTE0N2M0NzMifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_c48c015448d64bee8af1fd7d3acd8a4f",
+      "statement": "Only gluetun publishes the torrent Web UI ports, including the VPN status port bound to 127.0.0.1; qBittorrent, Prowlarr, FlareSolverr, vpn-check and vpn-status share its network namespace.",
+      "evidence": [
+        {
+          "resource": "repo://torrent/docker-compose.yml#L1-L20",
+          "version": "repo-lines-v1:sha256:19c6a595c5623a6116639cfa1061813ec0921a811cb3638175513a61d73dc8d7:eyJzZWxlY3RlZExpbmVDb3VudCI6MjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA0N2E4ZTJmODc1MjMxNWIzYTdhNzJkNWFmODZiMjQyMjRmNDk3MjFiZmY3Nzc2MDFiMGE5Y2E1ZTkzMTdiMDQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEyOGNkMWRlZTA0MTU0ZGZlMmIwYmExMzk5MmEyNGU1ODMwNDFmYjVkYTMxZWMyYTNiNDlmOWQ2NTRiNTUyZmUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijc3NWI4NTI1NDlkYzA0ZGJkZTM3NDRiMGIxNjgwMzY0NTM0ZTRjMzVjZTNmYTI5ZDk0ZDE2MzExODA2ODIzNmYifQ"
+        },
+        {
+          "resource": "repo://torrent/docker-compose.yml#L115-L165",
+          "version": "repo-lines-v1:sha256:aef671698100cbfb83473b44e996702a1fd18b7a1cb3aa3440efa266d78bfacb:eyJzZWxlY3RlZExpbmVDb3VudCI6NTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU1MmIyOWI3ZWFlMzU3YzlmNTdhMzgzNzU0YTViOTg2MTYzZjY0YTYxODAxYTBiMGYyODgwZTg3MGE2YTRlNjkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBmM2NhMTQ2ZWE4YmUyNDNmNGQ4YzE2OWI3NjljYjkyYmI2MGE4ZDk0MzRkODhjOTBmOTAwYzNhMzI2NzU3MTgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImM5MjEzOWJkMDk4YTU4M2IxYzkzOWI3NjdlZjJiNmEwOGEwZTJjZGU1NzA5ZDg4ZjYxMGY4OWM4ZDJiZDU5ZWMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImZlOTcwMDNhZmNkOTc4NTIzYzRiYWM5YWFhYTljNmI2YmUzY2MzOGY5NGUzNDNkYmNiMmEzMTFmY2RmNzg2OGMifQ"
+        },
+        {
+          "resource": "repo://torrent/docker-compose.yml#L40-L70",
+          "version": "repo-lines-v1:sha256:4fc5382a0eb5c014164becc2aaa80e595a7f250c96ded87f6c55485b64b5c76c:eyJzZWxlY3RlZExpbmVDb3VudCI6MzEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI3YjJmMTlkNTA2NGRlM2U3OThlMWM1ZTAxMDc5NTY2NTdhOGQzY2FkMmNjMmM1MTdjMmRlMWRhMDljZTI4MGMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc1ODg4ZGNkM2ExMTQzZDlkMGJmOTM4YmYyYzNlNGNiODIwZWIzOTc3OWQ0NDM5ZjE4MWI4ZThkYWQzODBiMjYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU5MmVkZTVmMGI4MmEzZDk4ZjBkN2Q5ZDgwYTBjZWUyMmY0NjYwNmE2ZDY0YTJhY2M4ZDVjMDE0OWNlNmZjOGQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImQ5YTA5NzQ2ZTM1OTlmNjljYWNkOWQ0M2VhYWJjY2M4OGNiMzVjN2JkNmNmZjNlZjlmYTdlNzQzYWU3YTZlYmIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_013f84cd65a84eea9352a4f4072be948",
+      "statement": "Uninstall-generated state consists of server/config, server/cache, torrent/config and each stack's .env; the media DATA_DIR is deliberately excluded.",
+      "evidence": [
+        {
+          "resource": "repo://src/stack.rs#L93-L105",
+          "version": "repo-lines-v1:sha256:037a0f3aec0ef090f41863e41cc6195ae2cfbb04fcbce3e86a9f29a4ae0a0d7a:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImFhODQ1M2ZiN2ZjY2ZiOGIwZTc2M2JkMjE5NGM3NDk5NWE4MjA5Y2Y4N2MxZGQ1ZWQ4NThhOGRhMGZiYjQ0ODAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjI1YzFlOGUxNTY0YzhhODY5N2NmYjUyMDkwOTM3YTUwY2Y3Y2JkNGZiYjRiNTMyYThmZGE0M2YwOTIxM2VhM2EifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_a5880f31fbff4d5d89da3e95fb93c6ca",
+      "statement": "The dashboard image reference defaults to ghcr.io/git-monke/churn-dashboard tagged with the installer's Cargo package version, unless CHURN_DASHBOARD_IMAGE overrides it.",
+      "evidence": [
+        {
+          "resource": "repo://src/stack.rs#L20-L24",
+          "version": "repo-lines-v1:sha256:16d0b4449e8f506f580a7258cbbfde298d7ff9c03904b1fe5f33b93e687f5f0f:eyJzZWxlY3RlZExpbmVDb3VudCI6NSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZWMxNWZjNjJmZDAxYTQxOGMyZGQwMjJjYzg5Y2U2ZTBmMDZmZDg2ZGFiMTFlOGY1MGFlNjQ5MTRmYTUzNzNjMyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZDdkMGY4MDg3Yjk0ZTJmMzQxMTM4NmIyNzZiNmY4ZGQ3MWE0YjRlZDU3YmUwZDYyNTRjYzI4YjE1NTg5NGFjNSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMzgxMmZiNWMwMDFhZmY2YzljZWE5Y2E1YjU4ZjRmMDFiZTNjMjc4NmJmMTUwZTdjMjNhNGE3ZDA4NzcwZGYzYyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNGJjZjkxMTU5NWNkNDIzZmZkZDA1MzVhYjI1ZjgzOGU0ZDRiZGM2Y2Y1Mzk0MjBlMzliZGE1OTIyODFkZmNiNiJ9"
+        },
+        {
+          "resource": "repo://src/stack.rs#L284-L294",
+          "version": "repo-lines-v1:sha256:82a6744d6828372b518cde792e0eb49ef980eeb6da9bf1685f95a1dc050c25d3:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImIwZmU1NGRlZmJmOWNkZjNiMTYwMzFiMjQ4MzZmYTY2ZTdjZTRhNGZkZGM0M2NiM2JiOTA1NDc1MDliM2EyOTYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjI5OTVkNGYzODgzNmFlNWY1NmVkNTJjNjE3ZWVkMjI3NGVkNzI4MGVhZGQ2NDc4NmZkYzM0YTg0ZWM1NzgyM2UifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_e9854c89c09b404189d269e0e2f8af02",
+      "statement": "Backend configuration merges server/.env with process environment, with process environment values taking precedence.",
+      "evidence": [
+        {
+          "resource": "repo://server/backend/src/config.ts#L204-L211",
+          "version": "repo-lines-v1:sha256:ba8f98df260c89ef9ca914744f184a5497cf02ac2cd0da276ddbd6e9e3abb32b:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYjY3YWZiZTVlYjMxYzYwZjFiNzU1ZWVlN2QyZTEzNjFhMDYwMWMyMjMwNmQ5ZjExYjU3ZmZkMmE4ZGZhM2I0NSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiY2I1YTRlNzAyODNlMjMxOTQ4ZTBkMmFmYWU3MTQyMzE1ZGIyYjhkODNiODc4YjkwNzYxMzQxYzIyOTJjODNlZiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZmI1ODBlOTY0ZjgzYTQ3M2Y0M2Q0NDM4NDYyOTQ5ZDY4YjU2MDBmZGE3ODdmMTYzNzQ1ZDAwZGU4OWNiZjM2YSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZjA1NjVlMDM0NjdlOTU4MzY3NmVjNGIxMGU1ZjU1YmIxMTM5NTljYmM1ZWFmNGQ2NTc2NWM5OTdlZTAyYzk5NCJ9"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-07T17:42:22.982Z"
+  }
+}

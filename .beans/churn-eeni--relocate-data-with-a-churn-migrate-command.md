@@ -1,13 +1,13 @@
 ---
 # churn-eeni
 title: Relocate data with a churn migrate command
-status: in-progress
+status: completed
 type: feature
 priority: normal
 tags:
     - storage
 created_at: 2026-11-05T04:05:47Z
-updated_at: 2026-11-05T05:16:42Z
+updated_at: 2026-11-07T18:10:10Z
 ---
 
 ## Problem

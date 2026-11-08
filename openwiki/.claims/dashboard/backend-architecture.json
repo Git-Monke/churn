@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:dde24699100fad4d88eff4e638b9a7774f25e25fd8c768b7ca5602afbb507c1e",
+  "claims": [
+    {
+      "id": "claim_ac883a1ab2e94426bc813ad886ea2924",
+      "statement": "buildServer constructs the Fastify app together with session, throttle, release-event, media-cache, IntroDB, attribution, release-search and library-scan collaborators, and stops the watcher and flushes/closes the session store on shutdown.",
+      "evidence": [
+        {
+          "resource": "repo://server/backend/src/server.ts#L43-L78",
+          "version": "repo-lines-v1:sha256:a488241b38aa8e34ac3db9a281c23c5c59a249f37dc556fdd81e3f83cdf9f11d:eyJzZWxlY3RlZExpbmVDb3VudCI6MzYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBiOTQwYjczNzA5ODk3MmQyNmM2MTYwOWY0Zjc2MjUwOGMzM2QzOTMwYTc3MzdiMWRhMDI2ZWFkNTQ0ZmIwYzEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNhM2U0NmY5NDI3NmI2ZjZmNGVkMWYwMmFmNzhiZWY2YTJlZTFjNDM5ZGQ1NTg0Yjk3Mzk0ODMxMzIxNGQyYjciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjA2ZWNlNjJjNTMwZjQ2ZjkwNzc0M2FjMDU2ZDhkY2ZhZWNkNmE4ZDk0ZjUxOWY1YjcyODYzNGVjMDRkNjZlMzYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY3OTQ5OTI1N2RhZDQzNzZiZjdjODdiN2Q2YTk4ZmEwY2RmOWMyY2IyODVkMDhlZjlhZTVmNzM1YTQ1NTUxMTkifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_cc204270a49b464c9682b30c36e0a10c",
+      "statement": "A single Fastify error handler maps ApiError to its status and code, UpstreamError to 502 upstream_error, and every other error to a logged 500 internal_error.",
+      "evidence": [
+        {
+          "resource": "repo://server/backend/src/server.ts#L80-L96",
+          "version": "repo-lines-v1:sha256:187c479f812a03868d9e9f6af2af7e1a3ef0e5c22be1c5d489c957c81bf68666:eyJzZWxlY3RlZExpbmVDb3VudCI6MTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU4ODdkMDFiOWM3MGU4NWI5NTI3M2UyMWI4NmRmNzAyMjBlMjc1YTRlOWI4NTU2YmE3OTg3OTdjZDExOGI3NzkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUxMTRmZGMyM2UxNTcyNzdmZGRjMGU0NzBhNzA2ZWY4NGRiN2JiM2I4YTJiZmE0NTlhNDg5ZWNkMjI0MTg3MDIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzZDMxZjQzYWExYTAzYjRkZWVmZDRhMGMwMGQyMzk0ZjY3ZWMzMmMyODEyMmY1M2U4Y2I4MGFiODgwOGMyOTkifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_2a55ebe026d14803aa69da16a907bd3c",
+      "statement": "All /api requests pass through one onRequest hook that enforces same-origin writes, allows only the health and auth endpoints publicly, and otherwise attaches the session-derived AuthContext or returns 401.",
+      "evidence": [
+        {
+          "resource": "repo://server/backend/src/server.ts#L99-L160",
+          "version": "repo-lines-v1:sha256:7ad172c563f0484beb6933f889a5869d7de3e56925587140d9ae8cb7218ca019:eyJzZWxlY3RlZExpbmVDb3VudCI6NjIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRlYTViNjNkZWFhYzI4ODlhMzM2OTAxMjYxNDQ2MmViMGU0ZjE2NTJjMzA2MWQ4OTY3NTc5NGVkODk1Y2VkZTQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNhM2U0NmY5NDI3NmI2ZjZmNGVkMWYwMmFmNzhiZWY2YTJlZTFjNDM5ZGQ1NTg0Yjk3Mzk0ODMxMzIxNGQyYjciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjBmZmI0N2ZkY2NkYmNiYzYyMTAxYjU4NmY3YjllNTMzZjdhNTU1NTAzZDlmMTY1YmZkZjllYzcyMTk4ODgwMzYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjhkM2M5ZjA0ZTljY2E0YTE2MWU5ODNlODg4MGI1ZGEzNDk4OTk2YTNmNDgwMzU4ZmRjNmM4Y2E2ZmVjYWI2MDIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_59f4559645e44a3ea4e290ecd9d65165",
+      "statement": "Route modules are registered explicitly in buildServer, and the not-found handler distinguishes unknown API paths, a missing frontend build and SPA fallback to index.html.",
+      "evidence": [
+        {
+          "resource": "repo://server/backend/src/server.ts#L162-L210",
+          "version": "repo-lines-v1:sha256:7d1a08bf3ae97ae8fc988ba5f56d7db8fce60d3a4bbb07487719343caca78ff2:eyJzZWxlY3RlZExpbmVDb3VudCI6NDksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxZDI4ZTljMGJmYmQ2OTIyNjIwZGNlODgxMGYxNDc3ZjE4ZTEyZjlkMmQzNzNhNjEzNTIwOGFlNWZkMDMwYmMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJjNjY2ZjljOThjNDNjZmJmNzEzM2JiYzM3ZjMyMGViMzE5OGM2YjM1ODkwY2JkMzg1ODFhM2I1ZjNmZTA0ZGUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijg3M2Y3YWExNDAyYjk4NzU5MzA1MWQ3ODQ3ZDkyMzdiMzIxOGYyOGUwYTZlMzM2NmJlNjNlM2NkZmJiMzMxZjkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjM3OTI5ZTkxZTBmOTljM2U4MjVkZTY5YjQzNWZiNjQ4NGQxYjBhMWRmMmY0NjU2MWFiZjFhMjlmMDQxODhiODgifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_192750f3f13e425e801003ddaa1a8f0c",
+      "statement": "Release caches prefer server/cache/releases, then server/.churn-cache/releases, then the system temporary directory, choosing the first path the backend can create and write.",
+      "evidence": [
+        {
+          "resource": "repo://server/backend/src/server.ts#L212-L232",
+          "version": "repo-lines-v1:sha256:277410c8b2c5fabda284ace290b7e8beae0c4acf22cb3ca48ed9a2bc485bc01f:eyJzZWxlY3RlZExpbmVDb3VudCI6MjEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI3ZTU3ODhkNWQ5ZDczZDI0YTgxZGJjMGE1YTc0YmZhODJjOWMzYjNhZjk5ZTUyYWY3OTZlOTBiNDY4YThhM2QiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjM3NmU1ZWM5NTMwZDhjYzE0Nzc2YmM3M2U5OGFhZjcyZWI1NGY2ODE5YjE4YzYwNWQ0YjczYzM5MzdjYThkMWEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjgwODU5ODgzMTkxNTI2NzJjMWJkOTc3MTczODVlYTFlMGUwNWU3NGQ1OGVjYzcwMDgzNTE4MmQ2NGY2OWM2MWYifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_431d2c983a344872821cfe8c76c82782",
+      "statement": "loadConfig resolves the server directory, merges process environment over server/.env, applies service defaults and maps every configured timeout, session TTL, cookie policy and state directory.",
+      "evidence": [
+        {
+          "resource": "repo://server/backend/src/config.ts#L204-L283",
+          "version": "repo-lines-v1:sha256:cb229626794537a63cf9dcb9738acd919f0544cd72c4760418e2374339c2b800:eyJzZWxlY3RlZExpbmVDb3VudCI6ODAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI2N2FmYmU1ZWIzMWM2MGYxYjc1NWVlZTdkMmUxMzYxYTA2MDFjMjIzMDZkOWYxMWI1N2ZmZDJhOGRmYTNiNDUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImZiNTgwZTk2NGY4M2E0NzNmNDNkNDQzODQ2Mjk0OWQ2OGI1NjAwZmRhNzg3ZjE2Mzc0NWQwMGRlODljYmYzNmEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImU4NGY0OTAxNDk0N2QzYjFkYWQ3ZjRmZGQ4ZTA0MmIyNzI5MTNkYTc1YjMzYzJmMDQxZWUzMTAwMmQyNmE0MWUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_a869053f9b884483be91bb81294127e4",
+      "statement": "API keys are read from environment overrides first, otherwise from Sonarr/Radarr config.xml, qBittorrent's [WebUI] APIKey (with the legacy key accepted) and Prowlarr config.xml.",
+      "evidence": [
+        {
+          "resource": "repo://server/backend/src/config.ts#L122-L202",
+          "version": "repo-lines-v1:sha256:858925cfe37f3c7817c64eda9e8cf5b8c025671bb3010841bf5bf8e2d8b09348:eyJzZWxlY3RlZExpbmVDb3VudCI6ODEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFiYjI2ZDY3YmMzZmRhYmVlZWE5ZWU5MjBkMWI0NTBhZWYyNTA1MjE1M2M4ZmUzZTViZTMyYWE2OGVmZWU0NmYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQwNjVhZjY2YTljZjc0YmYzNDM3NjY0YTk0ZDZiZDFlMDNkZDRiZDc5OGFmMDcxMzQxNzRmNzBmZDg1Y2ZkMDEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjM3NmNmZWI4MGE0NTY0YTdlMGFhMGMyODM1ZmJhNDY5MGEwNjk5YzBhMmU1NDZiNTE5ZjdlYmJjN2E0ZWE3YzIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_c1be5833e90d4434b4c8cd5d19bef299",
+      "statement": "Browser-facing service URLs honour an explicit public URL, otherwise rewrite loopback or container hostnames to the request host (X-Forwarded-Host, Forwarded host, then Host) with the detected LAN address as fallback.",
+      "evidence": [
+        {
+          "resource": "repo://server/backend/src/config.ts#L323-L395",
+          "version": "repo-lines-v1:sha256:51c5852c74d8fa2abf60cc10ff01eaeb5847bd7b5660be8af2f4de86478ecc65:eyJzZWxlY3RlZExpbmVDb3VudCI6NzMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFiNzU2MjBlZmM4YmUwODFmY2YyZGMyYWZhODMwN2FkYmEzNjYzMGRmMjM1ZjYxMGUyZTZjM2Y0MGM4MDE1ZTciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU1ODU2NDEwMGY3YTBiNDBiZjUyMTY2NzhmNDZiNGE3YWNlMjdlZDU1YmVhNWM2NWYwZDExZTMxMWZiYWJmZDkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQxMjc0NGJkODRiMzFlMGYwOGJmZDhmYmIzZGIzMGYwNGNmYmUzMmUwYWNiYjI3MDIyN2Y4OTRiMmVjYmExYmIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_839ab8f0d0434edfb416a0bda9589af0",
+      "statement": "LAN detection prefers RFC1918 addresses over public and CGNAT addresses, excludes loopback and link-local addresses, penalizes virtual interfaces, and can be overridden with CHURN_HOST_IP.",
+      "evidence": [
+        {
+          "resource": "repo://server/backend/src/lan.ts#L1-L114",
+          "version": "repo-lines-v1:sha256:0d50754227e3c47302a943e234fdba97deeac8e966402d741b06e5365e01bc96:eyJzZWxlY3RlZExpbmVDb3VudCI6MTE0LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI2MGJmYzA0NzhmODU5OGJkYzczMzQxMGRkNDBjYTVjOWY0YjNjZjNjNGM2NTFiNDg5N2Y5M2YxZDBhMGUwNzJkIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI0MTJjYTM0NWNjZjc1YmY5YzA4MDZiY2U2OTViZThkZTgwOGI3OTk4NDI1MWE3YTU0ZDIwMmNmNjEwMWRkNDUxIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MCwicHJlY2VkaW5nQ29udGV4dEhhc2giOiJlM2IwYzQ0Mjk4ZmMxYzE0OWFmYmY0Yzg5OTZmYjkyNDI3YWU0MWU0NjQ5YjkzNGNhNDk1OTkxYjc4NTJiODU1IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MCwiZm9sbG93aW5nQ29udGV4dEhhc2giOiJlM2IwYzQ0Mjk4ZmMxYzE0OWFmYmY0Yzg5OTZmYjkyNDI3YWU0MWU0NjQ5YjkzNGNhNDk1OTkxYjc4NTJiODU1In0"
+        }
+      ]
+    },
+    {
+      "id": "claim_a534005703244e3bae35607aaaa14965",
+      "statement": "Upstream fetches use a hard AbortSignal timeout and translate timeouts, network failures, 401/403 responses, other non-2xx responses and invalid JSON into UpstreamError values carrying service, kind and status.",
+      "evidence": [
+        {
+          "resource": "repo://server/backend/src/http.ts#L1-L95",
+          "version": "repo-lines-v1:sha256:dbf9f55b9149421c50b8f7e77c94840279ec3e9c3011e6d9a54f42799a05f436:eyJzZWxlY3RlZExpbmVDb3VudCI6OTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImMzNjg4Yjc2MGJhZDdhNDA4ZTVjZmQ0ZDUxN2I3ZTk3MTI3ZDExNWUyMGM1YzJjZGNjOWYwMjM3M2E3YTQ5NzEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAyZDk3NWY2NjZiMWE5ZTQwMzY3NjIzMTk2OWEyZWNmYjA3YmRhOTU4MTRjODUxOTJmN2VlNjM2ZDgxYTIyZTkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjM0OGM5M2ZkMGYwNGFjMTEyY2YwN2M3MWFhN2QzODcyN2RmZmQ5NmQ2MTIwZGE3MGUzNGE5ZTA4MDZiNTQ5YjEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_9bdaf17e1a114020adf2105a44d0bfdd",
+      "statement": "The executable entrypoint loads config, builds the app with logging, listens on the configured host and port, and closes the app on SIGINT/SIGTERM; GET /api/health is a minimal public liveness response.",
+      "evidence": [
+        {
+          "resource": "repo://server/backend/src/index.ts#L1-L29",
+          "version": "repo-lines-v1:sha256:4bc95a335519d802ca39f1ac1af2134ef62e87a17d86b1fd9edf7dc483f41afa:eyJzZWxlY3RlZExpbmVDb3VudCI6MjksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImUzNGEyNDk3MzFmMDk0ZTNiM2QzM2VmYWE3MDU0NjdjNjk1OGU2ZTViZDNlYzhiZTMxZDA3MDY1YzlmMDA4YzYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://server/backend/src/routes/health.ts#L1-L8",
+          "version": "repo-lines-v1:sha256:5804f0385728aecddbd5a089a7fba71fc7d534604fb5b5c0cfcb77e0c489b1aa:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZGY4M2NkYzM3NDVmYzA5OTZmMDAwNzA2NzE0ZGY0ZmQxMGZlNmM2NzUzMjY5ZWVkMDRjYmM3NjA3NGM1OGFiOCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNDEyY2EzNDVjY2Y3NWJmOWMwODA2YmNlNjk1YmU4ZGU4MDhiNzk5ODQyNTFhN2E1NGQyMDJjZjYxMDFkZDQ1MSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjAsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSJ9"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-07T17:42:22.982Z"
+  }
+}

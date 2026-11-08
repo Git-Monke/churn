@@ -1,0 +1,154 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:a354b7a4295fc3d979debb0b7780e19dfa9b4f22d28268460dcf5e1bf9ba0d4b",
+  "claims": [
+    {
+      "id": "claim_d9a8db6ae4b64480a9de8fd91e567e2d",
+      "statement": "Each stack declares its own questions; collection orders VPN before Storage and deduplicates across stacks, and the selected stacks are sorted so server precedes torrent.",
+      "evidence": [
+        {
+          "resource": "repo://src/main.rs#L214-L226",
+          "version": "repo-lines-v1:sha256:8253cc43243d3467e208e0dc5dae8faf08702b07c542e44fd42a9dc839decdfa:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMyZTY5YTExOWJlNjA2YTJkOWM0ZWM0M2IwOTI0MDQzODE3ODdlYzE4ZmY5MWYxZmJlYzQyZGU1MDA5ZjNlMjciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImVhMDk0MDk4MzBjMzg5YTZhYWZlZDZiNDc5MDYyMGJlZTY2NzEwNzE3NjBhMjY0YzQ1NGIyOTliYTZkN2VkNzEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjZiMmRjMmUyOTUyZjgxMWRiZjM4MzM2ZDg2ODc0MTRjNTU4NWUxNDkxZjk4ODJhMzBiYjk5NzU0NGYyZWE0ZWYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImZjYTYxNTBmOTg3ZTA1YTQ2MjhmNjQ5MjU5MTI3NjNmMmUxMWE5ZmIyMzc2MjZkYjdjMWQ0MzJkOTRhYzIwZjMifQ"
+        },
+        {
+          "resource": "repo://src/stack.rs#L314-L330",
+          "version": "repo-lines-v1:sha256:9467d6a25983b70a63096817141de83b1fb2fde3e4e444200cc1096ab32c3336:eyJzZWxlY3RlZExpbmVDb3VudCI6MTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk1YzJmZWM5OWM4Mjk0ZTc1MDM4NmZjYTBkODk1Y2QyMmYxYjgzNzc2NTBkMzRkZjQwZDQ0MWE0NzQyMmZkN2IiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjlkZDhjOGQ1MWEzNzVjZDBjNWUxNzliYmNjNzQyODZlMDYwYmQwN2M4MTFhYTlkODU4ZWE5ZjAxNmI2MzUxZDQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImE5ZmMxMmU2NTQ5ZTE0MTFhYmFiZDZiMzk1YWQ1ZmJjMjc5MGM4OGQ4ODFhZmFkMTc3MTFiM2MzZDMwMjMxMDgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijg2NWUwNzg5MTkzODY2NmExY2I2M2UzYmYzYzUxNzVkNWNlMjcwYTFhNWJlOTJjM2U2MWM4NGY1OGU2ZTg3NDAifQ"
+        },
+        {
+          "resource": "repo://src/stack.rs#L60-L76",
+          "version": "repo-lines-v1:sha256:132cdde5a9ff59310906d68da5114af0696be15fe114b725faf88a099c2e2095:eyJzZWxlY3RlZExpbmVDb3VudCI6MTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ1MzIzN2U4YjljYjE1NDM5NTUyOTM2OWJlZWUyNDk1NzNhNmZjN2UyMzU0MzU4YjY2YTM4ZDk2M2Q0NTk3NjAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU2YjA0NDkxNDY5NzIyZTgzNjNhOTRlNDA0NDUzOGUwMTNhMmEyMTdlMzZiMWU1NjhiYTYwYWNiN2I0YzhmMmUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijk5OWJkZWZlZWFjYTYzNDBlMDI5MGRjODZlODg5Yzg5ZDVlMTg5YWE1YmE0NGI1ODViM2I3MDczNGY0YTYyZDgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImM1Zjc5NTdlMmRlOGFjYzUyOWM0NmU3OTFmOWU3MThlMjYyNDY0NjYzYjc4OGExOGNjMzc0NjlhNTRlNjcwYmMifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_e6bd2d1cbf1245a98562120a0e47bfc6",
+      "statement": "Question defaults come from both stacks' .env files, with ports taken only from the owning stack, plus host ports already published by running churn containers; stored values prefill reruns.",
+      "evidence": [
+        {
+          "resource": "repo://src/main.rs#L229-L301",
+          "version": "repo-lines-v1:sha256:6fe0c3f661e1f57a499d7b88cb5ecc2a6344f96ebc8c9f72a572e49bd05e1dc2:eyJzZWxlY3RlZExpbmVDb3VudCI6NzMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjYwYWJlMTE1OWVlN2U5NjdmNWExYTAwYzUzMjYzYjkxMWQwMjlhMWQwYThjMjI1OWM0MzY3YjExN2QxNDQzZTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjViYTkzYTU5ODAzMTdkMTEzYTExNjI0NGVlNWQ1Y2YyZTZlM2M5NTBiZjY1MjdmYjM1ZDliMDdmOTBhN2QwZDEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImNhZjNiNjkwOTdhMzA4NzcyMzJlNjJhMTM3M2Q2NDFmN2JkMTA0MDI1YmY4NmUyYzkwNTRkZGFiNzAwMTgwZTMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImI3ZjhlYTliMzU2OWIyY2Q2NGMxODllY2VlZDhiOGI3MDhjMjYwMDY1M2NlYTQzNmY5Yjg2MGM4MzFhYWJiYjYifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_3ebe3dccdea34a7db7aed32c3f22ffc0",
+      "statement": "Port resolution reuses a valid stored port, takes a free default, otherwise scans upward then downward while avoiding other defaults and assigned ports, and either prompts or auto-selects under --yes; only 1024-65535 is accepted.",
+      "evidence": [
+        {
+          "resource": "repo://src/main.rs#L303-L362",
+          "version": "repo-lines-v1:sha256:3bac1a42a30ae9edcfb64dabb7d08a0f1f0f6db3b50b914317109e2a6e449cf6:eyJzZWxlY3RlZExpbmVDb3VudCI6NjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBkOTAzNjI5Nzc2NTMxYmZmZDZmNzcwYmNjMDA0OWM3M2Q3NmYxNTIyMjk4NTE0YjNjYTlhNWJiOTJlYTEzYTgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEyZDg0MDgzNzNhNDAzYmY4NGQ2MTE3ZGI5MDRlYTNhNGYwMDRhNTlmNjJkNDgzNTgzN2JmMmRiNzk1M2I1OTciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjJjMTFkYTgwNzE1NTFlNzlhYzMwOGU0ZjIyZmFhYTdiZDYyNzFlOTNhNjczZmFlMGJkNGNlM2ExY2E5YTA4MTIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImE4NWM5YWRhMTM2ZTM0ZjE1NGM0M2Q1NTNkYzNiMjE1MzAwMjllZWVmNGI1YTlmYzk3NmVjY2M1MGFmZTNjZWEifQ"
+        },
+        {
+          "resource": "repo://src/ports.rs#L150-L175",
+          "version": "repo-lines-v1:sha256:af65caa07cda0661c26b44c466b29b587bcb65c5612f480f0359b7584389b6bb:eyJzZWxlY3RlZExpbmVDb3VudCI6MjYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjUwMmFlZmZkMDFjOTlkOGNkODc5NzhhN2RhYWY1ZTI2ZDQ3MzMxOGUzNTkxNTRhYzc1NmViNGM5YTY5ZTg3Y2IiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFlMGFmM2ZkNGE0YzNhMWQ0N2M3ZjQ3MGVkMGQ4NmQ5MGQ5ZGUyMTBhNWViMTQ1NWZiZDk0NDgyYTQ3NjViNzIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQ1ODM3MzBiYjkyZmNlNGUxYjFiMmYxZDQzYmNhZGFiMzU4ZTVhMzg2YTAxMGRhNWJkZGUzYmRlNjg3ODU1YzIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjhiZTk5NjVjZTRhMzJmOTdmOWYzM2M1NTM4Y2VmOWQxNDY3OGIxNDRkODg4NWQ2NjI5OGE2ZGUyYzg4NzU2ZTEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_afc3f36381f640e2858ddd7b1015bb3f",
+      "statement": "Existing published ports are matched by Compose service and target port, and the VPN status port additionally requires a loopback publisher, letting reruns adopt moved host ports.",
+      "evidence": [
+        {
+          "resource": "repo://src/ports.rs#L98-L125",
+          "version": "repo-lines-v1:sha256:c7bddac0333b582bdfb967b6e7b74407e5c3af3a7cd887faa3975ec315b41138:eyJzZWxlY3RlZExpbmVDb3VudCI6MjgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc1YTFkNWJiZGU4NDM2ZmQyMTZmMzZhZjI3NDQ2ZjMxZWM4ZjRmNTgwMzNjN2U5NmQzYzA5NDJjNjVhMTkzMWEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjkxMWIzMGFjNzRjMDU1ZWZhNjhkNjA5NjhmMmQ0ZTZlNDNiNDJmNTVkYWJlN2Q3NmJmMjUwOTFkNzE1NTdmMmQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjU5YTJhZWEwZTRiNWU3OTU1MGYyNmUxNDRkNzY0ZGY5ZTIzZjdkZmM3MDMzYzJiMzAzNTcyZGQwYmM3ZDk0MTMifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_664a1619ffa949f58e7ca3f6a2952222",
+      "statement": "Mullvad archives must contain .conf entries; the first sorted config is parsed for a PrivateKey that base64-decodes to 32 bytes and the first IPv4 CIDR Address with a prefix of at most 32.",
+      "evidence": [
+        {
+          "resource": "repo://src/mullvad.rs#L99-L180",
+          "version": "repo-lines-v1:sha256:a2e1af6b90f17d9f296d25fc431c0ddad7bac60c2d1a2f4e6a6da0597074589c:eyJzZWxlY3RlZExpbmVDb3VudCI6ODIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEyNTg3NGZhZWNlNTc1YWU1NjRjYjI3MjFhMTc2NjYzZjIzZTlkMTZlODlkMmVhMGE3MTAzMjBiYWMzMWM1YTMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjUwNTVkMjRlYjdmMTg2MmFhODM4YmMyNGQ2MzdmNGRjYmJiNzQ2NmRiNGViMTI4MmYwNzQ1ZTg3ZDViNzBmMzIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjNhZGNlYWJhMGVmYmExNzAxNjIzOWEzZWEzNTY2MGI0NjY1YzgxM2E0NzQ0NTRkNGZlOGQ3M2Y4MDkwNTliYTkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjAzZDJmOWEwYjgzZDM4ZmQxMjVhNzRkYmU0ZTZlYTE0YmE2OWM3NzUwNjU4YTg2ZTA3NmZiZGZhNDY4MTYwNzQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_91b7f9de819749f9a4e05dabe08d3ea6",
+      "statement": "SERVER_COUNTRIES is derived from the selected config filename via a 50-country map, an explicit non-legacy value wins, and the old hardcoded Netherlands value is migrated to the derived country.",
+      "evidence": [
+        {
+          "resource": "repo://src/mullvad.rs#L17-L91",
+          "version": "repo-lines-v1:sha256:448dc0018c3e017035b643abe1c539269a05f6d7d0760fbb2b5dbfe884865413:eyJzZWxlY3RlZExpbmVDb3VudCI6NzUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI2MDcwNTIwZjEyNWVmMDlmNGNkNzMwZTBlYzU2MjA0YmM4MjE5MmI0YmQyYWU1NzQxYTY1YWE0NzhkMWFmMzYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjZjMjMwMDM2NzZmNWJhNWIyOTY5Y2IzYzI4ZjJjNWVkMjY0ZWMwNzg0NTcyYmUzMjcwM2RjZGM0YWY1ZTk4MjkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImE4Mzc2NjZmMWIyMWRlODYwNzNiMGZiMjZlYTQzNTZlYzUwYTFjNDViM2YwYjQ2YjcyNzY1YWM1NGZiODkxYTMifQ"
+        },
+        {
+          "resource": "repo://src/stack.rs#L286-L312",
+          "version": "repo-lines-v1:sha256:870694e81c1c916abc3ceff415225fac235e8cdf48c50024ed1e88a6ecbad5a5:eyJzZWxlY3RlZExpbmVDb3VudCI6MjcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM3NzE1M2VmYTliYTExMjAzMTIwMzZkN2FmOTBlNDU3MDg5YmVkMDcyYTkyOWMwZGQ5ZDg4NWViY2M1ZDA5OTAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZjYTAzMTgxMzVlZjBhZjIxMDIyMzEyZDYwYTIwMTJlYjM5ZGQ5ZjczMDM1OTAxY2EyNDFmYjU1ZDZjNTJjNGIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjI5ZmI3M2U4N2QwZWZmMWY4YTQzMGMwOTc1NTlmOGE5ZWVmYWE5NTJlZTNkN2E4NWY2YjliYWQzNWRlZTcyMDMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjIwMDNhYzcyZDZhYzhmMzg2Y2M1MzVmMzZhMTlkZDY3MTI2ODZlY2ZkODIyOWU0Njc5MDZmYTg3OTAyZTQ3NjQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_4e0798d89b124ee0b7d63158bb8fc722",
+      "statement": "The archive prompt expands ~ using the sudo-invoking user's home from /etc/passwd when SUDO_USER or SUDO_UID is present, falling back to HOME.",
+      "evidence": [
+        {
+          "resource": "repo://src/question.rs#L220-L260",
+          "version": "repo-lines-v1:sha256:49197ab0ec96da8fea8258dd0d9e20920234c091b4714e1075eab2f562771753:eyJzZWxlY3RlZExpbmVDb3VudCI6NDEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg3NDEzMjE0YTQ3NzE2OTBlYTY1YTc3Njc1MDQwZGViZGVhM2UwZjQwNzdiMGJiNTlhYzU5ZjQ1NzkzNTRkMjgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjA2Y2JkYjYzYjU1N2YxOTgzYjMxYTI0M2RiODMwZTMzYmNhMzU3NmFhMzVhNTE5ZTc1N2YzZjQ4Y2U3Y2Q0ZTYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImE5MDEzY2E5YmQwODI2ZDc4ZjdiNDMyNmRiYmVmZDhhYWJlMWM3NjliZDVlNWQ4NWFkMmVhNjRiYWJiNjgwMTgifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_acff4385ece54875af665c2228353e6c",
+      "statement": "Compose files and scripts are embedded in the binary and materialized atomically with fixed modes into each stack directory on every run, replacing modified assets while leaving .env and generated config untouched.",
+      "evidence": [
+        {
+          "resource": "repo://src/assets.rs#L22-L110",
+          "version": "repo-lines-v1:sha256:b11b05dfdd853e02b51b45ee4281cec576561591cb74fc930c192aa440576bb9:eyJzZWxlY3RlZExpbmVDb3VudCI6ODksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImIxYzEwZTEyYzY5ZWZjYzc0ZGI3NDJkNWQ4ZTcyMjBlNzY3Y2YxMDI0MDJiYTRlNGZmZmIwZGE5OWU5ZjEyOTYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhlNzZjNGMxZjFkNWZkNmE0MTU2YjI0MjIxM2NmYzZhZjNiOTRlMTUxOTRmMTZmNTQ0ODlmM2IxYzI1YjBmMWUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjgzYTZkYjM1ZjY3YzQ4OWM0ZGY5OGI3N2RjZDdiNzliMDY1MDU4MjBmODJlYWJjNmJlZDVkNzQxZWRjZTEyMTgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjM1MjYxYjgwZWJhNTEzYTg1MzRiOWY5ZTQyYjJlNGViNmJiYmM0NmFiNzJmNWUyZTcxMDBhMmJjZWVjZmI4OGQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_087ac12f20744d1e91df0798ba011466",
+      "statement": "Stack::apply writes DATA_DIR, PUID, PGID, TZ, all seven host ports to both stacks, the dashboard image for the server stack, and Mullvad credentials, country and detected HOST_IP for the torrent stack.",
+      "evidence": [
+        {
+          "resource": "repo://src/stack.rs#L194-L262",
+          "version": "repo-lines-v1:sha256:f39fa7ef100a11fe25d703fa987f0b6af139994ed6ef162fb8467aa150f329c5:eyJzZWxlY3RlZExpbmVDb3VudCI6NjksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM5MmIyMGI0NGZlZWFhNmMwMmYxOGNmMzFiMTMwMTU5ZjVmNjY3NDQyODIwMTc5OWMyYjA1YTU2ZmExYTVkZDMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImJmMDVhNDI2YWE2MDk1ZjE2ODYyNTRkYTViNGVmMjgwMWQ2MGYyMmVjZTQyYTQyZmVmYWRmNTlmMGIwM2VmYjgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjZmMjVhZWVlMTJiZjU4N2JmMjZjNWVlNGYyMDg5NTgzZTE3NjYyYWJjZDBjNDU0MWNkNzQ3YWU2OTM5M2Q2YWQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_7ef6177cd24f4b4eaba5ba9bdded2b3f",
+      "statement": "write_merged emits a generated preamble and managed keys in fixed order, then preserves every unmanaged key under a preserved-from-previous-file comment.",
+      "evidence": [
+        {
+          "resource": "repo://src/envfile.rs#L61-L92",
+          "version": "repo-lines-v1:sha256:b8bd079b21336e24ddd00eb7c4e11e32424d5842369c86902358d61c57eb360a:eyJzZWxlY3RlZExpbmVDb3VudCI6MzIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY0OWY1YTA0MGRlMDExYzUxYWZkNTQxYjhhZTc1ZmQzNjg3NTYyZWYwODIwYjc4N2I1MGQ4MTEwZmFhZmI0OGEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMyMjI5YmI2NzZhZDFlNWM2ZGFmZjA4ZTcyNzcyNjE1NTNkOWNhOGMxZWQ2MGY4MjFjMDdjOThhNzg5YzZmZjIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjBlZmY5ZmQwYzQ2ZDVhMmFhZmVhODdlODBkNGEwMmIzMmY4MDYyZjVhOWQ0NDQwODNkZTQ4Y2RmYTk0NDNhMGQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJiZDM5NTI3NWQ0NTk1OTFkNzEwZjlkNzQ5ODQ1ZjMzZjZjY2ZmMDZjMGI0NTExMzliMjVmODI4Y2NmYTgzNTEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_9ae0f019586f44a681553e00993f8297",
+      "statement": "PUID/PGID come from the data directory owner or the current process via /proc/self/status, TZ falls back through /etc/timezone and /etc/localtime to UTC, and HOST_IP uses CHURN_HOST_IP, a UDP route probe, then 127.0.0.1.",
+      "evidence": [
+        {
+          "resource": "repo://src/envfile.rs#L155-L217",
+          "version": "repo-lines-v1:sha256:bb7dc04b5a200009d6b57b1f2193c82d5c21d6786fdb8ad05e980596b4054bd3:eyJzZWxlY3RlZExpbmVDb3VudCI6NjMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImMwMTRmM2RhZjRkNjZkZDQ4NTMxNjFmNmVjNmM0ZGIxYWMyMGUyYjQ0ODRlNDM5NTIyMWRjMDMyZDgzYzJiOTEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImZmYmFlYmJiMzA4ZjM0Mjc3YjkwZmMxMjY2ZmFiNDdmZjNiMzQwYzA4ZmZhMmQ0NTY4NGIxZjRhYWZmN2IyMDgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImE3ZjE1YTU5MTllMWY2MTVjZmRjN2Y1MjA1MjI1N2M2ZGJmOWRiNTMyMTk2ZTZkZGRkZWRmOWQ0NTNjM2ExOWUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_5ae2dae4659940cdaff4ff75af9cc40e",
+      "statement": "Tests cover distinct port defaults and validation, upward-then-downward search, asset content/modes and path containment, single data-dir prompting, section order, secret masking, env preservation, and country/config parsing.",
+      "evidence": [
+        {
+          "resource": "repo://src/assets.rs#L115-L181",
+          "version": "repo-lines-v1:sha256:655b25e83e8b43efd90438d3a6ace903b009dfb55807b2e5bc826306a9d56f12:eyJzZWxlY3RlZExpbmVDb3VudCI6NjcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjMzMTczOWY2N2QxNzU5YTQ3YjI4YjczNTI2NThmZTU5Yzc5N2JkYTJiMGVjZDZlZGQ4Y2M3M2IxNzVlZjQ4YmYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://src/ports.rs#L210-L253",
+          "version": "repo-lines-v1:sha256:f22464945d2dd492926132428bd40fb2a399ced96341bfe2509f3cd7a126ec95:eyJzZWxlY3RlZExpbmVDb3VudCI6NDQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg3ZGZmY2FkZDE4NmJlOWQ1OTY4ZThjNzY4OGZkMDFhM2Y4OGYyNzU2ZDNhYTVlNTkwYTVjYmY2ODZlOTc3ZjciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjgwYzQ0N2U5NjljOTVmNzc1MzcwYjU0Y2ZjMjc4N2RjY2Q3N2Y4YWMyZDFlMGMxOGI0OWNmNTI1ZDc5MDdhNjkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://tests/installer.rs#L14-L320",
+          "version": "repo-lines-v1:sha256:6134047a20cc1b8530d10e9b01f89830ed7fc816e273d51cae4dcda15de19182:eyJzZWxlY3RlZExpbmVDb3VudCI6MzA3LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiIxM2VhNWFiMzRkYTFjYzA1ODg3MDdmYzA2MzQzNGJjZDRmOTNlNzQyNDk4MWVlZWRmNzBhN2JiZjMxMTVjOWE1IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiIxNWRjNWRkMTA3MjBmZDVjODFiYzE0MTMxNjE1YmUzMzU4ZmQzMzZkYTc4Mzc2OTE3YTI0MzMyODY4ZGQwM2YzIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI2NDc1MTZlNWQ1ODc1ZjgwYjQ5MzA3YTdmYzdhZDFkMjk0NzRmODhlZWFlYmFhMmIyNmRhYTZmYTUyOTVlOWE3IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiI4YjE4ZjM1YmM0ODQ5NTAzNmI0NThhYmY4YzY3ODVhNDUxYmQwODY0YjIyZmJkYWIwZjYzMWM3ZmFlNDllZmZmIn0"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-07T17:42:22.982Z"
+  }
+}
