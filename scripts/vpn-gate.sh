@@ -358,23 +358,44 @@ toolchain_dir_complete() {
     [ -x "$1/cargo-fmt" ] && [ -x "$1/cargo-clippy" ]
 }
 
-# A build cache remembers the rustc that filled it. Reusing it with a different
-# compiler fails with E0514, so a gate that ends up on another toolchain gets
-# its own cache instead of asking the user to clean theirs.
-ensure_target_cache_matches() {
-  local info built current
-  info=${CARGO_TARGET_DIR:-target}/.rustc_info.json
-  [ -f "$info" ] || return 0
+# A build cache filled by another rustc fails with E0514, which reads like a code
+# error. `.rustc_info.json` cannot answer this: cargo rewrites it on every
+# invocation, so a `cargo fmt` that never touches an artifact is enough to make
+# it claim a match while target/debug still holds objects from another compiler.
+# Detect the failure itself and retry in a cache the gate owns.
+e0514_seen() { [ -f "$1" ] && grep -q 'E0514' "$1"; }
+
+isolate_target_cache() {
+  local current isolated
   current=$(rustc_commit_of rustc)
-  [ -n "$current" ] || return 0
-  built=$(grep -o 'commit-hash: [0-9a-f]*' "$info" 2>/dev/null |
-    sed 's/^commit-hash: //' | cut -c1-9 | sort -u | head -n 1)
-  [ -n "$built" ] || return 0
-  [ "$built" = "$current" ] && return 0
-  export CARGO_TARGET_DIR=$GATE_DIR/target-$current
+  [ -n "$current" ] || return 1
+  isolated=$GATE_DIR/target-$current
+  # Already isolated: a retry cannot help.
+  [ "${CARGO_TARGET_DIR:-}" != "$isolated" ] || return 1
+  export CARGO_TARGET_DIR=$isolated
   mkdir -p "$CARGO_TARGET_DIR"
-  note "target/ was built by rustc $built, this gate uses $current"
-  note "building into $CARGO_TARGET_DIR to avoid E0514"
+  note "the build cache was filled by a different rustc; retrying in $CARGO_TARGET_DIR"
+}
+
+# Run a cargo step, retrying once in an isolated cache when the only problem is a
+# stale one. Everything else fails exactly as it did before.
+rust_step() {
+  local what=$1 hint=$2 log
+  shift 2
+  log=$tmp/cargo.log
+  if [ "$verbose" = 1 ]; then
+    printf '+ %s\n' "$*" >&2
+  fi
+  if ! "$@" >"$log" 2>&1; then
+    if ! { e0514_seen "$log" && isolate_target_cache; } || ! "$@" >"$log" 2>&1; then
+      tail -n 40 "$log" >&2
+      if e0514_seen "$log"; then
+        fail "$what could not run" \
+          "E0514: ${CARGO_TARGET_DIR:-target} was filled by a different rustc; remove it or set CARGO_TARGET_DIR"
+      fi
+      fail "$what" "$hint"
+    fi
+  fi
 }
 
 pin_toolchain() {
@@ -383,7 +404,6 @@ pin_toolchain() {
     if toolchain_dir_complete "$CHURN_TOOLCHAIN_BIN"; then
       export PATH="$CHURN_TOOLCHAIN_BIN:$PATH"
       say "toolchain: $CHURN_TOOLCHAIN_BIN (CHURN_TOOLCHAIN_BIN)"
-      ensure_target_cache_matches
       return 0
     fi
     note "note: CHURN_TOOLCHAIN_BIN=$CHURN_TOOLCHAIN_BIN is not a complete toolchain; ignoring it"
@@ -392,7 +412,6 @@ pin_toolchain() {
   # Nothing to fix when the ambient toolchain already works.
   if toolchain_usable; then
     say "toolchain: $(command -v cargo | sed 's|/cargo$||') (already on PATH)"
-    ensure_target_cache_matches
     return 0
   fi
 
@@ -402,7 +421,6 @@ pin_toolchain() {
     if toolchain_dir_complete "$candidate"; then
       export PATH="$candidate:$PATH"
       say "toolchain: $candidate"
-      ensure_target_cache_matches
       return 0
     fi
   done
@@ -488,16 +506,11 @@ stage_static() {
   fi
 
   step "cargo fmt --check" cargo fmt --check
-  if ! cargo clippy --locked --all-targets -- -D warnings >"$tmp/clippy.log" 2>&1; then
-    tail -n 40 "$tmp/clippy.log" >&2
-    if grep -q 'E0514' "$tmp/clippy.log"; then
-      fail "cargo clippy could not run" \
-        "E0514 means the build was produced by a different rustc than the one running now; use a single toolchain (rustup default stable) and run 'cargo clean' (or set CARGO_TARGET_DIR)"
-    fi
-    fail "cargo clippy reported warnings" "the gate treats warnings as errors; see above"
-  fi
-  step "cargo test" cargo test --locked
-  step "cargo build" cargo build --locked --quiet
+  rust_step "cargo clippy" "the gate treats warnings as errors; see above" \
+    cargo clippy --locked --all-targets -- -D warnings
+  rust_step "cargo test" "command failed: cargo test --locked" cargo test --locked
+  rust_step "cargo build" "command failed: cargo build --locked --quiet" \
+    cargo build --locked --quiet
 
   local script
   for script in torrent/scripts/*.sh; do
