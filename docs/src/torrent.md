@@ -66,6 +66,39 @@ other machines, bind the published port to
   and serves them as JSON on `127.0.0.1:8098`. The dashboard's Services → VPN
   tab uses it to show the live exit IP, boundary checks, and which torrent apps
   are reachable inside the protected namespace.
+- `churn verify-vpn` applies the same rules to a `docker compose config`
+  document. The installer runs it before starting the stack, and
+  `scripts/vpn-gate.sh` runs it for the release gate.
+
+### The release gate
+
+The isolation rules are only worth as much as the proof that the file which
+ships still satisfies them. Before any release is tagged or pushed,
+`scripts/release.sh` runs `scripts/vpn-gate.sh` with `--force`, so a release is
+always freshly proven (outside a release, the gate skips itself when nothing it
+covers has changed). The full gate:
+
+1. renders `torrent/docker-compose.yml` with a committed fake environment and
+   requires `churn verify-vpn` to accept it;
+2. renders every known-unsafe variant in `tests/vpn-gate/unsafe/` (a sidecar on
+   its own network or publishing its own port, a missing `resolv.conf` mount, a
+   sidecar that starts before `vpn-check`, IPv6 enabled, the firewall off, a
+   plaintext resolver, a public `HOST_IP`, a LAN-exposed status port, ...) and
+   requires each one to be rejected for the expected reason;
+3. starts the whole pinned stack in a throwaway Compose project, requires
+   `vpn-check` to pass, `vpn-status` to report `secure: true` with every check,
+   and a probe in the shared namespace to see a Mullvad exit (unreachable apps
+   are reported as a warning, not a gate failure: an app crash is not a leak);
+4. breaks each control on purpose (a leaking `resolv.conf`, a public `HOST_IP`,
+   an `iptables` rule that re-opens `eth0`, a blackholed tunnel) and requires
+   the checks to fail closed;
+5. recreates the namespace, proves it is secure again, removes the sandbox and
+   writes `.churn-state/vpn-gate.json`.
+
+CI runs the deterministic part (stages 1 and the `tests/compose_gate.rs` tests)
+on every pull request and again on the release tag, so a hand-pushed `v*` tag
+cannot publish either. See the README's "The VPN release gate" section for the
+commands.
 
 ## Wiring and storage
 

@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: Rust (fmt, clippy, tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      # tests/compose_gate.rs renders the real torrent/docker-compose.yml, so
+      # the runner needs a Docker CLI. Ubuntu runners ship one.
+      - name: docker compose is available
+        run: docker compose version
+      - name: format
+        run: cargo fmt --check
+      - name: clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: tests
+        run: cargo test --locked
+
+  # The VPN gate only judges the torrent stack, so a PR that touches nothing it
+  # covers skips both jobs below. `--check-changed` is the same code the release
+  # script uses, so the skip decision cannot drift from the proof it is skipping.
+  vpn-changes:
+    name: Detect VPN-relevant changes
+    runs-on: ubuntu-latest
+    outputs:
+      needed: ${{ steps.check.outputs.needed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Tags and history are the comparison base; a shallow clone would have
+          # neither and would always run the gate.
+          fetch-depth: 0
+      - name: Does anything the gate covers differ?
+        id: check
+        run: |
+          if scripts/vpn-gate.sh --check-changed; then
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  vpn-config:
+    name: VPN config gate
+    needs: vpn-changes
+    if: needs.vpn-changes.outputs.needed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # The shipped compose file must pass the isolation rules...
+      - name: shipped compose file is isolated
+        run: cargo run --locked --quiet -- verify-vpn --env-file tests/vpn-gate/fixture.env
+      # ...and every known leak path must still be rejected by those same rules.
+      - name: known unsafe layouts are rejected
+        run: cargo test --locked --test compose_gate
+      # No `continue-on-error` anywhere: a skipped VPN assertion is a failed
+      # VPN assertion.
+
+  shell:
+    name: Shell scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        run: shellcheck -x scripts/*.sh torrent/scripts/*.sh
+      - name: POSIX syntax
+        run: for script in torrent/scripts/*.sh; do sh -n "$script"; done
+      - name: bash syntax
+        run: for script in scripts/*.sh; do bash -n "$script"; done

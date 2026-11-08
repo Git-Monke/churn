@@ -536,7 +536,9 @@ scripts/release.sh --dry-run       # show the plan without changing anything
 ```
 
 That updates `Cargo.toml` and `Cargo.lock`, commits `Release vX.Y.Z`, creates
-the annotated tag and pushes the branch and tag. If the newest tag is
+the annotated tag and pushes the branch and tag. Before it touches the
+version it runs the VPN release gate (see below); if that fails, nothing is
+tagged or pushed. If the newest tag is
 inconsistent with its tagged `Cargo.toml` (for example, `v0.1.5` was created
 while Cargo still said `0.1.4`), the default command repairs that tag instead
 of bumping past it. The working tree must be clean, so commit the release
@@ -547,6 +549,72 @@ check the files without releasing:
 ```bash
 scripts/check-version.sh          # Cargo.toml <-> Cargo.lock
 scripts/check-version.sh v0.1.4   # ...and the tag
+```
+
+### The VPN release gate
+
+A release promises that the torrent stack cannot leak traffic. `scripts/release.sh`
+will not tag or push unless `scripts/vpn-gate.sh` proves it, and CI re-checks the
+static half on every pull request and release tag.
+
+```bash
+scripts/vpn-gate.sh                 # the full proof (skips if nothing changed)
+scripts/vpn-gate.sh --force         # always prove it, even if nothing changed
+scripts/vpn-gate.sh --static-only   # deterministic checks only; no tun device
+scripts/vpn-gate.sh --check-changed # exit 0 if there is work, 1 if there is not
+scripts/vpn-gate.sh --keep          # keep the sandbox project and temp dir
+```
+
+The gate only judges the torrent stack, so it skips itself when nothing that can
+change its verdict has moved since the last release tag (or since the last
+recorded run when no tag exists). The paths it watches are listed in
+`gate_inputs()` in `scripts/vpn-gate.sh`: `torrent/`, `tests/vpn-gate/`, the
+validator (`src/security.rs`), the renderer (`src/system.rs`), the `verify-vpn`
+wiring (`src/main.rs`) and the gate script itself. A skip always prints its
+reason; `--force` (or `VPN_GATE_FORCE=1`) overrides it.
+
+`scripts/release.sh` always passes `--force`, so a release is never published
+without a fresh proof. CI's `vpn-config` job uses `--check-changed` to decide
+whether to schedule itself at all.
+
+The full gate has four stages:
+
+1. **static** — `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`,
+   shellcheck, then `churn verify-vpn` against the shipped
+   `torrent/docker-compose.yml` rendered with `tests/vpn-gate/fixture.env`.
+   Afterwards it renders each known-unsafe layout from
+   `tests/vpn-gate/unsafe/cases.tsv` (a sidecar on its own network, a published
+   sidecar port, a missing `resolv.conf` mount, IPv6 enabled, the firewall off,
+   a public `HOST_IP`, a LAN-exposed status port, ...) and requires every one to
+   be rejected for the expected reason.
+2. **live** — starts the whole pinned stack in the isolated Compose project
+   `churn-vpn-gate` on ports 18080/19696/18098 with a throwaway `DATA_DIR`, then
+   requires `vpn-check` to exit 0 with `PASS: torrent egress is confined to the
+   VPN`, `vpn-status` to report `secure: true` with every check, and a probe
+   inside the shared namespace to observe a Mullvad exit. Service coverage is
+   recorded and warned about, but not gated: an application that crashes is not
+   a VPN leak.
+3. **negative** — makes each control fail on purpose and requires the checks to
+   notice: a `resolv.conf` with a public nameserver, a public `HOST_IP`, an
+   `iptables` rule that re-opens `eth0`, and a blackholed tunnel.
+4. **restore** — recreates the namespace (dropping every injected rule), proves
+   it is secure again, removes the sandbox and writes
+   `.churn-state/vpn-gate.json` with the per-check results, image refs and a
+   fingerprint of the files that define the boundary. Exit IPs and the
+   WireGuard key are never recorded.
+
+The live stages need Docker access, `/dev/net/tun` and WireGuard credentials in
+`torrent/.env` (or `VPN_GATE_ENV=<path>`). `--dry-run` releases run only the
+static stage so a release can be rehearsed anywhere; a real release always runs
+the full gate.
+
+`churn verify-vpn` is the same validator the installer uses, exposed for use
+elsewhere:
+
+```bash
+churn verify-vpn                                    # the installed stack
+churn verify-vpn --env-file tests/vpn-gate/fixture.env
+churn verify-vpn --config -                         # rendered compose JSON on stdin
 ```
 
 ### Documentation

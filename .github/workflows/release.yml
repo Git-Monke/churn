@@ -9,8 +9,34 @@ permissions:
   contents: write
 
 jobs:
+  # A tag can be pushed by hand, or a release can be re-run. The static layer of
+  # the VPN gate runs here too, so no release can publish while the shipped
+  # compose file fails the isolation rules. The live layer needs a real tun
+  # device and WireGuard credentials, so it stays in scripts/release.sh.
+  #
+  # Deliberately NOT change-detected, unlike ci.yml: a release is the moment the
+  # promise is made, it needs no tun device, and it takes about a minute.
+  vpn-gate:
+    name: VPN config gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Shipped compose file is isolated
+        run: cargo run --locked --quiet -- verify-vpn --env-file tests/vpn-gate/fixture.env
+
+      - name: Known unsafe layouts are rejected
+        run: cargo test --locked --test compose_gate
+
   binaries:
     name: churn (${{ matrix.target }})
+    # The VPN gate runs first, so a release whose compose file fails the
+    # isolation rules produces no build artifact at all.
+    needs: vpn-gate
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -49,7 +75,9 @@ jobs:
 
   publish:
     name: Publish release
-    needs: binaries
+    needs: [binaries, vpn-gate]
+    # `binaries` already depends on `vpn-gate`, but listing both keeps the
+    # security precondition visible at the job that actually publishes.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
