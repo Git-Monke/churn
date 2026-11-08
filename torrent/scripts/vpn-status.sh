@@ -12,6 +12,7 @@
 # (vpn-check.sh) through vpn-lib.sh.
 set -eu
 
+# shellcheck source=vpn-lib.sh
 . "${VPN_LIB_PATH:-/scripts/vpn-lib.sh}"
 
 if [ "${1:-}" = "serve" ]; then

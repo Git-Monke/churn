@@ -18,6 +18,7 @@
 # (vpn-status.sh) runs exactly the same logic.
 set -eu
 
+# shellcheck source=vpn-lib.sh
 . "${VPN_LIB_PATH:-/scripts/vpn-lib.sh}"
 
 host_ip=${HOST_IP:-}

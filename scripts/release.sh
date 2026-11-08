@@ -89,6 +89,27 @@ if [ "$dry_run" -eq 0 ] && [ -n "$(git status --porcelain)" ]; then
   exit 1
 fi
 
+# The VPN boundary is part of the release, so it is proven before any version
+# math touches Cargo.toml. There is no bypass: a failure here means the stack
+# could leak traffic, and nothing may be tagged or pushed.
+#
+# --dry-run stays static-only so a release can be rehearsed on a machine without
+# /dev/net/tun or WireGuard credentials. A real release always runs the live
+# proof and its negative controls.
+#
+# A release is forced: change detection exists to keep routine runs cheap, but at
+# the moment of publishing the proof is always worth the minute.
+if [ "$dry_run" -eq 1 ]; then
+  gate_args=(--static-only --force)
+else
+  gate_args=(--force)
+fi
+echo "gate:     scripts/vpn-gate.sh ${gate_args[*]:-}"
+if ! scripts/vpn-gate.sh "${gate_args[@]+"${gate_args[@]}"}"; then
+  echo "error: the VPN release gate failed; nothing was tagged or pushed" >&2
+  exit 1
+fi
+
 git fetch --tags --force --quiet origin || true
 
 latest_tag=$(
@@ -223,6 +244,7 @@ fi
 
 if [ "$push" -eq 0 ]; then
   echo "Prepared $tag locally at $(git rev-parse --short HEAD)"
+  echo "VPN gate: $(pwd)/.churn-state/vpn-gate.json"
   echo "Push it with:"
   if [ "$force_tag" -eq 1 ]; then
     echo "  git push origin $branch"
@@ -242,4 +264,5 @@ else
 fi
 
 echo "Published $tag from $(git rev-parse --short HEAD)"
+echo "VPN gate: $(pwd)/.churn-state/vpn-gate.json"
 echo "CI will build the binaries and publish the release after the dashboard image for $target is available."

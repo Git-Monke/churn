@@ -1,0 +1,8 @@
+# ShellCheck configuration for the scripts that ship with churn.
+#
+# `torrent/scripts/*.sh` are sourced by each other and are POSIX `sh` (they run
+# inside the frame images), while `scripts/*.sh` are bash for the release
+# tooling. SCRIPTDIR makes `# shellcheck source=` directives resolve next to the
+# script instead of the current directory.
+source-path=SCRIPTDIR
+external-sources=true
