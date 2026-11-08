@@ -1,0 +1,5 @@
+# The kill switch disabled.
+services:
+  gluetun:
+    environment:
+      FIREWALL_ENABLED_DISABLING_IT_SHOOTS_YOU_IN_YOUR_FOOT: off

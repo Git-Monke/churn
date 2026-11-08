@@ -239,8 +239,23 @@ fn find_env<'a>(values: &'a [String], key: &str) -> Option<&'a str> {
 /// Verify the effective Compose configuration keeps the torrent stack inside
 /// Gluetun's network namespace and behind its kill switch.
 pub fn verify_torrent_isolation(dir: &Path) -> io::Result<()> {
-    let output = Command::new("docker")
-        .args(["compose", "config", "--format", "json"])
+    verify_torrent_isolation_env(dir, None)
+}
+
+/// [`verify_torrent_isolation`] against an explicit env file instead of the
+/// stack's generated `.env`.
+///
+/// The release gate validates the real compose file with a fixture env (no
+/// WireGuard key is needed to render it), so there is exactly one
+/// implementation of the isolation rules.
+pub fn verify_torrent_isolation_env(dir: &Path, env_file: Option<&Path>) -> io::Result<()> {
+    let mut command = Command::new("docker");
+    command.args(["compose"]);
+    if let Some(env_file) = env_file {
+        command.arg("--env-file").arg(env_file);
+    }
+    let output = command
+        .args(["config", "--format", "json"])
         .current_dir(dir)
         .output()?;
     if !output.status.success() {

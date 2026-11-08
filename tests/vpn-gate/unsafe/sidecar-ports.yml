@@ -1,0 +1,6 @@
+# A sidecar that publishes a port itself. Even inside Gluetun's namespace that
+# is a host-reachable door around the port policy, so it must be rejected.
+services:
+  prowlarr:
+    ports:
+      - "19696:9696"

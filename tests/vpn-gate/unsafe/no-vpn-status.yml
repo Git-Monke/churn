@@ -1,0 +1,3 @@
+# No live check agent, so nobody can prove the running namespace is safe.
+services:
+  vpn-status: !reset

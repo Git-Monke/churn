@@ -1,0 +1,5 @@
+# A sidecar that leaves Gluetun's namespace and gets its own bridge network.
+# Must be rejected: its traffic would use the host's route, not the tunnel.
+services:
+  prowlarr:
+    network_mode: bridge

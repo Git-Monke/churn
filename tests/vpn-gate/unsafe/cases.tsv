@@ -1,0 +1,43 @@
+# Unsafe variants of the shipping torrent stack.
+#
+# Read by both tests/compose_gate.rs (`cargo test`) and scripts/vpn-gate.sh
+# (stage 1), so the assertions CI runs and the assertions the release gate runs
+# are literally the same list.
+#
+# Columns are tab separated:
+#
+#   id        short name used in output
+#   expected  substring that must appear in a rejection message
+#   overrides comma separated compose files in tests/vpn-gate/unsafe/
+#             (- means none)
+#   env       space separated KEY=VALUE pairs exported for the render
+#             (- means none)
+#
+# Every row must be REJECTED. A row that renders and validates cleanly is a gate
+# failure, because it means a known-unsafe layout passed.
+#
+# The live stages of scripts/vpn-gate.sh add the cases that need real containers
+# (DNS leak through a hand-written resolv.conf, a broken kill switch, a stopped
+# tunnel); those are listed in scripts/vpn-gate.sh and cannot be expressed here.
+sidecar-bridge	prowlarr must use network_mode	sidecar-bridge.yml	-
+sidecar-ports	must not publish ports	sidecar-ports.yml	-
+sidecar-no-resolv	resolv.conf	sidecar-no-resolv.yml	-
+sidecar-no-vpn-check	must wait for vpn-check	sidecar-no-vpn-check.yml	-
+ipv6-enabled	disable IPv6	ipv6-enabled.yml	-
+firewall-off	FIREWALL	firewall-off.yml	-
+keep-nameserver	DNS_KEEP_NAMESERVER	keep-nameserver.yml	-
+plaintext-dns	plaintext	plaintext-dns.yml	-
+other-provider	VPN_SERVICE_PROVIDER=mullvad	other-provider.yml	-
+no-vpn-status	no vpn-status dashboard agent	no-vpn-status.yml	-
+status-port-public	must bind 127.0.0.1	status-port-public.yml	-
+status-agent-bridge	must share Gluetun	status-agent-bridge.yml	-
+gluetun-privileged	must not be privileged	gluetun-privileged.yml	-
+gluetun-network-mode	own network namespace	gluetun-network-mode.yml	-
+gatelib-unmounted	vpn-check must mount its shared check library	gate-script-vpn-lib.yml	-
+check-script-unmounted	vpn-check must mount its check script	gate-script-vpn-check.yml	-
+public-host-ip	FIREWALL_OUTBOUND_SUBNETS	-	HOST_IP=8.8.8.8
+other-public-host-ip	FIREWALL_OUTBOUND_SUBNETS	-	HOST_IP=1.1.1.1
+host-ip-with-cidr	FIREWALL_OUTBOUND_SUBNETS	-	HOST_IP=192.168.1.0/24
+host-ip-any	FIREWALL_OUTBOUND_SUBNETS	-	HOST_IP=0.0.0.0/0
+host-ip-not-an-address	FIREWALL_OUTBOUND_SUBNETS	-	HOST_IP=localhost
+sidecar-foreign-resolv	must mount the static Gluetun resolv.conf	sidecar-foreign-resolv.yml	-

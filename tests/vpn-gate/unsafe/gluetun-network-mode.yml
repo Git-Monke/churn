@@ -1,0 +1,4 @@
+# Gluetun sharing the host network: the tunnel would be bypassed entirely.
+services:
+  gluetun:
+    network_mode: host

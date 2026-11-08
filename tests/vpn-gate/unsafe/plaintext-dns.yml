@@ -1,0 +1,5 @@
+# DNS over plaintext instead of DoT: queries are readable in transit.
+services:
+  gluetun:
+    environment:
+      DNS_UPSTREAM_RESOLVER_TYPE: plain

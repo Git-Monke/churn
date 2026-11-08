@@ -1,0 +1,5 @@
+# The status agent on its own network: its checks would describe the wrong
+# namespace.
+services:
+  vpn-status:
+    network_mode: bridge

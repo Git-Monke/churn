@@ -1,0 +1,28 @@
+# Compose override used by scripts/vpn-gate.sh for the live stages.
+#
+# The gate must never touch the installed stack's state. Every bind mount that
+# would write into the repository (app config) or into the real library is
+# redirected under ${VPN_GATE_TMP}, a throwaway directory the gate creates.
+#
+# DATA_DIR and the published ports cannot be redirected here (Compose cannot
+# interpolate an override into another variable), so the gate exports them as
+# environment variables, which win over the stack's .env file.
+services:
+  qbittorrent-init:
+    volumes:
+      - ${VPN_GATE_TMP:?the VPN gate must set VPN_GATE_TMP}/config/qbittorrent:/config
+
+  qbittorrent:
+    volumes:
+      - ${VPN_GATE_TMP:?the VPN gate must set VPN_GATE_TMP}/config/qbittorrent:/config
+
+  prowlarr:
+    volumes:
+      - ${VPN_GATE_TMP:?the VPN gate must set VPN_GATE_TMP}/config/prowlarr:/config
+
+  prowlarr-init:
+    volumes:
+      - ${VPN_GATE_TMP:?the VPN gate must set VPN_GATE_TMP}/config/prowlarr:/prowlarr-config
+      - ${VPN_GATE_TMP:?the VPN gate must set VPN_GATE_TMP}/config/qbittorrent:/qbittorrent-config
+      - ${VPN_GATE_TMP:?the VPN gate must set VPN_GATE_TMP}/server-config/sonarr:/sonarr-config
+      - ${VPN_GATE_TMP:?the VPN gate must set VPN_GATE_TMP}/server-config/radarr:/radarr-config

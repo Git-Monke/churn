@@ -200,10 +200,10 @@ pub fn ask_directory(prompt: &str, stored: Option<&str>, placeholder: &str) -> i
 
 // -------------------------------------------------------------------- validation
 pub fn expand_tilde(value: &str) -> PathBuf {
-    if value == "~" || value.starts_with("~/") {
-        if let Some(home) = home_dir() {
-            return home.join(value.strip_prefix("~/").unwrap_or(""));
-        }
+    if (value == "~" || value.starts_with("~/"))
+        && let Some(home) = home_dir()
+    {
+        return home.join(value.strip_prefix("~/").unwrap_or(""));
     }
     PathBuf::from(value)
 }
@@ -395,6 +395,20 @@ pub fn validate_wireguard_address(value: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Redact a secret for the confirmation summary.
+pub fn mask(value: &str) -> String {
+    let chars: Vec<char> = value.chars().collect();
+    if chars.is_empty() {
+        return "(unset)".into();
+    }
+    if chars.len() <= 10 {
+        return format!("{}…", chars.iter().take(2).collect::<String>());
+    }
+    let head: String = chars.iter().take(4).collect();
+    let tail: String = chars.iter().skip(chars.len() - 2).collect();
+    format!("{head}…{tail} ({} chars)", chars.len())
+}
+
 #[cfg(test)]
 mod path_completion_tests {
     use super::*;
@@ -479,18 +493,4 @@ monke:x:1000:1000::/home/monke:/bin/bash
 
         fs::remove_dir_all(&dir).unwrap();
     }
-}
-
-/// Redact a secret for the confirmation summary.
-pub fn mask(value: &str) -> String {
-    let chars: Vec<char> = value.chars().collect();
-    if chars.is_empty() {
-        return "(unset)".into();
-    }
-    if chars.len() <= 10 {
-        return format!("{}…", chars.iter().take(2).collect::<String>());
-    }
-    let head: String = chars.iter().take(4).collect();
-    let tail: String = chars.iter().skip(chars.len() - 2).collect();
-    format!("{head}…{tail} ({} chars)", chars.len())
 }

@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 use std::fs;
-use std::io;
+use std::io::{self, Read};
 use std::net::{SocketAddr, TcpStream};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -47,6 +47,7 @@ USAGE:
     churn show [--stacks <LIST>]
     churn update [OPTIONS]
     churn migrate [--to <PATH>] [OPTIONS]
+    churn verify-vpn [--dir <PATH>] [--env-file <PATH>] [--config <PATH|->]
 
 COMMANDS:
     show              print the URLs for the installed services; does not need
@@ -56,6 +57,9 @@ COMMANDS:
     migrate           copy DATA_DIR to a new host path, verify the copy, rewrite
                       both .env files and restart the stacks; the old copy is
                       kept unless --move is given
+    verify-vpn        validate the torrent stack's VPN isolation from
+                      `docker compose config`; needs no root and starts nothing.
+                      Exits non-zero when any service could leave the tunnel
 
 OPTIONS:
     --stacks <LIST>   comma separated: server,torrent (skips the menu; with
@@ -74,6 +78,18 @@ MIGRATE OPTIONS:
     --allow-network-fs
                       allow a network filesystem as the destination, which is
                       unsafe for SQLite and interactive media use
+
+VERIFY-VPN OPTIONS:
+    --dir <PATH>      torrent stack directory (default: ./torrent in a checkout,
+                      otherwise the installed stack root)
+    --env-file <PATH>
+                      validate against this env file instead of the stack's
+                      generated .env (the release gate uses a fixture)
+    --config <PATH|->
+                      validate an already rendered `docker compose config
+                      --format json` instead of rendering it here; '-' reads
+                      stdin. This lets the release gate check many variant
+                      compose files through the same rules.
 
 UPDATE OPTIONS:
     --check           print installed and latest versions; change nothing
@@ -96,6 +112,10 @@ struct Args {
     force: bool,
     uninstall: bool,
     migrate: bool,
+    verify_vpn: bool,
+    dir: Option<String>,
+    env_file: Option<String>,
+    config: Option<String>,
     move_old: bool,
     keep_old: bool,
     allow_network_fs: bool,
@@ -116,6 +136,19 @@ fn parse_args() -> Result<Args, String> {
             "show" => args.show = true,
             "update" => args.update = true,
             "migrate" => args.migrate = true,
+            "verify-vpn" => args.verify_vpn = true,
+            "--dir" => {
+                let value = raw.next().ok_or("--dir needs a path")?;
+                args.dir = Some(value);
+            }
+            "--env-file" => {
+                let value = raw.next().ok_or("--env-file needs a path")?;
+                args.env_file = Some(value);
+            }
+            "--config" => {
+                let value = raw.next().ok_or("--config needs a path or '-'")?;
+                args.config = Some(value);
+            }
             "--check" => args.check = true,
             "--to" => {
                 let value = raw.next().ok_or("--to needs a path or version")?;
@@ -141,6 +174,15 @@ fn parse_args() -> Result<Args, String> {
             other if other.starts_with("--to=") => {
                 args.to = Some(other["--to=".len()..].to_string());
             }
+            other if other.starts_with("--dir=") => {
+                args.dir = Some(other["--dir=".len()..].to_string());
+            }
+            other if other.starts_with("--env-file=") => {
+                args.env_file = Some(other["--env-file=".len()..].to_string());
+            }
+            other if other.starts_with("--config=") => {
+                args.config = Some(other["--config=".len()..].to_string());
+            }
             other if other.starts_with("--image=") => {
                 args.image = Some(other["--image=".len()..].to_string());
             }
@@ -152,12 +194,28 @@ fn parse_args() -> Result<Args, String> {
 }
 
 fn validate_args(args: &Args) -> Result<(), String> {
-    let commands = [args.show, args.update, args.uninstall, args.migrate]
-        .into_iter()
-        .filter(|chosen| *chosen)
-        .count();
+    let commands = [
+        args.show,
+        args.update,
+        args.uninstall,
+        args.migrate,
+        args.verify_vpn,
+    ]
+    .into_iter()
+    .filter(|chosen| *chosen)
+    .count();
     if commands > 1 {
-        return Err("'show', 'update', '--uninstall' and 'migrate' cannot be combined".to_string());
+        return Err(
+            "'show', 'update', '--uninstall', 'migrate' and 'verify-vpn' cannot be combined"
+                .to_string(),
+        );
+    }
+    let verify_option = args.dir.is_some() || args.env_file.is_some() || args.config.is_some();
+    if verify_option && !args.verify_vpn {
+        return Err("--dir, --env-file and --config require the 'verify-vpn' command".to_string());
+    }
+    if args.config.is_some() && (args.dir.is_some() || args.env_file.is_some()) {
+        return Err("--config cannot be combined with --dir or --env-file".to_string());
     }
 
     let update_option =
@@ -238,10 +296,10 @@ fn ask_questions(
         for (question, value) in stack.stored_answers() {
             // Prefer the stack that owns a port; the other stack's copy can be
             // stale after a partial install.
-            if let Question::Port(port) = question {
-                if port.stack() != stack {
-                    continue;
-                }
+            if let Question::Port(port) = question
+                && port.stack() != stack
+            {
+                continue;
             }
             defaults.entry(question).or_insert(value);
         }
@@ -1818,6 +1876,63 @@ fn show_services(args: &Args) -> io::Result<()> {
     Ok(())
 }
 
+/// `churn verify-vpn`: prove the torrent compose file still confines every
+/// networked service to Gluetun.
+///
+/// This is the one implementation of the isolation rules, shared by the
+/// installer preflight, CI and the release gate (`scripts/vpn-gate.sh`).
+fn verify_vpn(args: &Args) -> io::Result<()> {
+    if let Some(config) = &args.config {
+        let body = if config == "-" {
+            let mut body = Vec::new();
+            io::stdin().read_to_end(&mut body)?;
+            body
+        } else {
+            fs::read(config).map_err(|err| {
+                io::Error::new(err.kind(), format!("cannot read --config {config}: {err}"))
+            })?
+        };
+        let value: serde_json::Value = serde_json::from_slice(&body)
+            .map_err(|err| io::Error::other(format!("--config is not valid JSON: {err}")))?;
+        churn::security::verify_torrent_isolation(&value).map_err(|problems| {
+            io::Error::other(format!(
+                "the compose configuration does not confine the torrent stack:\n  - {}",
+                problems.join("\n  - ")
+            ))
+        })?;
+        println!("vpn OK: every networked service shares gluetun and its kill switch");
+        return Ok(());
+    }
+
+    let root = envfile::root();
+    let dir = match &args.dir {
+        Some(dir) => PathBuf::from(dir),
+        None if root.join("torrent/docker-compose.yml").is_file() => root.join("torrent"),
+        None => Stack::Torrent.dir(),
+    };
+    // Resolve relative to the caller's directory: `docker compose` runs with
+    // the stack directory as its cwd, so a relative path would be looked up
+    // next to the compose file instead of where it was typed.
+    let env_file = match &args.env_file {
+        Some(env_file) => {
+            let path = std::path::absolute(env_file)?;
+            if !path.is_file() {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!("--env-file {} does not exist", path.display()),
+                ));
+            }
+            Some(path)
+        }
+        None => None,
+    };
+
+    println!("checking VPN isolation in {}", dir.display());
+    system::verify_torrent_isolation_env(&dir, env_file.as_deref())?;
+    println!("vpn OK: every networked service shares gluetun and its kill switch");
+    Ok(())
+}
+
 /// Returns `false` when a preflight check stopped the installer.
 fn run(args: Args) -> io::Result<bool> {
     if args.uninstall {
@@ -1886,6 +2001,15 @@ fn main() -> ExitCode {
     }
     if args.show {
         return match show_services(&args) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(err) => {
+                eprintln!("churn: {err}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+    if args.verify_vpn {
+        return match verify_vpn(&args) {
             Ok(()) => ExitCode::SUCCESS,
             Err(err) => {
                 eprintln!("churn: {err}");

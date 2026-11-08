@@ -1,0 +1,6 @@
+# A sidecar that starts before the fail-closed gate has passed.
+services:
+  flaresolverr:
+    depends_on: !override
+      gluetun:
+        condition: service_healthy

@@ -1,0 +1,6 @@
+# vpn-check without its shared library: it would crash instead of failing closed
+# on a compromised namespace, and the two proofs could drift apart.
+services:
+  vpn-check:
+    volumes: !reset
+      - ./scripts/vpn-check.sh:/scripts/vpn-check.sh:ro

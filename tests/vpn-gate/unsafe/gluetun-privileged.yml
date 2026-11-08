@@ -1,0 +1,4 @@
+# A privileged Gluetun can reach the host's devices and namespaces.
+services:
+  gluetun:
+    privileged: true

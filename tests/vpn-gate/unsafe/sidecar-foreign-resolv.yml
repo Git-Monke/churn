@@ -1,0 +1,9 @@
+# A sidecar that mounts *a* resolv.conf, but not the stack's. Any other file
+# can point at a resolver outside the tunnel, which is a DNS leak.
+#
+# The path is relative to torrent/docker-compose.yml, which is where this
+# override is merged in.
+services:
+  qbittorrent:
+    volumes:
+      - ../tests/vpn-gate/unsafe/resolv-dns-leak.conf:/etc/resolv.conf:ro

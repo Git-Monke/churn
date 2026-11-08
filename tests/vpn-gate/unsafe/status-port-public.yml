@@ -1,0 +1,6 @@
+# The status agent exposes security details; publishing it on every interface
+# leaks them to the LAN.
+services:
+  gluetun:
+    ports: !override
+      - "8098:8098"

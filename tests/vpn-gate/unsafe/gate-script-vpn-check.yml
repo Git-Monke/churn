@@ -1,0 +1,5 @@
+# vpn-check without the script it runs.
+services:
+  vpn-check:
+    volumes: !reset
+      - ./scripts/vpn-lib.sh:/scripts/vpn-lib.sh:ro

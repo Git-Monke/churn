@@ -52,9 +52,7 @@ pub fn verify_torrent_isolation(config: &Value) -> Result<(), Vec<String>> {
 
 fn check_gluetun(service: &Value, problems: &mut Vec<String>) {
     if service.get("network_mode").is_some() {
-        problems.push(format!(
-            "gluetun must use its own network namespace, not network_mode"
-        ));
+        problems.push("gluetun must use its own network namespace, not network_mode".to_string());
     }
     if is_true(service.get("privileged")) {
         problems.push("gluetun must not be privileged".to_string());

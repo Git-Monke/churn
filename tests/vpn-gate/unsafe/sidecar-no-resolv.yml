@@ -1,0 +1,5 @@
+# A sidecar that drops the static Gluetun resolv.conf. It would inherit
+# Docker's nameserver instead, which is the DNS leak path.
+services:
+  qbittorrent:
+    volumes: !reset []

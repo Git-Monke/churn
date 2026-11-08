@@ -1,0 +1,6 @@
+# Gluetun keeps the Docker nameserver alongside its own resolver, so queries
+# can fall back to the un-tunnelled resolver when DNS fails.
+services:
+  gluetun:
+    environment:
+      DNS_KEEP_NAMESERVER: "on"
