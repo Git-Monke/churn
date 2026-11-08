@@ -4,9 +4,9 @@
 # would write into the repository (app config) or into the real library is
 # redirected under ${VPN_GATE_TMP}, a throwaway directory the gate creates.
 #
-# DATA_DIR and the published ports cannot be redirected here (Compose cannot
-# interpolate an override into another variable), so the gate exports them as
-# environment variables, which win over the stack's .env file.
+# DOWNLOAD_DIR/MEDIA_DIR and the published ports cannot be redirected here
+# (Compose cannot interpolate an override into another variable), so the gate
+# exports them as environment variables, which win over the stack's .env file.
 services:
   qbittorrent-init:
     volumes:

@@ -131,7 +131,8 @@ services:
       - WEBUI_PORT=8080
     volumes:
       - ./config/qbittorrent:/config
-      - "${DATA_DIR:?run churn to set DATA_DIR}:/data"
+      - "${DOWNLOAD_DIR:-${DATA_DIR:?run churn to set DOWNLOAD_DIR}}:/data"
+      - "${MEDIA_DIR:-${DOWNLOAD_DIR:-${DATA_DIR:?run churn to set MEDIA_DIR}}/media}:/data/media"
       - ./resolv.conf:/etc/resolv.conf:ro    # Gluetun's local DNS
     restart: unless-stopped
 
@@ -149,7 +150,7 @@ services:
       - TZ=${TZ:-UTC}
     volumes:
       - ./config/prowlarr:/config
-      - "${DATA_DIR:?run churn to set DATA_DIR}:/data"
+      - "${DOWNLOAD_DIR:-${DATA_DIR:?run churn to set DOWNLOAD_DIR}}:/data"
       - ./resolv.conf:/etc/resolv.conf:ro    # Gluetun's local DNS
     restart: unless-stopped
 

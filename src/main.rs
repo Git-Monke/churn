@@ -40,7 +40,7 @@ Must be run as root (for example: sudo churn). If Docker is missing, churn
 offers to install it for the detected Linux distribution. After writing each
 stack's .env, it starts the stack with docker compose up -d and completes Jellyfin
 first-run setup, writing a generated API key to server/.env. Use --uninstall to
-stop/remove the containers and delete generated config without touching DATA_DIR.
+stop/remove the containers and delete generated config without touching the media and download directories.
 
 USAGE:
     churn [OPTIONS]
@@ -54,9 +54,11 @@ COMMANDS:
                       root and does not start or change anything
     update            update the churn binary and/or the server dashboard to the
                       latest release; see update options below
-    migrate           copy DATA_DIR to a new host path, verify the copy, rewrite
-                      both .env files and restart the stacks; the old copy is
-                      kept unless --move is given
+    migrate           copy a storage directory to a new host path, verify the
+                      copy, rewrite both .env files and restart the stacks; the
+                      old copy is kept unless --move is given. Moves the media
+                      library by default; pass --download for the download
+                      directory
     verify-vpn        validate the torrent stack's VPN isolation from
                       `docker compose config`; needs no root and starts nothing.
                       Exits non-zero when any service could leave the tunnel
@@ -65,13 +67,16 @@ OPTIONS:
     --stacks <LIST>   comma separated: server,torrent (skips the menu; with
                       --uninstall, show or migrate, limits what is handled)
     --uninstall       stop and remove the stack containers, then delete their
-                      generated config, cache and .env files; DATA_DIR is kept
+                      generated config, cache and .env files; media and
+                      downloads are kept
     --dry-run         show the plan; write, remove, copy and start nothing
     -y, --yes         skip the final confirmation
     -h, --help        show this help
 
 MIGRATE OPTIONS:
     --to <PATH>       destination directory; prompted when omitted
+    --media           move MEDIA_DIR, the finished library (default)
+    --download        move DOWNLOAD_DIR, where downloads are in progress
     --move            delete the old copy after the new one is verified and the
                       stacks restart (alias: --delete-old)
     --keep-old        keep the old copy (default; alias: --copy)
@@ -112,6 +117,7 @@ struct Args {
     force: bool,
     uninstall: bool,
     migrate: bool,
+    migrate_target: Option<migrate::StorageTarget>,
     verify_vpn: bool,
     dir: Option<String>,
     env_file: Option<String>,
@@ -136,6 +142,8 @@ fn parse_args() -> Result<Args, String> {
             "show" => args.show = true,
             "update" => args.update = true,
             "migrate" => args.migrate = true,
+            "--media" => args.migrate_target = Some(migrate::StorageTarget::Media),
+            "--download" => args.migrate_target = Some(migrate::StorageTarget::Download),
             "verify-vpn" => args.verify_vpn = true,
             "--dir" => {
                 let value = raw.next().ok_or("--dir needs a path")?;
@@ -226,7 +234,9 @@ fn validate_args(args: &Args) -> Result<(), String> {
     if args.to.is_some() && !args.update && !args.migrate {
         return Err("--to requires the 'update' or 'migrate' command".to_string());
     }
-    if (args.move_old || args.keep_old || args.allow_network_fs) && !args.migrate {
+    if (args.move_old || args.keep_old || args.allow_network_fs || args.migrate_target.is_some())
+        && !args.migrate
+    {
         return Err("migrate options require the 'migrate' command".to_string());
     }
     if args.move_old && args.keep_old {
@@ -323,6 +333,7 @@ fn ask_questions(
             explain(section);
             current = Some(section);
         }
+        storage_hint(*question);
         if let Question::Port(port) = question {
             let value = resolve_port(
                 *question,
@@ -351,9 +362,62 @@ fn ask_questions(
             }
             continue;
         }
-        answers.insert(*question, question.ask(stored(question))?);
+        let mut default = stored(question)
+            .map(str::to_string)
+            .or_else(|| media_default(*question, &answers));
+        // The two storage answers only make sense together, so the pair is
+        // validated at the second prompt and re-asked in place rather than
+        // failing the whole run after every other question was answered.
+        if *question == Question::MediaDir
+            && let Some(download) = answers.get(&Question::DownloadDir)
+        {
+            loop {
+                let media = question.ask(default.as_deref())?;
+                match question::validate_storage_paths(download, &media) {
+                    Ok(()) => {
+                        answers.insert(*question, media);
+                        break;
+                    }
+                    Err(message) => {
+                        log::error(message)?;
+                        default = Some(media);
+                    }
+                }
+            }
+            continue;
+        }
+        answers.insert(*question, question.ask(default.as_deref())?);
     }
+    ensure_storage_paths(&answers)?;
     Ok(answers)
+}
+
+/// Default for the media prompt: the download answer the user just gave.
+fn media_default(question: Question, answers: &Answers) -> Option<String> {
+    if question != Question::MediaDir {
+        return None;
+    }
+    answers.get(&Question::DownloadDir).map(|download| {
+        format!(
+            "{}/{}",
+            question::normalize_path(download),
+            stack::MEDIA_SUBDIR
+        )
+    })
+}
+
+/// Reject a download directory that Jellyfin would index.
+///
+/// Runs before anything is created or written so a bad pair costs nothing.
+fn ensure_storage_paths(answers: &Answers) -> io::Result<()> {
+    let (Some(download), Some(media)) = (
+        answers.get(&Question::DownloadDir),
+        answers.get(&Question::MediaDir),
+    ) else {
+        return Ok(());
+    };
+    question::validate_storage_paths(download, media)
+        .map_err(|message| io::Error::new(io::ErrorKind::InvalidInput, message))
 }
 
 /// Reuse a stored port, silently take a free default, or ask only when the
@@ -424,21 +488,72 @@ fn explain(section: Section) {
         Section::Storage => {
             let _ = note(
                 "Storage layout",
-                "One absolute host path holds media and downloads.\n\
-                 It is mounted at /data inside every container, so Jellyfin,\n\
-                 Sonarr, Radarr and qBittorrent agree on paths no matter where\n\
-                 they run.\n\n\
+                "Two locations keep streaming smooth: downloads happen on fast\n\
+                 local disk, then the finished files live on your media drive.\n\n\
+                 They are mounted at /data and /data/media in every container, so\n\
+                 Jellyfin, Sonarr, Radarr and qBittorrent agree on paths no\n\
+                 matter where they run.\n\n\
                  Paths: Tab completes, ↑/↓ choose, Enter submits.",
             );
         }
     }
 }
 
-fn ensure_data_dir(answers: &Answers) -> io::Result<()> {
-    let Some(path) = answers.get(&Question::DataDir) else {
-        return Ok(());
+/// A short hint printed immediately above the question it explains.
+///
+/// Section-wide notes are too far away from the second prompt to be useful:
+/// the recommendation has to be adjacent to the path being typed.
+fn storage_hint(question: Question) {
+    let hint = match question {
+        Question::DownloadDir => {
+            "Recommended on an SSD or fast local disk — downloads are written and\n\
+             re-read while seeding, so a slow drive stutters playback."
+        }
+        Question::MediaDir => {
+            "Recommended on a large hard drive or a NAS — this is the library\n\
+             Jellyfin streams from, so space matters more than speed."
+        }
+        _ => return,
     };
-    let path = Path::new(path);
+    let _ = log::info(hint);
+}
+
+/// Create the storage directories that do not exist yet.
+///
+/// Only missing paths are created, one confirmation each, so the user knows
+/// exactly what churn is about to make. Ownership is never changed: an existing
+/// library belongs to whoever already wrote it.
+fn ensure_directories(answers: &Answers) -> io::Result<()> {
+    let download = answers
+        .get(&Question::DownloadDir)
+        .map(|value| PathBuf::from(question::normalize_path(value)));
+    let media = answers
+        .get(&Question::MediaDir)
+        .map(|value| PathBuf::from(question::normalize_path(value)));
+
+    if let Some(path) = &download {
+        create_if_missing(path)?;
+    }
+    if let Some(path) = &media {
+        if Some(path) != download.as_ref() {
+            create_if_missing(path)?;
+        }
+        for name in ["movies", "tv"] {
+            let subdir = path.join(name);
+            if subdir.is_dir() {
+                continue;
+            }
+            create_if_missing(&subdir)?;
+        }
+        let answers_owner = stack::stack_owner(path, download.as_deref().unwrap_or(path));
+        if let Some(warning) = stack::storage_warning(path, answers_owner) {
+            log::warning(warning)?;
+        }
+    }
+    Ok(())
+}
+
+fn create_if_missing(path: &Path) -> io::Result<()> {
     if path.is_dir() {
         return Ok(());
     }
@@ -449,13 +564,13 @@ fn ensure_data_dir(answers: &Answers) -> io::Result<()> {
     {
         std::fs::create_dir_all(path)?;
         log::success(format!("created {}", path.display()))?;
+        Ok(())
     } else {
-        return Err(io::Error::new(
+        Err(io::Error::new(
             io::ErrorKind::Interrupted,
-            "data dir declined",
-        ));
+            format!("declined to create {}", path.display()),
+        ))
     }
-    Ok(())
 }
 
 fn show_plan(chosen: &[Stack], questions: &[Question], answers: &Answers) -> io::Result<()> {
@@ -883,7 +998,8 @@ fn start_stacks(chosen: &[Stack], dry_run: bool) -> io::Result<()> {
     Ok(())
 }
 
-/// Stop/remove containers and delete generated state, while keeping `DATA_DIR`.
+/// Stop/remove containers and delete generated state, while keeping the media
+/// and download directories.
 fn uninstall(args: Args) -> io::Result<bool> {
     intro("churn · torrent stack uninstaller")?;
 
@@ -901,7 +1017,7 @@ fn uninstall(args: Args) -> io::Result<bool> {
         }
     }
     lines.push_str(
-        "\nDATA_DIR, media, downloads and images are left untouched.\nThe dashboard cache and auth-state volumes are removed.",
+        "\nMedia, downloads and images are left untouched.\nThe dashboard cache and auth-state volumes are removed.",
     );
     note("About to uninstall", lines.trim_end().to_string())?;
 
@@ -996,6 +1112,7 @@ fn copy_detail(progress: &migrate::Progress2) -> String {
 
 fn show_migration_plan(plan: &migrate::Plan, args: &Args) -> io::Result<()> {
     let mut lines = String::new();
+    lines.push_str(&format!("{:<14} {}\n", "moving", plan.target.label()));
     lines.push_str(&format!("{:<14} {}\n", "from", plan.source.display()));
     lines.push_str(&format!("{:<14} {}\n", "to", plan.destination.display()));
     lines.push_str(&format!(
@@ -1033,6 +1150,9 @@ fn show_migration_plan(plan: &migrate::Plan, args: &Args) -> io::Result<()> {
             "kept (rollback stays possible)"
         }
     ));
+    if plan.splits_imports {
+        lines.push_str("\nThe library will be on a different filesystem from the download directory.\nSonarr and Radarr will copy each import and delete the download instead of\nhardlinking, so imports take longer and use more space while they run.\n");
+    }
     if plan.network_filesystem {
         lines.push_str("\nThe destination is a network filesystem. SQLite databases and\ninteractive media playback can misbehave on network storage.\n");
     }
@@ -1125,9 +1245,9 @@ fn migrate_storage(args: &Args) -> io::Result<bool> {
     if let Some(explicit) = &args.stacks {
         if let Some(missing) = installed.iter().find(|stack| !explicit.contains(stack)) {
             outro_note(
-                "Both stacks share DATA_DIR",
+                "Both stacks share the storage directories",
                 format!(
-                    "The {} stack is installed and uses the same data directory.\n\
+                    "The {} stack is installed and uses the same storage directories.\n\
                      Migrate both stacks together so they do not point at different copies.",
                     missing.key()
                 ),
@@ -1156,17 +1276,35 @@ fn migrate_storage(args: &Args) -> io::Result<bool> {
         return Ok(false);
     }
 
-    let source = match migrate::current_data_dir(&root, &stacks) {
+    let target = args.migrate_target.unwrap_or_default();
+    let source = match migrate::current_storage(&root, &stacks, target) {
         Ok(source) => source,
         Err(err) => {
             outro_cancel(format!("cannot migrate: {err}"))?;
             return Ok(false);
         }
     };
+    // The library may not exist yet (a fresh install before the first import).
+    // Creating it empty is a safe no-op, and the alternative is refusing to move
+    // an install that is merely new.
+    if target == migrate::StorageTarget::Media
+        && !source.exists()
+        && let Err(err) = std::fs::create_dir_all(&source)
+    {
+        outro_cancel(format!(
+            "cannot create the media directory {}: {err}",
+            source.display()
+        ))?;
+        return Ok(false);
+    }
     let destination_value = match &args.to {
         Some(value) => question::normalize_path(value),
         None => question::ask_directory(
-            &format!("Old location: {}\nNew location", source.display()),
+            &format!(
+                "Current {}: {}\nNew location",
+                target.label(),
+                source.display()
+            ),
             None,
             "/mnt/media",
         )?,
@@ -1174,6 +1312,7 @@ fn migrate_storage(args: &Args) -> io::Result<bool> {
     let plan = match migrate::plan(
         &root,
         &stacks,
+        target,
         Path::new(&destination_value),
         args.allow_network_fs,
     ) {
@@ -1273,13 +1412,14 @@ fn migrate_storage(args: &Args) -> io::Result<bool> {
         }
     }
 
-    let backups = match migrate::write_envs(&root, &stacks, &plan.destination, uid, gid) {
-        Ok(backups) => backups,
-        Err(err) => {
-            let restart = start_stacks(&stacks, false);
-            return Err(with_restart(err, restart));
-        }
-    };
+    let backups =
+        match migrate::write_envs(&root, &stacks, plan.target, &plan.destination, uid, gid) {
+            Ok(backups) => backups,
+            Err(err) => {
+                let restart = start_stacks(&stacks, false);
+                return Err(with_restart(err, restart));
+            }
+        };
 
     if let Err(err) = start_stacks(&stacks, false) {
         let restored = migrate::restore_envs(&backups);
@@ -1949,7 +2089,7 @@ fn run(args: Args) -> io::Result<bool> {
     let existing_ports = preflight(&chosen)?;
     let questions = stack::collect_questions(&chosen);
     let answers = ask_questions(&questions, args.yes, &existing_ports)?;
-    ensure_data_dir(&answers)?;
+    ensure_directories(&answers)?;
     show_plan(&chosen, &questions, &answers)?;
 
     if !args.yes

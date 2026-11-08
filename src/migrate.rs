@@ -1,8 +1,9 @@
 //! Preflight, copy, verify and `.env` rewrite for `churn migrate`.
 //!
-//! Only the host `DATA_DIR` moves. Every container keeps mounting it at
+//! Only the host download directory moves. Every container keeps mounting it at
 //! `/data`, so qBittorrent, Sonarr, Radarr and Jellyfin continue to use the
-//! same container paths and need no per-service reconfiguration. The old data
+//! same container paths and need no per-service reconfiguration. Relocating a
+//! `MEDIA_DIR` that lives elsewhere is follow-up `churn-scz2`. The old data
 //! is retained by default and only removed after a verified copy, a healthy
 //! restart and an explicit `--move`.
 
@@ -18,7 +19,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::envfile;
 use crate::question;
-use crate::stack::Stack;
+use crate::stack::{self, Stack};
 use crate::system;
 
 /// Marker written into the destination while a copy is in progress. Its
@@ -93,6 +94,8 @@ pub struct VerifyReport {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Plan {
+    /// Which of the two storage directories this plan moves.
+    pub target: StorageTarget,
     pub source: PathBuf,
     pub destination: PathBuf,
     pub total_bytes: u64,
@@ -101,7 +104,51 @@ pub struct Plan {
     pub available_bytes: u64,
     pub resuming: bool,
     pub network_filesystem: bool,
+    /// The media library and the download directory end up on different
+    /// filesystems, so arr imports become copy-then-delete instead of hardlinks.
+    pub splits_imports: bool,
     pub stacks: Vec<Stack>,
+}
+
+/// The storage directory a migration moves.
+///
+/// The library is the interesting one — it is the large, rarely-changing tree
+/// users outgrow, and moving it does not disturb in-flight torrents. The
+/// download directory stays opt-in for that reason.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum StorageTarget {
+    /// `MEDIA_DIR`, where the finished library lives. The default.
+    #[default]
+    Media,
+    /// `DOWNLOAD_DIR`, where in-progress downloads live.
+    Download,
+}
+
+impl StorageTarget {
+    pub fn env_key(self) -> &'static str {
+        match self {
+            StorageTarget::Media => "MEDIA_DIR",
+            StorageTarget::Download => "DOWNLOAD_DIR",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            StorageTarget::Media => "media directory",
+            StorageTarget::Download => "download directory",
+        }
+    }
+
+    /// Whether moving this target also moves the other one.
+    ///
+    /// In the default layout `MEDIA_DIR` is `<DOWNLOAD_DIR>/media`, so a media
+    /// move leaves the download directory in place and only changes where the
+    /// library is mounted. A download move drags a nested library with it,
+    /// because deleting the old download directory would otherwise take the
+    /// media tree with it.
+    pub fn carries_nested_other(self) -> bool {
+        matches!(self, StorageTarget::Download)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -150,25 +197,28 @@ fn env_path(root: &Path, stack: Stack) -> PathBuf {
 /// Read the current storage path from every installed stack.
 ///
 /// A mismatch means a previous partial edit; refuse rather than pick one.
-pub fn current_data_dir(root: &Path, stacks: &[Stack]) -> io::Result<PathBuf> {
+/// Accepts a legacy `DATA_DIR` key so a pre-split install can still relocate,
+/// and derives the media directory when the file predates the split.
+pub fn current_storage(
+    root: &Path,
+    stacks: &[Stack],
+    target: StorageTarget,
+) -> io::Result<PathBuf> {
     let mut found: Option<(Stack, PathBuf)> = None;
     for stack in stacks {
         let env = envfile::read(&env_path(root, *stack));
-        let Some(value) = env
-            .get("DATA_DIR")
-            .map(|value| value.trim())
-            .filter(|value| !value.is_empty())
-        else {
+        let Some(value) = storage_value(&env, target) else {
             continue;
         };
-        let path = PathBuf::from(question::normalize_path(value));
+        let path = PathBuf::from(question::normalize_path(&value));
         if let Some((other, existing)) = &found {
             if existing != &path {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     format!(
-                        "the stacks disagree about DATA_DIR: {} has {}, {} has {}.\n\
+                        "the stacks disagree about the {}: {} has {}, {} has {}.\n\
                          Fix both .env files before migrating.",
+                        target.label(),
                         other.key(),
                         existing.display(),
                         stack.key(),
@@ -185,7 +235,8 @@ pub fn current_data_dir(root: &Path, stacks: &[Stack]) -> io::Result<PathBuf> {
         None => Err(io::Error::new(
             io::ErrorKind::NotFound,
             format!(
-                "no DATA_DIR found in {}; run the installer first",
+                "no {} found in {}; run the installer first",
+                target.env_key(),
                 stacks
                     .iter()
                     .map(|stack| env_path(root, *stack).display().to_string())
@@ -196,19 +247,41 @@ pub fn current_data_dir(root: &Path, stacks: &[Stack]) -> io::Result<PathBuf> {
     }
 }
 
+/// One `.env` file's value for `target`, or the implied default.
+///
+/// A pre-split file has only the download path; the media directory was then
+/// always `<DOWNLOAD_DIR>/media`, which is exactly what the installer writes
+/// for a default answer.
+fn storage_value(env: &envfile::EnvMap, target: StorageTarget) -> Option<String> {
+    match target {
+        StorageTarget::Download => envfile::storage_path(env, "DOWNLOAD_DIR"),
+        StorageTarget::Media => envfile::storage_path(env, "MEDIA_DIR").or_else(|| {
+            envfile::storage_path(env, "DOWNLOAD_DIR").map(|download| {
+                format!(
+                    "{}/{}",
+                    question::normalize_path(&download),
+                    stack::MEDIA_SUBDIR
+                )
+            })
+        }),
+    }
+}
+
 /// Validate the target and collect everything the confirmation screen shows.
 pub fn plan(
     root: &Path,
     stacks: &[Stack],
+    target: StorageTarget,
     destination: &Path,
     allow_network_filesystem: bool,
 ) -> io::Result<Plan> {
-    let source = current_data_dir(root, stacks)?;
+    let source = current_storage(root, stacks, target)?;
     let source = fs::canonicalize(&source).map_err(|err| {
         io::Error::new(
             io::ErrorKind::NotFound,
             format!(
-                "cannot read the current data directory {}: {err}",
+                "cannot read the current {} {}: {err}",
+                target.label(),
                 source.display()
             ),
         )
@@ -237,15 +310,16 @@ pub fn plan(
     if source == destination {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!("{} is already the data directory", source.display()),
+            format!("{} is already the {}", source.display(), target.label()),
         ));
     }
     if destination.starts_with(&source) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!(
-                "{} is inside the current data directory {}",
+                "{} is inside the current {} {}",
                 destination.display(),
+                target.label(),
                 source.display()
             ),
         ));
@@ -254,7 +328,8 @@ pub fn plan(
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!(
-                "the current data directory {} is inside {}",
+                "the current {} {} is inside {}",
+                target.label(),
                 source.display(),
                 destination.display()
             ),
@@ -303,7 +378,9 @@ pub fn plan(
         ));
     }
 
+    let splits_imports = splits_imports(root, stacks, target, &destination)?;
     Ok(Plan {
+        target,
         source,
         destination,
         total_bytes: total.bytes,
@@ -311,8 +388,46 @@ pub fn plan(
         available_bytes: filesystem.available_bytes,
         resuming,
         network_filesystem: filesystem.is_network(),
+        splits_imports,
         stacks: stacks.to_vec(),
     })
+}
+
+/// Whether the move leaves the library and the downloads on different
+/// filesystems.
+///
+/// Sonarr and Radarr import a finished download by hardlinking (or atomically
+/// renaming) it into the library, which only works within one filesystem.
+/// Across two, every import becomes a full copy followed by a delete.
+///
+/// A media move is judged by the new library path against the download
+/// directory that stays put. A download move takes the media directory with it
+/// (see `StorageTarget::carries_nested_other`), so the pair stays together and
+/// the answer is always `false`.
+fn splits_imports(
+    root: &Path,
+    stacks: &[Stack],
+    target: StorageTarget,
+    destination: &Path,
+) -> io::Result<bool> {
+    if target == StorageTarget::Download {
+        return Ok(false);
+    }
+    let Ok(download) = current_storage(root, stacks, StorageTarget::Download) else {
+        return Ok(false);
+    };
+    let download = canonical_target(&download)?;
+    let library_device = device_of(&nearest_existing(destination));
+    let download_device = device_of(&nearest_existing(&download));
+    Ok(match (library_device, download_device) {
+        (Some(library), Some(download)) => library != download,
+        _ => false,
+    })
+}
+
+fn device_of(path: &Path) -> Option<u64> {
+    use std::os::unix::fs::MetadataExt;
+    fs::metadata(path).ok().map(|metadata| metadata.dev())
 }
 
 /// Reuse the installer's absolute-path, existence and writability checks.
@@ -772,14 +887,22 @@ pub fn set_owner(path: &Path, uid: u32, gid: u32) -> io::Result<()> {
     }
 }
 
-/// Update `DATA_DIR`, `PUID` and `PGID` in every stack's `.env`.
+/// Write the moved storage key and `PUID`/`PGID` into every stack's `.env`.
 ///
 /// A backup is written first, and a failure part-way through restores the
 /// files already changed so the installation never points at a half-written
-/// configuration.
+/// configuration. A legacy `DATA_DIR` is dropped so the file never carries both
+/// keys.
+///
+/// A download move also rewrites `MEDIA_DIR` when it lives inside the directory
+/// being moved (the default `<DOWNLOAD_DIR>/media` layout). Leaving it alone
+/// would be a data-loss bug with `--move`: the media tree is copied to the
+/// destination and then deleted with the old download directory, while `.env`
+/// still pointed at the deleted path.
 pub fn write_envs(
     root: &Path,
     stacks: &[Stack],
+    target: StorageTarget,
     destination: &Path,
     uid: u32,
     gid: u32,
@@ -787,11 +910,6 @@ pub fn write_envs(
     let destination = destination.to_string_lossy().to_string();
     let uid = uid.to_string();
     let gid = gid.to_string();
-    let values: [(&str, &str); 3] = [
-        ("DATA_DIR", destination.as_str()),
-        ("PUID", uid.as_str()),
-        ("PGID", gid.as_str()),
-    ];
 
     let mut backups: Vec<EnvBackup> = Vec::new();
     for stack in stacks {
@@ -800,6 +918,21 @@ pub fn write_envs(
             continue;
         }
         let original = fs::read_to_string(&path)?;
+        let mut values: Vec<(&str, String)> = vec![
+            (target.env_key(), destination.clone()),
+            ("PUID", uid.clone()),
+            ("PGID", gid.clone()),
+        ];
+        if target.carries_nested_other()
+            && let Some(media) = relocated_media(&original, &destination)
+        {
+            values.push(("MEDIA_DIR", media));
+        }
+        let borrowed: Vec<(&str, &str)> = values
+            .iter()
+            .map(|(key, value)| (*key, value.as_str()))
+            .collect();
+
         let backup = path
             .parent()
             .unwrap_or_else(|| Path::new("."))
@@ -814,14 +947,40 @@ pub fn write_envs(
         backups.push(EnvBackup {
             path: path.clone(),
             backup,
-            original,
+            original: original.clone(),
         });
-        if let Err(err) = envfile::upsert_many(&path, &values) {
+        if let Err(err) = envfile::upsert_many(&path, &borrowed)
+            .and_then(|()| envfile::remove_keys(&path, &["DATA_DIR"]))
+        {
             let _ = restore_envs(&backups);
             return Err(err);
         }
     }
     Ok(backups)
+}
+
+/// Where the media directory must point after the download directory moved.
+///
+/// `None` means the file's storage keys could not be read, so `MEDIA_DIR` is
+/// left exactly as it was. A media path inside the old download directory is
+/// rebased onto the destination; anything else is returned unchanged, because
+/// a download move only moves the download tree.
+fn relocated_media(original: &str, destination: &str) -> Option<String> {
+    let env = envfile::parse(original);
+    let old_download = envfile::storage_path(&env, "DOWNLOAD_DIR")?;
+    let old_download = question::normalize_path(&old_download);
+    let media = envfile::storage_path(&env, "MEDIA_DIR")
+        .map(|value| question::normalize_path(&value))
+        .unwrap_or_else(|| format!("{old_download}/{}", stack::MEDIA_SUBDIR));
+
+    let inside = media == old_download || Path::new(&media).starts_with(Path::new(&old_download));
+    if !inside {
+        return Some(media);
+    }
+    let relative = Path::new(&media)
+        .strip_prefix(Path::new(&old_download))
+        .unwrap_or_else(|_| Path::new(""));
+    Some(format!("{}/{}", destination, relative.display()))
 }
 
 /// Restore every `.env` from its pre-migration backup.
@@ -832,7 +991,7 @@ pub fn restore_envs(backups: &[EnvBackup]) -> io::Result<()> {
     Ok(())
 }
 
-/// Remove the contents of the old data directory, keeping the directory itself
+/// Remove the contents of the old download directory, keeping the directory itself
 /// so the old mount point still exists.
 pub fn remove_old_data(source: &Path) -> io::Result<()> {
     for entry in fs::read_dir(source)? {
@@ -933,7 +1092,7 @@ mod tests {
             fs::write(
                 dir.join(".env"),
                 format!(
-                    "DATA_DIR={}\nPUID=1000\nPGID=1000\nKEEP=yes\n",
+                    "DOWNLOAD_DIR={}\nPUID=1000\nPGID=1000\nKEEP=yes\n",
                     source.display()
                 ),
             )
@@ -943,18 +1102,34 @@ mod tests {
     }
 
     #[test]
-    fn current_data_dir_is_shared_and_rejects_a_mismatch() {
+    fn current_storage_is_shared_and_rejects_a_mismatch() {
         let (root, source, _) = fixture("current");
         let stacks = installed_stacks(&root);
         assert_eq!(stacks, vec![Stack::Server, Stack::Torrent]);
-        assert_eq!(current_data_dir(&root, &stacks).unwrap(), source);
+        assert_eq!(
+            current_storage(&root, &stacks, StorageTarget::Download).unwrap(),
+            source
+        );
 
         fs::write(
             root.join("torrent/.env"),
-            format!("DATA_DIR={}\n", root.join("other").display()),
+            format!("DOWNLOAD_DIR={}\n", root.join("other").display()),
         )
         .unwrap();
-        assert!(current_data_dir(&root, &stacks).is_err());
+        assert!(current_storage(&root, &stacks, StorageTarget::Download).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_pre_split_env_derives_the_media_directory() {
+        let (root, source, _) = fixture("derive");
+        let stacks = installed_stacks(&root);
+        // The fixture writes only DOWNLOAD_DIR, like an install from before the
+        // split; the installer's default media directory is <DOWNLOAD_DIR>/media.
+        assert_eq!(
+            current_storage(&root, &stacks, StorageTarget::Media).unwrap(),
+            source.join("media")
+        );
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -963,16 +1138,26 @@ mod tests {
         let (root, source, destination) = fixture("nesting");
         let stacks = installed_stacks(&root);
 
-        assert!(plan(&root, &stacks, &source.join("nested"), false).is_err());
-        assert!(plan(&root, &stacks, &source.parent().unwrap().join("old"), false).is_err());
-        assert!(plan(&root, &stacks, &source, false).is_err());
+        let download = StorageTarget::Download;
+        assert!(plan(&root, &stacks, download, &source.join("nested"), false).is_err());
+        assert!(
+            plan(
+                &root,
+                &stacks,
+                download,
+                &source.parent().unwrap().join("old"),
+                false
+            )
+            .is_err()
+        );
+        assert!(plan(&root, &stacks, download, &source, false).is_err());
 
         fs::create_dir_all(&destination).unwrap();
         fs::write(destination.join("keep.txt"), b"keep").unwrap();
-        assert!(plan(&root, &stacks, &destination, false).is_err());
+        assert!(plan(&root, &stacks, download, &destination, false).is_err());
         fs::remove_dir_all(&destination).unwrap();
 
-        let plan = plan(&root, &stacks, &destination, false).unwrap();
+        let plan = plan(&root, &stacks, download, &destination, false).unwrap();
         assert_eq!(plan.total_bytes, 6);
         assert!(!plan.resuming);
         assert_eq!(plan.stacks, stacks);
@@ -987,7 +1172,7 @@ mod tests {
         write_marker(&source, &destination).unwrap();
         fs::write(destination.join("partial.bin"), b"12").unwrap();
 
-        let plan = plan(&root, &stacks, &destination, false).unwrap();
+        let plan = plan(&root, &stacks, StorageTarget::Download, &destination, false).unwrap();
         assert!(plan.resuming);
         assert_eq!(plan.remaining_bytes, 4);
         fs::remove_dir_all(root).unwrap();
@@ -1000,9 +1185,15 @@ mod tests {
         write_marker(&source, &destination).unwrap();
         assert!(destination.join(MARKER).is_file());
         assert!(
-            plan(&root, &installed_stacks(&root), &destination, false)
-                .unwrap()
-                .resuming
+            plan(
+                &root,
+                &installed_stacks(&root),
+                StorageTarget::Download,
+                &destination,
+                false
+            )
+            .unwrap()
+            .resuming
         );
         fs::remove_dir_all(root).unwrap();
     }
@@ -1050,13 +1241,25 @@ mod tests {
     fn env_update_keeps_other_keys_and_can_be_restored() {
         let (root, _, destination) = fixture("envs");
         let stacks = installed_stacks(&root);
-        let backups = write_envs(&root, &stacks, &destination, 1001, 1002).unwrap();
+        let backups = write_envs(
+            &root,
+            &stacks,
+            StorageTarget::Download,
+            &destination,
+            1001,
+            1002,
+        )
+        .unwrap();
 
         for stack in &stacks {
             let env = envfile::read(&env_path(&root, *stack));
             assert_eq!(
-                env.get("DATA_DIR").map(String::as_str),
+                env.get("DOWNLOAD_DIR").map(String::as_str),
                 Some(destination.to_string_lossy().as_ref())
+            );
+            assert!(
+                !env.contains_key("DATA_DIR"),
+                "the legacy key must not survive the rename"
             );
             assert_eq!(env.get("PUID").map(String::as_str), Some("1001"));
             assert_eq!(env.get("PGID").map(String::as_str), Some("1002"));
@@ -1069,6 +1272,139 @@ mod tests {
             let env = envfile::read(&env_path(&root, *stack));
             assert_eq!(env.get("PUID").map(String::as_str), Some("1000"));
             assert_eq!(env.get("KEEP").map(String::as_str), Some("yes"));
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// The default layout puts media inside the download directory, so a
+    /// `--move` that rewrote only `DOWNLOAD_DIR` would delete the media tree and
+    /// leave `.env` pointing at the path it just removed.
+    #[test]
+    fn relocating_the_download_directory_carries_a_nested_media_directory() {
+        let (root, _, destination) = fixture("relocate-media");
+        let stacks = installed_stacks(&root);
+        let before = envfile::read(&env_path(&root, Stack::Server));
+        assert_eq!(
+            before.get("MEDIA_DIR"),
+            None,
+            "the fixture stores no media key"
+        );
+        let old_download = before.get("DOWNLOAD_DIR").cloned().unwrap();
+
+        write_envs(
+            &root,
+            &stacks,
+            StorageTarget::Download,
+            &destination,
+            1001,
+            1002,
+        )
+        .unwrap();
+
+        for stack in &stacks {
+            let env = envfile::read(&env_path(&root, *stack));
+            let media = env.get("MEDIA_DIR").expect("MEDIA_DIR must be written");
+            assert_eq!(
+                media,
+                &format!("{}/media", destination.display()),
+                "media nested in the old download directory must follow it"
+            );
+            assert!(
+                !media.starts_with(&old_download),
+                "the rewritten media path must not point into the directory --move deletes"
+            );
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A media move touches `MEDIA_DIR` only: the download directory, and
+    /// therefore every in-flight torrent, keeps pointing where it was.
+    #[test]
+    fn relocating_the_media_directory_leaves_downloads_alone() {
+        let (root, source, destination) = fixture("relocate-media-only");
+        let stacks = installed_stacks(&root);
+        let download = format!("{}/incomplete", source.display());
+        for stack in &stacks {
+            envfile::upsert(&env_path(&root, *stack), "DOWNLOAD_DIR", &download).unwrap();
+            envfile::upsert(
+                &env_path(&root, *stack),
+                "MEDIA_DIR",
+                &format!("{}/media", source.display()),
+            )
+            .unwrap();
+        }
+        fs::create_dir_all(source.join("media")).unwrap();
+
+        let plan = plan(&root, &stacks, StorageTarget::Media, &destination, false).unwrap();
+        assert_eq!(plan.target, StorageTarget::Media);
+        assert_eq!(plan.source, fs::canonicalize(source.join("media")).unwrap());
+        assert_eq!(plan.total_bytes, 6, "only the library is counted");
+
+        write_envs(
+            &root,
+            &stacks,
+            StorageTarget::Media,
+            &destination,
+            1001,
+            1002,
+        )
+        .unwrap();
+
+        for stack in &stacks {
+            let env = envfile::read(&env_path(&root, *stack));
+            assert_eq!(
+                env.get("MEDIA_DIR").map(String::as_str),
+                Some(destination.to_string_lossy().as_ref())
+            );
+            assert_eq!(
+                env.get("DOWNLOAD_DIR").map(String::as_str),
+                Some(download.as_str()),
+                "a media move must not disturb the download directory"
+            );
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A download move carries the library with it, so the pair stays on one
+    /// filesystem and imports keep hardlinking.
+    #[test]
+    fn a_download_move_never_splits_imports() {
+        let (root, _, destination) = fixture("splits-download");
+        let stacks = installed_stacks(&root);
+        let plan = plan(&root, &stacks, StorageTarget::Download, &destination, false).unwrap();
+        assert!(!plan.splits_imports);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A library on its own disk must not be rewritten or moved.
+    #[test]
+    fn relocating_leaves_a_media_directory_outside_the_download_directory_alone() {
+        let (root, _, destination) = fixture("relocate-media-outside");
+        let stacks = installed_stacks(&root);
+        for stack in &stacks {
+            envfile::upsert(&env_path(&root, *stack), "MEDIA_DIR", "/mnt/library").unwrap();
+        }
+
+        write_envs(
+            &root,
+            &stacks,
+            StorageTarget::Download,
+            &destination,
+            1001,
+            1002,
+        )
+        .unwrap();
+
+        for stack in &stacks {
+            let env = envfile::read(&env_path(&root, *stack));
+            assert_eq!(
+                env.get("MEDIA_DIR").map(String::as_str),
+                Some("/mnt/library")
+            );
+            assert_eq!(
+                env.get("DOWNLOAD_DIR").map(String::as_str),
+                Some(destination.to_string_lossy().as_ref())
+            );
         }
         fs::remove_dir_all(root).unwrap();
     }

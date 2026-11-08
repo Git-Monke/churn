@@ -45,23 +45,35 @@ finds, and is safe to rerun. It also adds the private LAN ranges and Tailscale's
 `100.64.0.0/10` range to Jellyfin's LAN networks, so tailnet clients can stream
 video directly from Jellyfin while remote access stays disabled.
 
-## Migrating `DATA_DIR`
+## Migrating storage
 
-Move an existing library to a new disk with `churn migrate`:
+Move an existing library to a new disk or NAS with `churn migrate`. It moves
+`MEDIA_DIR` by default; `--download` moves `DOWNLOAD_DIR` instead, and each
+location is migrated independently:
 
 ```bash
-sudo churn migrate --to /mnt/media --dry-run
-sudo churn migrate --to /mnt/media
-sudo churn migrate --to /mnt/media --move
+sudo churn migrate --to /mnt/library --dry-run
+sudo churn migrate --to /mnt/library
+sudo churn migrate --to /mnt/library --move
+sudo churn migrate --download --to /mnt/ssd
 ```
+
+The default matters: the library is the tree that outgrows a disk, and moving
+it leaves the download directory — and every in-flight torrent — untouched. A
+download move carries a library nested under `<DOWNLOAD_DIR>/media` with it and
+leaves one on its own disk alone.
 
 The command reads the current path from both stacks' `.env` files, refuses
 nested, unwritable, read-only, network and too-small destinations, then stops
 the installed stacks for the duration of the copy. It copies with rsync
 (`--partial`, so an interrupted run resumes) or `cp -a` when rsync is missing,
-verifies every file's size and symlink target, updates `DATA_DIR`, `PUID` and
+verifies every file's size and symlink target, updates the moved key, `PUID` and
 `PGID` in both `.env` files, restarts the stacks and runs the Jellyfin health
 check.
+
+A media directory on a different filesystem from the download directory stops
+Sonarr and Radarr hardlinking imports: each import becomes a copy followed by a
+delete. The plan warns about this before anything is stopped.
 
 The copy shows live progress from rsync: bytes moved, transfer rate, ETA and how
 many files are left to check. The percentage is rsync's own, so it describes the
@@ -76,9 +88,9 @@ prints the `cp` commands to roll back. The destination is marked while the copy
 is in progress so a second run continues instead of mixing data from different
 sources.
 
-Container paths do not change: the new host directory is still mounted at
-`/data`, so Jellyfin libraries, arr root folders and qBittorrent paths stay
-valid without being touched.
+Container paths do not change: the download directory is still mounted at
+`/data` and the library at `/data/media`, so Jellyfin libraries, arr root
+folders and qBittorrent paths stay valid without being touched.
 
 ## Configuration
 

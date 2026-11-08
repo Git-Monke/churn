@@ -10,7 +10,8 @@ services:
     volumes:
       - ./config/jellyfin:/config
       - ./cache/jellyfin:/cache
-      - "${DATA_DIR:?run churn to set DATA_DIR}:/data"
+      - "${DOWNLOAD_DIR:-${DATA_DIR:?run churn to set DOWNLOAD_DIR}}:/data"
+      - "${MEDIA_DIR:-${DOWNLOAD_DIR:-${DATA_DIR:?run churn to set MEDIA_DIR}}/media}:/data/media"
     restart: unless-stopped
 
   sonarr:
@@ -23,7 +24,8 @@ services:
       - TZ=${TZ:-UTC}
     volumes:
       - ./config/sonarr:/config
-      - "${DATA_DIR:?run churn to set DATA_DIR}:/data"
+      - "${DOWNLOAD_DIR:-${DATA_DIR:?run churn to set DOWNLOAD_DIR}}:/data"
+      - "${MEDIA_DIR:-${DOWNLOAD_DIR:-${DATA_DIR:?run churn to set MEDIA_DIR}}/media}:/data/media"
     restart: unless-stopped
 
   radarr:
@@ -36,7 +38,8 @@ services:
       - TZ=${TZ:-UTC}
     volumes:
       - ./config/radarr:/config
-      - "${DATA_DIR:?run churn to set DATA_DIR}:/data"
+      - "${DOWNLOAD_DIR:-${DATA_DIR:?run churn to set DOWNLOAD_DIR}}:/data"
+      - "${MEDIA_DIR:-${DOWNLOAD_DIR:-${DATA_DIR:?run churn to set MEDIA_DIR}}/media}:/data/media"
     restart: unless-stopped
 
   # One-shot: creates the shared media folders and registers them as the
@@ -59,7 +62,8 @@ services:
       - ./scripts/server-init.sh:/server-init.sh:ro
       - ./config/sonarr:/sonarr-config:ro
       - ./config/radarr:/radarr-config:ro
-      - "${DATA_DIR:?run churn to set DATA_DIR}:/data"
+      - "${DOWNLOAD_DIR:-${DATA_DIR:?run churn to set DOWNLOAD_DIR}}:/data"
+      - "${MEDIA_DIR:-${DOWNLOAD_DIR:-${DATA_DIR:?run churn to set MEDIA_DIR}}/media}:/data/media"
     restart: "no"
 
   # Web dashboard. The image is built by CI and pinned in .env by the

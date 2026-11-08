@@ -1,7 +1,7 @@
 ---
 # churn-jl2c
 title: Import an existing Jellyfin library and media folder during install
-status: todo
+status: scrapped
 type: feature
 priority: normal
 tags:
@@ -9,7 +9,7 @@ tags:
     - installer
     - storage
 created_at: 2026-11-06T07:26:02Z
-updated_at: 2026-11-06T07:26:02Z
+updated_at: 2026-11-08T01:16:06Z
 ---
 
 ## Problem
@@ -95,3 +95,9 @@ The installer detects an existing Jellyfin/media setup early and offers to bring
 - `Relocate data with a churn migrate command` — shares rsync/verify/resume, marker and rollback mechanics; import should reuse them rather than fork them.
 - `Separate media and download locations` — decides whether media can stay outside `DATA_DIR`, which affects the copy-vs-reference answer.
 - `Resume interrupted installs` — import must be resumable in the same way.
+
+
+
+---
+
+**Superseded** by epic `churn-mcj1`. The copy-based import described above is out of scope: churn references an existing media library **in place** by pointing `MEDIA_DIR` at it (no copy, no restructuring), and Jellyfin is pointed at one mixed library at that root. Only the optional Jellyfin `config/`+`data/` adoption survives, as child bean `churn-17s1`. See `plans/media-locations.md` and the epic.

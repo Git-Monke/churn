@@ -220,7 +220,7 @@ fn fresh_install_creates_user_and_writes_api_key() {
         },
     );
 
-    let (dir, env_path) = temp_env("DATA_DIR=/data\nHAND_EDITED=keep-me\n");
+    let (dir, env_path) = temp_env("DOWNLOAD_DIR=/data\nHAND_EDITED=keep-me\n");
     let client = Jellyfin::new(&server.base_url, Duration::from_secs(2));
     let credentials = Credentials {
         username: "admin".into(),
@@ -268,7 +268,7 @@ fn completed_setup_reuses_an_existing_churn_key() {
         _ => (404, "{}".into()),
     });
 
-    let (dir, env_path) = temp_env("DATA_DIR=/data\n");
+    let (dir, env_path) = temp_env("DOWNLOAD_DIR=/data\n");
     let client = Jellyfin::new(&server.base_url, Duration::from_secs(2));
     let credentials = Credentials {
         username: "admin".into(),
@@ -321,7 +321,7 @@ fn fallback_finds_key_after_a_204_create_response() {
         },
     );
 
-    let (dir, env_path) = temp_env("DATA_DIR=/data\n");
+    let (dir, env_path) = temp_env("DOWNLOAD_DIR=/data\n");
     let client = Jellyfin::new(&server.base_url, Duration::from_secs(2));
     let credentials = Credentials {
         username: "admin".into(),

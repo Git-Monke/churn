@@ -7,7 +7,7 @@ priority: normal
 tags:
     - storage
 created_at: 2026-11-05T04:05:47Z
-updated_at: 2026-11-07T18:10:10Z
+updated_at: 2026-11-08T01:16:07Z
 ---
 
 ## Problem
@@ -124,3 +124,9 @@ pass), `cargo fmt --check`. Clippy only reports pre-existing warnings in
 Remaining before completing this bean: a real host run against Docker to
 confirm a healthy restart and playable media (the checkboxes for that and for
 split-location support are intentionally still open).
+
+
+
+---
+
+**Follow-up:** once epic `churn-mcj1` lands, migrate must relocate `MEDIA_DIR` as well as `DATA_DIR` — see bean `churn-scz2`.

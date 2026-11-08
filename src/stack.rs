@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::envfile;
+use crate::envfile::{self, EnvMap};
 use crate::ports::{self, Port};
 use crate::question::{Question, Section};
 use crate::security;
@@ -60,7 +60,8 @@ impl Stack {
     pub fn questions(self) -> &'static [Question] {
         match self {
             Stack::Server => &[
-                Question::DataDir,
+                Question::DownloadDir,
+                Question::MediaDir,
                 Question::Port(Port::Jellyfin),
                 Question::Port(Port::Sonarr),
                 Question::Port(Port::Radarr),
@@ -68,7 +69,8 @@ impl Stack {
             ],
             Stack::Torrent => &[
                 Question::WireguardArchive,
-                Question::DataDir,
+                Question::DownloadDir,
+                Question::MediaDir,
                 Question::Port(Port::Qbittorrent),
                 Question::Port(Port::Prowlarr),
                 Question::Port(Port::VpnStatus),
@@ -95,7 +97,7 @@ impl Stack {
     /// Generated state that an uninstall removes.
     ///
     /// These are only app configuration, caches and the generated `.env`; the
-    /// media/download directory (`DATA_DIR`) is never included.
+    /// media and download directories are never included.
     pub fn state_paths(self) -> Vec<PathBuf> {
         let dir = self.dir();
         match self {
@@ -185,30 +187,50 @@ impl Stack {
         Question::ALL
             .iter()
             .filter_map(|question| {
-                env.get(question.env_key())
-                    .map(|value| (*question, value.clone()))
+                let value = if matches!(question, Question::DownloadDir | Question::MediaDir) {
+                    envfile::storage_path(&env, question.env_key())
+                } else {
+                    env.get(question.env_key()).cloned()
+                };
+                value.map(|value| (*question, value))
             })
             .collect()
     }
 
-    pub fn apply(self, answers: &Answers) -> io::Result<PathBuf> {
-        let data_dir = answers
-            .get(&Question::DataDir)
-            .cloned()
-            .unwrap_or_else(|| "/data".to_string());
-        let (uid, gid) = envfile::owner(Path::new(&data_dir));
-
-        let mut managed: Vec<(&str, String)> = vec![
-            ("DATA_DIR", data_dir),
-            ("PUID", uid.to_string()),
-            ("PGID", gid.to_string()),
-            ("TZ", envfile::timezone()),
-        ];
-
+    /// The `.env` keys this stack manages, in write order.
+    ///
+    /// Pure, so tests can assert the values without touching the filesystem.
+    /// The storage pair is written as resolved paths: `MEDIA_DIR` never depends
+    /// on `${DOWNLOAD_DIR}` expansion, so the file stays readable on its own.
+    pub fn managed_env(self, answers: &Answers) -> Vec<(&'static str, String)> {
         // Write every host port to both stacks: the dashboard and prowlarr-init
         // need ports owned by the other stack. Stored values survive reruns.
         let mut stored_env = envfile::read(&self.other().env_path());
         stored_env.extend(envfile::read(&self.env_path()));
+        self.managed_env_with(answers, &stored_env)
+    }
+
+    /// [`Self::managed_env`] with the stored `.env` supplied by the caller.
+    ///
+    /// `stored_env` is only consulted for values the user cannot answer from
+    /// scratch (hand-edited ports, a country override). Taking it as a parameter
+    /// keeps the function testable without a root directory on disk.
+    pub fn managed_env_with(
+        self,
+        answers: &Answers,
+        stored_env: &EnvMap,
+    ) -> Vec<(&'static str, String)> {
+        let download_dir = download_dir(answers);
+        let media_dir = media_dir(answers);
+        let (uid, gid) = stack_owner(Path::new(&media_dir), Path::new(&download_dir));
+
+        let mut managed: Vec<(&'static str, String)> = vec![
+            ("DOWNLOAD_DIR", download_dir),
+            ("MEDIA_DIR", media_dir),
+            ("PUID", uid.to_string()),
+            ("PGID", gid.to_string()),
+            ("TZ", envfile::timezone()),
+        ];
         for port in Port::ALL {
             let value = answers
                 .get(&Question::Port(port))
@@ -260,8 +282,12 @@ impl Stack {
             }
         }
 
+        managed
+    }
+
+    pub fn apply(self, answers: &Answers) -> io::Result<PathBuf> {
         let path = self.env_path();
-        envfile::write_merged(&path, &managed)?;
+        envfile::write_merged(&path, &self.managed_env(answers))?;
         Ok(path)
     }
 }
@@ -273,6 +299,76 @@ impl Stack {
 pub fn start_order(mut chosen: Vec<Stack>) -> Vec<Stack> {
     chosen.sort_by_key(|stack| Stack::ALL.iter().position(|known| known == stack));
     chosen
+}
+
+/// Default media directory: a `media` folder inside the download directory.
+///
+/// This reproduces today's single-`DATA_DIR` layout exactly, so the split is
+/// only a naming change until the user points `MEDIA_DIR` somewhere else.
+pub const MEDIA_SUBDIR: &str = "media";
+
+pub fn download_dir(answers: &Answers) -> String {
+    answers
+        .get(&Question::DownloadDir)
+        .map(|value| crate::question::normalize_path(value))
+        .unwrap_or_else(|| "/data".to_string())
+}
+
+pub fn media_dir(answers: &Answers) -> String {
+    answers
+        .get(&Question::MediaDir)
+        .map(|value| crate::question::normalize_path(value))
+        .unwrap_or_else(|| format!("{}/{MEDIA_SUBDIR}", download_dir(answers)))
+}
+
+/// Owning uid/gid for the containers.
+///
+/// Sonarr/Radarr import into the media root, so its owner is the better source;
+/// otherwise use the download directory, which qBittorrent writes. A root-owned
+/// media tree is skipped rather than adopted: running the whole stack as uid 0
+/// because `/mnt/media` happens to be root-owned is never what the user wants,
+/// so the warning from [`storage_warning`] is the honest outcome.
+pub fn stack_owner(media: &Path, download: &Path) -> (u32, u32) {
+    if media.exists() {
+        let (uid, gid) = envfile::owner(media);
+        if uid != 0 {
+            return (uid, gid);
+        }
+    }
+    envfile::owner(download)
+}
+
+/// Warn when the resolved containers could not write to the media directory.
+///
+/// Reported before anything is written; the installer never changes ownership
+/// of an existing library, so an unwritable library must be visible up front
+/// instead of surfacing later as silent import failures.
+pub fn storage_warning(media: &Path, owner: (u32, u32)) -> Option<String> {
+    let metadata = std::fs::metadata(media).ok()?;
+    if !metadata.is_dir() {
+        return Some(format!(
+            "{} exists but is not a directory.",
+            media.display()
+        ));
+    }
+    if is_root() {
+        return None;
+    }
+    let (uid, _) = envfile::owner(media);
+    if uid == owner.0 {
+        return None;
+    }
+    Some(format!(
+        "{} is owned by uid {uid} but the containers will run as PUID {}.\n\
+         Sonarr, Radarr and Jellyfin may not be able to write there.\n\
+         churn does not change ownership of an existing library; fix it yourself if imports fail.",
+        media.display(),
+        owner.0
+    ))
+}
+
+fn is_root() -> bool {
+    unsafe { libc::geteuid() == 0 }
 }
 
 fn answer_port(answers: &Answers, port: Port) -> u16 {
@@ -310,7 +406,7 @@ fn server_countries(existing: Option<&str>, config_entry: Option<&str>) -> Strin
 /// Every unique question across the chosen stacks, VPN before Storage.
 ///
 /// This is where the orchestration dedupes: picking both `server` and `torrent`
-/// yields one `DataDir` question, not two.
+/// yields one `DownloadDir` and one `MediaDir` question, not two of each.
 pub fn collect_questions(chosen: &[Stack]) -> Vec<Question> {
     let mut ordered: Vec<Question> = Vec::new();
     for section in Section::ORDER {

@@ -43,7 +43,7 @@
 # Requirements for the live stages: Docker, /dev/net/tun, and WireGuard
 # credentials in torrent/.env (or VPN_GATE_ENV=<path>). The gate only ever uses
 # the Compose project `churn-vpn-gate`, host ports 18080/19696/18098 and a temp
-# DATA_DIR, so a run cannot touch an installed stack.
+# DOWNLOAD_DIR/MEDIA_DIR, so a run cannot touch an installed stack.
 #
 # There is deliberately no flag that skips a stage silently: --static-only says
 # what it does, and release.sh never passes it for a real release.
@@ -693,9 +693,10 @@ start_stack() {
   export QBITTORRENT_PORT=18080
   export PROWLARR_PORT=19696
   export VPN_STATUS_PORT=18098
-  export DATA_DIR=$tmp/data
+  export DOWNLOAD_DIR=$tmp/data
+  export MEDIA_DIR=$tmp/media
   export VPN_GATE_TMP=$tmp
-  mkdir -p "$tmp/data" "$tmp/config/qbittorrent" "$tmp/config/prowlarr" \
+  mkdir -p "$tmp/data" "$tmp/media" "$tmp/config/qbittorrent" "$tmp/config/prowlarr" \
     "$tmp/server-config/sonarr" "$tmp/server-config/radarr"
 
   sandbox_started=1

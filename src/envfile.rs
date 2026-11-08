@@ -46,6 +46,11 @@ pub fn read(path: &Path) -> EnvMap {
     let Ok(contents) = fs::read_to_string(path) else {
         return EnvMap::new();
     };
+    parse(&contents)
+}
+
+/// Parse `.env` text, ignoring blanks, comments and lines without a separator.
+pub fn parse(contents: &str) -> EnvMap {
     contents
         .lines()
         .map(str::trim)
@@ -57,15 +62,45 @@ pub fn read(path: &Path) -> EnvMap {
         .collect()
 }
 
+/// Read a storage path from an env map, accepting the pre-`MEDIA_DIR` key.
+///
+/// Installations created before the download/media split stored one path under
+/// `DATA_DIR`. Reading it as the download directory keeps a rerun from losing
+/// the user's existing location, and `Stack::apply` rewrites the file with the
+/// new key so the legacy value never lingers.
+pub fn storage_path(env: &EnvMap, key: &str) -> Option<String> {
+    let read = |env: &EnvMap, name: &str| {
+        env.get(name)
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    };
+    read(env, key).or_else(|| {
+        if key == "DOWNLOAD_DIR" {
+            read(env, "DATA_DIR")
+        } else {
+            None
+        }
+    })
+}
+
 /// Write `managed` keys in order, keeping any unrelated keys from a previous run.
 pub fn write_merged(path: &Path, managed: &[(&str, String)]) -> io::Result<()> {
     let existing = read(path);
+    // A pre-split install stored one path under `DATA_DIR`. Once `DOWNLOAD_DIR`
+    // is managed, the old key must go: keeping it under "preserved" would leave
+    // two keys claiming the same thing.
+    let dropped: &[&str] = if managed.iter().any(|(key, _)| *key == "DOWNLOAD_DIR") {
+        &["DATA_DIR"]
+    } else {
+        &[]
+    };
     let extras: Vec<(&String, &String)> = existing
         .iter()
         .filter(|(key, _)| {
-            !managed
-                .iter()
-                .any(|(managed_key, _)| managed_key == &key.as_str())
+            !dropped.contains(&key.as_str())
+                && !managed
+                    .iter()
+                    .any(|(managed_key, _)| managed_key == &key.as_str())
         })
         .collect();
 
@@ -125,6 +160,29 @@ pub fn upsert_many(path: &Path, values: &[(&str, &str)]) -> io::Result<()> {
     write_atomic(path, &out)
 }
 
+/// Remove keys from a file, keeping comments, ordering and everything else.
+///
+/// Used when a key is renamed: the old name must not linger next to the new one,
+/// or a reader cannot tell which value is current.
+pub fn remove_keys(path: &Path, keys: &[&str]) -> io::Result<()> {
+    let Ok(existing) = fs::read_to_string(path) else {
+        return Ok(());
+    };
+    let mut out = String::with_capacity(existing.len());
+    for line in existing.lines() {
+        let name = line.split_once('=').map(|(name, _)| name.trim());
+        if name.is_some_and(|name| keys.contains(&name)) {
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    if out == existing {
+        return Ok(());
+    }
+    write_atomic(path, &out)
+}
+
 /// Replace a file without exposing a partially written version to a reader.
 pub fn write_atomic(path: &Path, contents: &str) -> io::Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
@@ -151,7 +209,7 @@ pub fn write_atomic(path: &Path, contents: &str) -> io::Result<()> {
     result
 }
 
-/// Owning uid/gid of the data directory, so containers can write to it.
+/// Owning uid/gid of a directory, so containers can write to it.
 pub fn owner(path: &Path) -> (u32, u32) {
     match fs::metadata(path) {
         Ok(meta) => (meta.uid(), meta.gid()),

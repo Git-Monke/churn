@@ -24,7 +24,8 @@ impl Section {
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Question {
-    DataDir,
+    DownloadDir,
+    MediaDir,
     Port(Port),
     WireguardArchive,
     WireguardConfig,
@@ -34,8 +35,9 @@ pub enum Question {
 
 impl Question {
     /// Every variant, used to prefill answers from a previous `.env`.
-    pub const ALL: [Question; 12] = [
-        Question::DataDir,
+    pub const ALL: [Question; 13] = [
+        Question::DownloadDir,
+        Question::MediaDir,
         Question::Port(Port::Jellyfin),
         Question::Port(Port::Sonarr),
         Question::Port(Port::Radarr),
@@ -62,14 +64,15 @@ impl Question {
             | Question::WireguardConfig
             | Question::WireguardPrivateKey
             | Question::WireguardAddresses => Section::Vpn,
-            Question::DataDir | Question::Port(_) => Section::Storage,
+            Question::DownloadDir | Question::MediaDir | Question::Port(_) => Section::Storage,
         }
     }
 
     /// Name of the key this answer is stored under in `.env`.
     pub fn env_key(self) -> &'static str {
         match self {
-            Question::DataDir => "DATA_DIR",
+            Question::DownloadDir => "DOWNLOAD_DIR",
+            Question::MediaDir => "MEDIA_DIR",
             Question::Port(port) => port.env_key(),
             Question::WireguardArchive => "WIREGUARD_ARCHIVE",
             Question::WireguardConfig => "WIREGUARD_CONFIG",
@@ -80,7 +83,8 @@ impl Question {
 
     pub fn label(self) -> &'static str {
         match self {
-            Question::DataDir => "Where should media and downloads live?",
+            Question::DownloadDir => "Where should in-progress downloads live?",
+            Question::MediaDir => "Where should downloaded media be stored?",
             Question::Port(port) => port.label(),
             Question::WireguardArchive => "Path to the Mullvad WireGuard config zip",
             Question::WireguardConfig => "WireGuard config file",
@@ -135,7 +139,10 @@ impl Question {
     /// error, which makes a mistyped path impossible to correct.
     pub fn ask(self, stored: Option<&str>) -> io::Result<String> {
         match self {
-            Question::DataDir => ask_directory(self.label(), stored.or(Some("/data")), "/data"),
+            Question::DownloadDir => ask_directory(self.label(), stored.or(Some("/data")), "/data"),
+            // The media default is derived from the download answer, which this
+            // call cannot see, so the caller passes it in as `stored`.
+            Question::MediaDir => ask_directory(self.label(), stored, "/data/media"),
             Question::Port(port) => {
                 let default = stored
                     .and_then(|value| ports::validate_port(value).ok())
@@ -310,6 +317,35 @@ fn complete_paths(input: &str, include_files: bool) -> Vec<String> {
         .into_iter()
         .map(|(_, _, suggestion)| suggestion)
         .collect()
+}
+
+/// Validate the storage pair as a whole.
+///
+/// `MEDIA_DIR` nested inside `DOWNLOAD_DIR` is the default layout and is fine:
+/// finished downloads land inside the directory Jellyfin indexes. The reverse
+/// is not: Jellyfin would index files that are still downloading (partials,
+/// temp files), so equal paths and a download directory inside the media
+/// directory are rejected. Both sides are normalized but never canonicalized,
+/// because the directories usually do not exist yet.
+pub fn validate_storage_paths(download: &str, media: &str) -> Result<(), String> {
+    let download = PathBuf::from(normalize_path(download));
+    let media = PathBuf::from(normalize_path(media));
+    if download == media {
+        return Err(format!(
+            "The download directory and the media directory cannot be the same path ({}).\n\
+             Keep downloads outside the library: Jellyfin would index files that are still downloading.",
+            download.display()
+        ));
+    }
+    if download.starts_with(&media) {
+        return Err(format!(
+            "The download directory ({}) cannot live inside the media directory ({}).\n\
+             Jellyfin would index files that are still downloading, and partial files would show up in your library.",
+            download.display(),
+            media.display()
+        ));
+    }
+    Ok(())
 }
 
 pub fn validate_data_dir(value: &str) -> Result<(), String> {

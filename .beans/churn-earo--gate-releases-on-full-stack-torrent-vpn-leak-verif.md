@@ -1,7 +1,7 @@
 ---
 # churn-earo
 title: Gate releases on full-stack torrent VPN leak verification
-status: todo
+status: completed
 type: feature
 priority: critical
 tags:
@@ -10,7 +10,7 @@ tags:
     - testing
     - vpn
 created_at: 2026-11-06T06:07:52Z
-updated_at: 2026-11-06T06:07:52Z
+updated_at: 2026-11-08T00:06:08Z
 ---
 
 # Why

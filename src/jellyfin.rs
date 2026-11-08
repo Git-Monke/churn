@@ -16,7 +16,8 @@ use crate::envfile;
 
 pub const API_KEY_ENV: &str = "JELLYFIN_API_KEY";
 const API_KEY_NAME: &str = "churn";
-/// Jellyfin runs with the same DATA_DIR mounted at /data as the other stacks.
+/// Jellyfin runs with the same download directory mounted at /data as the other
+/// stacks.
 const DATA_ROOT: &str = "/data";
 /// Media libraries must point at the media folders, never at DATA_ROOT: the
 /// download clients save under /data, so a root-level library indexes files

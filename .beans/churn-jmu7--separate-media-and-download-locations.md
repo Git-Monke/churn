@@ -1,13 +1,13 @@
 ---
 # churn-jmu7
 title: Separate media and download locations
-status: todo
+status: scrapped
 type: feature
 priority: normal
 tags:
     - storage
 created_at: 2026-11-05T04:05:39Z
-updated_at: 2026-11-05T04:05:39Z
+updated_at: 2026-11-08T01:16:06Z
 ---
 
 ## Problem
@@ -61,3 +61,9 @@ Two storage locations instead of one:
 ## Related
 
 - `Relocate data with a churn migrate command` — must handle both locations once this lands.
+
+
+
+---
+
+**Superseded** by epic `churn-mcj1` (Separate media and download locations, adopt an existing library in place) after a design session. The final design differs from this bean: no `DOWNLOAD_DIR`/`/downloads` third path — `DATA_DIR` stays the download root at `/data` and a new `MEDIA_DIR` mounts at `/data/media`. See `plans/media-locations.md` and the epic for the authoritative design.

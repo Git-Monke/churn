@@ -144,23 +144,36 @@ sudo ./target/release/churn --uninstall --yes        # no confirmation
 
 ## Migrating storage
 
-`churn migrate` moves an existing `DATA_DIR` to a new host path without
-reinstalling. It detects the current path from the `.env` files, validates the
-destination, stops the installed stacks, copies and verifies the data, rewrites
-both `.env` files and restarts the services. The old copy is kept by default so
-playback and imports can be checked before deleting it:
+`churn migrate` moves a storage directory to a new host path without
+reinstalling. It moves the media library (`MEDIA_DIR`) by default — the large
+tree you outgrow when adding a disk or a NAS — and leaves the download
+directory, and therefore every in-flight torrent, exactly where it is. Pass
+`--download` to move `DOWNLOAD_DIR` instead.
+
+It detects the current path from the `.env` files, validates the destination,
+stops the installed stacks, copies and verifies the data, rewrites both `.env`
+files and restarts the services. The old copy is kept by default so playback and
+imports can be checked before deleting it:
 
 ```bash
-sudo churn migrate --to /mnt/media --dry-run   # show the plan, change nothing
-sudo churn migrate --to /mnt/media             # copy, verify, restart; keep old
-sudo churn migrate --to /mnt/media --move      # delete the old copy afterwards
-sudo churn migrate                             # prompt for the destination
+sudo churn migrate --to /mnt/library --dry-run   # show the plan, change nothing
+sudo churn migrate --to /mnt/library             # move the library; keep the old copy
+sudo churn migrate --to /mnt/library --move      # delete the old copy afterwards
+sudo churn migrate --download --to /mnt/ssd      # move the download directory instead
+sudo churn migrate                               # prompt for the destination
 ```
 
 The path prompt uses the same autocomplete and validation as the installer.
-Only the host `DATA_DIR` changes: every container still mounts it at `/data`,
-so qBittorrent, Sonarr, Radarr and Jellyfin keep the same container paths and
-need no per-service reconfiguration.
+Only the selected host directory changes: every container still mounts the
+download directory at `/data` and the library at `/data/media`, so qBittorrent,
+Sonarr, Radarr and Jellyfin keep the same container paths and need no
+per-service reconfiguration. A download move carries a library nested inside the
+old download directory (`<DOWNLOAD_DIR>/media`) with it; a library on its own
+disk is left alone.
+
+Moving the library to a different filesystem from the download directory means
+Sonarr and Radarr can no longer hardlink imports, so each import becomes a copy
+followed by a delete. The plan says so before anything is stopped.
 
 Before copying, churn refuses a destination that is inside the current data
 directory (or vice versa), is not writable, is on a read-only filesystem, is on
@@ -177,8 +190,7 @@ been verified by size and symlink target. Each stack's previous `.env` is saved
 as `.env.churn-migrate.bak`; the command prints the exact `cp` commands to roll
 back. `--dry-run` stops nothing and writes nothing.
 
-Split media/download locations are a separate follow-up; once that lands,
-`migrate` will cover each location independently.
+Each location is migrated independently; nothing moves both at once.
 
 ## What it writes
 

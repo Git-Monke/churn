@@ -221,6 +221,158 @@ fn the_case_list_is_parseable_and_unique() {
     }
 }
 
+/// Disambiguates the throwaway env files of concurrent renders.
+static TEMP_ENV_SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Render with a throwaway `.env` built from the fixture.///
+/// Compose interpolation reads `--env-file` in preference to the process
+/// environment, so a case that wants a different storage layout has to supply
+/// its own file rather than just setting variables.
+fn render_with_storage(pairs: &[(&str, Option<&str>)]) -> Result<serde_json::Value, String> {
+    let fixture = std::fs::read_to_string(fixture_env()).map_err(|err| err.to_string())?;
+    let replaced: Vec<&str> = pairs.iter().map(|(key, _)| *key).collect();
+    let mut body = String::new();
+    for line in fixture.lines() {
+        let name = line.split_once('=').map(|(name, _)| name.trim());
+        if name.is_some_and(|name| replaced.contains(&name)) {
+            continue;
+        }
+        body.push_str(line);
+        body.push('\n');
+    }
+    for (key, value) in pairs {
+        if let Some(value) = value {
+            body.push_str(&format!("{key}={value}\n"));
+        }
+    }
+
+    let path = std::env::temp_dir().join(format!(
+        "churn-compose-gate-{}-{}.env",
+        std::process::id(),
+        // Unique per call: tests run in parallel and a shared name made one
+        // case render another case's storage paths.
+        TEMP_ENV_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    std::fs::write(&path, body).map_err(|err| err.to_string())?;
+
+    let mut command = Command::new("docker");
+    command.args(["compose", "--env-file"]).arg(&path).args([
+        "-f",
+        "docker-compose.yml",
+        "config",
+        "--format",
+        "json",
+    ]);
+    command.current_dir(torrent_dir());
+    let output = command.output().map_err(|err| err.to_string())?;
+    let _ = std::fs::remove_file(&path);
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr)
+            .trim_end()
+            .to_string());
+    }
+    serde_json::from_slice(&output.stdout)
+        .map_err(|err| format!("compose config is not JSON: {err}"))
+}
+
+/// Host paths of every bind mount in the rendered compose file.
+fn bind_sources(config: &serde_json::Value) -> Vec<String> {
+    let mut sources = Vec::new();
+    let services = config["services"]
+        .as_object()
+        .expect("compose config has services");
+    for service in services.values() {
+        let Some(volumes) = service["volumes"].as_array() else {
+            continue;
+        };
+        for volume in volumes {
+            if let Some(source) = volume["source"].as_str() {
+                sources.push(source.to_string());
+            }
+        }
+    }
+    sources
+}
+
+/// A pre-split install has `DATA_DIR` in `.env` and no `MEDIA_DIR`.
+///
+/// `churn update` materialises these compose files without rerunning the
+/// installer, so an install that never sees the new prompts must still render
+/// and mount exactly the paths it mounted before the split.
+#[test]
+fn a_legacy_env_with_only_data_dir_still_renders_the_old_layout() {
+    let config = render_with_storage(&[
+        ("DOWNLOAD_DIR", None),
+        ("MEDIA_DIR", None),
+        ("DATA_DIR", Some("/srv/churn")),
+    ])
+    .expect("a legacy .env must still render the shipped compose");
+    let sources = bind_sources(&config);
+    assert!(
+        sources.contains(&"/srv/churn".to_string()),
+        "the legacy DATA_DIR must still be mounted at /data: {sources:?}"
+    );
+    assert!(
+        sources.contains(&"/srv/churn/media".to_string()),
+        "MEDIA_DIR must fall back to <DATA_DIR>/media so the layout is unchanged: {sources:?}"
+    );
+}
+
+/// The three storage keys a compose render can read, with the value to use for
+/// each (`None` removes the key so a fallback case is actually exercised).
+type StorageEnv = [(&'static str, Option<&'static str>); 3];
+
+/// Every storage combination must mount the paths the installer would write.
+#[test]
+fn the_storage_mounts_follow_the_env_it_is_given() {
+    let cases: [(&str, StorageEnv, &str, &str); 3] = [
+        (
+            "legacy key only",
+            [
+                ("DOWNLOAD_DIR", None),
+                ("MEDIA_DIR", None),
+                ("DATA_DIR", Some("/legacy")),
+            ],
+            "/legacy",
+            "/legacy/media",
+        ),
+        (
+            "new download key only",
+            [
+                ("DOWNLOAD_DIR", Some("/mnt/ssd")),
+                ("MEDIA_DIR", None),
+                ("DATA_DIR", None),
+            ],
+            "/mnt/ssd",
+            "/mnt/ssd/media",
+        ),
+        (
+            "both new keys",
+            [
+                ("DOWNLOAD_DIR", Some("/mnt/ssd")),
+                ("MEDIA_DIR", Some("/mnt/hdd/library")),
+                ("DATA_DIR", None),
+            ],
+            "/mnt/ssd",
+            "/mnt/hdd/library",
+        ),
+    ];
+
+    for (label, pairs, download, media) in cases {
+        let config = render_with_storage(&pairs)
+            .unwrap_or_else(|err| panic!("{label}: compose refused to render: {err}"));
+        let sources = bind_sources(&config);
+        assert!(
+            sources.contains(&download.to_string()),
+            "{label}: expected {download} mounted at /data, found {sources:?}"
+        );
+        assert!(
+            sources.contains(&media.to_string()),
+            "{label}: expected {media} mounted at /data/media, found {sources:?}"
+        );
+    }
+}
+
 #[test]
 fn verify_vpn_reads_the_env_file_it_is_given() {
     // The same code path CI and scripts/vpn-gate.sh use, exercised end to end

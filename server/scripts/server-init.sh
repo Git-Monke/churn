@@ -1,9 +1,13 @@
 #!/bin/sh
 # Runs once after Sonarr and Radarr start.
 #
-# Creates the shared media folders under DATA_DIR and registers them as root
-# folders through the Sonarr/Radarr APIs. Everything is idempotent, so the
-# one-shot can be re-run after config changes or a partial install.
+# Creates the shared media folders under MEDIA_DIR (mounted at /data/media) and
+# registers them as root folders through the Sonarr/Radarr APIs. Everything is
+# idempotent, so the one-shot can be re-run after config changes or a partial
+# install.
+#
+# Existing directories are never modified: churn creates what is missing and
+# leaves ownership alone, so an adopted library keeps its own owner.
 set -eu
 
 media_root=${MEDIA_ROOT:-/data/media}
@@ -73,9 +77,24 @@ ensure_root_folder() {
     echo "registered $path as a root folder in $app"
 }
 
-mkdir -p "$media_root/tv" "$media_root/movies"
-chown "$puid:$pgid" "$media_root" "$media_root/tv" "$media_root/movies"
-echo "ensured $media_root/tv and $media_root/movies"
+# Create only what is missing. Never chown: the media tree may be an existing
+# library owned by a different user, and silently taking it over is worse than
+# a readable warning.
+for dir in "$media_root" "$media_root/tv" "$media_root/movies"; do
+    if [ -d "$dir" ]; then
+        continue
+    fi
+    if mkdir -p "$dir" 2>/dev/null; then
+        echo "created $dir"
+    else
+        echo "warning: could not create $dir" >&2
+    fi
+done
+
+if [ ! -w "$media_root" ]; then
+    echo "warning: $media_root is not writable by uid $(id -u) (PUID=$puid PGID=$pgid)." >&2
+    echo "warning: Sonarr/Radarr imports will fail until that is fixed; churn does not change ownership." >&2
+fi
 
 sonarr_key=$(wait_for_key Sonarr "$sonarr_config")
 radarr_key=$(wait_for_key Radarr "$radarr_config")
