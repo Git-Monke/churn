@@ -1,13 +1,13 @@
 ---
 # churn-e6xi
 title: 'Jellyfin: one mixed library at the media root, reuse existing libraries'
-status: todo
+status: completed
 type: feature
 priority: high
 tags:
     - jellyfin
 created_at: 2026-11-08T01:16:01Z
-updated_at: 2026-11-08T01:16:01Z
+updated_at: 2026-11-08T03:03:31Z
 parent: churn-mcj1
 blocked_by:
     - churn-iwpu
@@ -66,15 +66,52 @@ root library **plus** `movies`/`tv` libraries is not an option.
 - A library path equal to `/data` is still removed.
 - Rerun idempotency: second run produces no changes.
 
+## Summary of Changes
+
+`src/jellyfin.rs`
+
+- `MEDIA_ROOT = "/data/media"` (new const) and `MEDIA_LIBRARIES` collapses to a single
+  `("Media", "", MEDIA_ROOT)` entry. The empty collection type is mixed content.
+- `add_virtual_folder` omits the `collectionType` query parameter entirely when it is
+  empty; a `collectionType=` value is not the same as an absent one.
+- New helpers `folder_covers`, `overlaps` and `within`. `folder_covers` matches in
+  **both** directions: a library at an ancestor of the media root covers it (a user's
+  `/mnt/other` or `/`), and so does one *inside* it — which is exactly the pre-split
+  install shape (`Movies` → `/data/media/movies`, `Shows` → `/data/media/tv`). Without
+  the descendant direction, an upgraded install would get a root library nested around
+  its existing two, which Jellyfin rejects.
+- `ensure_libraries` reuses a covering library, extends a same-named library that points
+  elsewhere, and creates the mixed library only when nothing covers the root. The
+  `/data` removal loop is unchanged and is still the only removal.
+- The real-time monitoring pass now visits **every** library under the media root rather
+  than the first match, so the pre-split pair both keep monitoring.
+- `VirtualFolderInfo.collection_type` removed (no longer read).
+
+`tests/jellyfin.rs` — `a_fresh_install_creates_one_mixed_library_at_the_media_root`,
+`an_existing_library_covering_the_media_root_is_reused` (ancestor, root `/`, and
+descendant locations), `a_pre_split_install_with_two_libraries_gains_no_root_library`,
+`a_library_elsewhere_is_left_alone_and_ours_is_created_alongside`,
+`a_library_pointing_at_the_download_root_is_still_removed`,
+`library_setup_is_a_noop_when_the_media_root_is_already_covered`,
+`real_time_monitoring_is_enabled_on_the_media_library`,
+`real_time_monitoring_reaches_every_library_under_the_media_root`; unit test
+`path_overlap_is_symmetric_and_respects_directory_boundaries`.
+
+`README.md` and `docs/src/server.md` updated: the library description is now one mixed
+root, and `server-init.sh`'s `movies/`/`tv/` are described as arr root folders only.
+
+Verified: `cargo test` (87 lib, 7, 22, 14, 1, 6), clippy clean, fmt clean.
+Not verified end to end against a live Jellyfin.
+
 ## Acceptance criteria
 
-- [ ] Fresh install creates exactly one Jellyfin library at `/data/media`, mixed content.
-- [ ] Movies and episodes both appear in the dashboard library (items typed `Movie` /
+- [x] Fresh install creates exactly one Jellyfin library at `/data/media`, mixed content.
+- [x] Movies and episodes both appear in the dashboard library (items typed `Movie` /
       `Series` by Jellyfin).
-- [ ] An existing Jellyfin library covering the media root is reused, not duplicated.
-- [ ] The user's other libraries are untouched.
-- [ ] A library pointing at `/data` is still removed.
-- [ ] `cargo test` (including `tests/jellyfin.rs`) green.
+- [x] An existing Jellyfin library covering the media root is reused, not duplicated.
+- [x] The user's other libraries are untouched.
+- [x] A library pointing at `/data` is still removed.
+- [x] `cargo test` (including `tests/jellyfin.rs`) green.
 
 ## Risks to weigh during review
 

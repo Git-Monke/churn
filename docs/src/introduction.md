@@ -24,9 +24,12 @@ qBittorrent downloads releases, and FlareSolverr handles Cloudflare challenges.
 Every one of those containers shares gluetun's network namespace, so all of
 their traffic leaves through the Mullvad WireGuard tunnel.
 
-The stacks share a single `DATA_DIR`, mounted at `/data` everywhere. That keeps
-media paths consistent between the downloader, the automation apps, and
-Jellyfin.
+The stacks share two host paths, mounted at fixed container paths everywhere: a
+download directory (`DOWNLOAD_DIR`) at `/data` and a media directory
+(`MEDIA_DIR`) at `/data/media`. That keeps media paths consistent between the
+downloader, the automation apps, and Jellyfin, while letting downloads live on a
+fast disk and the library on a large one. The media directory can point at an
+existing library, which churn adopts in place.
 
 ## Updating
 

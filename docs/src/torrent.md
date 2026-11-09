@@ -120,8 +120,10 @@ bypass. churn derives `SERVER_COUNTRIES` from the selected Mullvad config
 filename (for example `us-atl-wg-001.conf` becomes `USA`). Set
 `SERVER_COUNTRIES` in `torrent/.env` to pin an exit country explicitly.
 
-The stack shares `${DATA_DIR}` with the server stack at `/data`, so completed
-downloads are visible to Sonarr, Radarr, and Jellyfin without path translation.
+The stack shares `${DOWNLOAD_DIR}` with the server stack at `/data`, and
+`${MEDIA_DIR}` at `/data/media`, so completed downloads are visible to Sonarr,
+Radarr, and Jellyfin without path translation. An older `.env` that still holds
+`DATA_DIR` is read as the download directory and rewritten on the next run.
 
 ## Useful commands
 

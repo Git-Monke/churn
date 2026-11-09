@@ -75,13 +75,30 @@ Then it asks which roles this machine should run and collects what it needs:
   its path. It opens the zip and reads `PrivateKey` and IPv4 `Address` from
   one of the `.conf` files. (Every file in one archive carries the same key and
   address, so churn just picks the first one instead of asking.)
-- **Storage path** — one absolute host path for media and downloads. It is
-  mounted at `/data` inside every container, so Jellyfin and qBittorrent agree
-  on paths regardless of which machine they run on.
+- **Download directory** (`DOWNLOAD_DIR`) — where qBittorrent writes in-progress
+  downloads and seeds from. Recommended on an SSD or fast local disk: files are
+  written and re-read while seeding, so a slow drive stutters playback. Defaults
+  to `/data`.
+- **Media directory** (`MEDIA_DIR`) — the library Jellyfin indexes and streams
+  from. Recommended on a large hard drive or a NAS: space matters more than
+  speed. Defaults to `<DOWNLOAD_DIR>/media`, which keeps the layout of an
+  install from before the split.
+
+Downloads are asked for first, because the media default derives from that
+answer. The two paths are then checked together: the download directory may not
+be the media directory or live inside it, because Jellyfin would index files
+that are still downloading and partial files would appear in the library.
+
+Point `MEDIA_DIR` at an existing library to adopt it in place — no copy and no
+folder restructuring. Jellyfin types each item itself, so one mixed library at
+the media root covers both films and shows; `movies/` and `tv/` exist only as
+Sonarr/Radarr root folders for new downloads.
 
 Answers are shared between installers, so selecting both roles asks for the
-storage path once. Reruns prefill previous answers and reuse them if you press
-Enter. Path prompts autocomplete as you type: use ↑/↓ to highlight a suggestion,
+storage paths once. Reruns prefill previous answers and reuse them if you press
+Enter. An older `.env` that still holds `DATA_DIR` is read as the download
+directory and rewritten with `DOWNLOAD_DIR` on the next run, so the existing
+location is kept. Path prompts autocomplete as you type: use ↑/↓ to highlight a suggestion,
 then Tab or Enter to accept it.
 
 Once the answers are written, churn starts each selected stack with
@@ -130,8 +147,8 @@ server/config      server/cache      server/.env
 torrent/config     torrent/.env
 ```
 
-The media/download directory (`DATA_DIR`), Docker images, and the committed
-compose files and scripts are left untouched. If Docker Compose fails to remove
+The download and media directories (`DOWNLOAD_DIR`, `MEDIA_DIR`), Docker images,
+and the committed compose files and scripts are left untouched. If Docker Compose fails to remove
 a stack, churn stops before deleting any config so the containers and their
 credentials stay consistent.
 
@@ -198,7 +215,8 @@ Each location is migrated independently; nothing moves both at once.
 `docker compose up -d` in each selected stack directory.
 
 ```
-server/.env      DATA_DIR, PUID, PGID, TZ, host ports, JELLYFIN_API_KEY (after setup)
+server/.env      DOWNLOAD_DIR, MEDIA_DIR, PUID, PGID, TZ, host ports,
+                 JELLYFIN_API_KEY (after setup)
 torrent/.env     the above + HOST_IP + Mullvad credentials (and the archive path)
 ```
 
@@ -243,9 +261,11 @@ develop; set `PORT` to move it, and the Vite proxy follows.
 
 After the server stack starts, churn completes Jellyfin's first-run setup,
 creates an API key named `churn`, and writes it to `server/.env` as
-`JELLYFIN_API_KEY`. It also creates or repairs the `Movies` and `Shows`
-libraries at `/data/media/movies` and `/data/media/tv`, and removes any `/data`
-library path so Jellyfin does not index qBittorrent's in-progress downloads. It
+`JELLYFIN_API_KEY`. It also makes sure one mixed library covers `/data/media`
+(Jellyfin types each item itself, so movies and TV can share a library root),
+reusing a library that already covers it — or sits inside it, as an install
+from before the split does — and removes any `/data` library path so Jellyfin
+does not index qBittorrent's in-progress downloads. It
 also adds the private LAN ranges and Tailscale's `100.64.0.0/10` range to
 Jellyfin's LAN networks, so tailnet clients can stream directly from Jellyfin
 while remote access stays disabled. The installer asks for a Jellyfin admin
@@ -367,12 +387,12 @@ The wiring is automatic on first `docker compose up`:
    as `FIREWALL_OUTBOUND_SUBNETS`, so the VPN kill switch still blocks
    everything else.
 
-Because every container mounts the same `${DATA_DIR}` at `/data`, download
-paths line up without translation. Direct release grabs are saved into
-`/data/media/tv` and `/data/media/movies`; older arr-managed downloads still use
-`/data` (incomplete files under `/data/incomplete`). Media lives in
-`/data/media`, which is what Jellyfin's libraries point at; never add `/data`
-itself as a Jellyfin library.
+Because every container mounts the download directory at `/data` and the media
+directory at `/data/media`, download paths line up without translation. Direct
+release grabs are saved into `/data/media/tv` and `/data/media/movies`; older
+arr-managed downloads still use `/data` (incomplete files under `/data/incomplete`).
+Media lives in `/data/media`, which is what Jellyfin's library points at; never
+add `/data` itself as a Jellyfin library.
 
 Re-run the one-shots by recreating the stack (a plain `docker compose up -d`
 leaves already-exited one-shots alone):
@@ -500,10 +520,10 @@ checking the release notes.
 
 They are wired up automatically by `prowlarr-init`. The `server` stack also
 runs `server-init`, which creates `/data/media/tv` and `/data/media/movies`
-inside `DATA_DIR`, sets their ownership to `PUID`/`PGID`, and registers them as
-the Sonarr/Radarr root folders. It waits for both APIs and is idempotent. Add
-media under those directories, and point Jellyfin's TV and movie libraries at
-the same container paths (`/data/media/tv`, `/data/media/movies`).
+inside the media directory, sets their ownership to `PUID`/`PGID`, and
+registers them as the Sonarr/Radarr root folders. It waits for both APIs and is
+idempotent. Add media under those directories; Jellyfin indexes the whole media
+root as one mixed library and works out what each item is.
 
 `prowlarr-init` reads the Sonarr/Radarr API keys from `../server/config`, so it
 expects both stacks on **one machine**. The installer starts `server` before
@@ -600,7 +620,8 @@ The full gate has four stages:
    a public `HOST_IP`, a LAN-exposed status port, ...) and requires every one to
    be rejected for the expected reason.
 2. **live** — starts the whole pinned stack in the isolated Compose project
-   `churn-vpn-gate` on ports 18080/19696/18098 with a throwaway `DATA_DIR`, then
+   `churn-vpn-gate` on ports 18080/19696/18098 with a throwaway `DOWNLOAD_DIR`
+   and `MEDIA_DIR`, then
    requires `vpn-check` to exit 0 with `PASS: torrent egress is confined to the
    VPN`, `vpn-status` to report `secure: true` with every check, and a probe
    inside the shared namespace to observe a Mullvad exit. Service coverage is

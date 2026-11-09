@@ -19,13 +19,18 @@ const API_KEY_NAME: &str = "churn";
 /// Jellyfin runs with the same download directory mounted at /data as the other
 /// stacks.
 const DATA_ROOT: &str = "/data";
-/// Media libraries must point at the media folders, never at DATA_ROOT: the
-/// download clients save under /data, so a root-level library indexes files
-/// that are still downloading.
-const MEDIA_LIBRARIES: &[(&str, &str, &str)] = &[
-    ("Movies", "movies", "/data/media/movies"),
-    ("Shows", "tvshows", "/data/media/tv"),
-];
+/// The media directory is mounted at `/data/media` in every service, so the
+/// host path in `MEDIA_DIR` never reaches Jellyfin.
+const MEDIA_ROOT: &str = "/data/media";
+/// One mixed library at the media root, rather than one library per media
+/// folder. Points at the root so an adopted library is indexed where it lies,
+/// and so `movies/` and `tv/` need not exist for the library to be valid.
+///
+/// The empty collection type is what makes it mixed: Jellyfin inspects each
+/// item and decides for itself whether it is a movie or a series. It also means
+/// `add_virtual_folder` must omit the `collectionType` parameter entirely — an
+/// empty value is not the same as an absent one.
+const MEDIA_LIBRARIES: &[(&str, &str, &str)] = &[("Media", "", MEDIA_ROOT)];
 /// Jellyfin replaces its default "all private networks are local" rule as soon
 /// as `LocalNetworkSubnets` is non-empty. Keep the private ranges explicitly so
 /// LAN, loopback and Docker clients still work, then add the reserved Tailscale
@@ -98,8 +103,6 @@ struct VirtualFolderInfo {
     name: Option<String>,
     #[serde(default)]
     locations: Option<Vec<String>>,
-    #[serde(default)]
-    collection_type: Option<String>,
     #[serde(default)]
     item_id: Option<String>,
     /// Jellyfin's full `LibraryOptions`. Kept as raw JSON because the update
@@ -343,41 +346,38 @@ impl Jellyfin {
             .ok_or_else(|| io::Error::other("Jellyfin created an API key but did not return it"))
     }
 
-    /// Create the movie and TV libraries at the media root and remove any
-    /// library path that points at DATA_ROOT itself. Download clients save
-    /// under DATA_ROOT, so a root-level library makes Jellyfin index files that
-    /// are still downloading.
+    /// Make sure one library covers the media root, and remove any library
+    /// path that points at DATA_ROOT itself.
+    ///
+    /// Download clients save under DATA_ROOT, so a root-level library makes
+    /// Jellyfin index files that are still downloading. That is the only
+    /// removal this ever performs.
     pub fn ensure_libraries(&self, api_key: &str) -> io::Result<Vec<String>> {
         let folders = self.list_virtual_folders(api_key)?;
         let mut changes = Vec::new();
 
         for (name, collection_type, path) in MEDIA_LIBRARIES {
-            let existing = folders.iter().find(|folder| {
-                folder
-                    .collection_type
-                    .as_deref()
-                    .is_some_and(|value| value.eq_ignore_ascii_case(collection_type))
-                    || folder
-                        .name
-                        .as_deref()
-                        .is_some_and(|value| value.eq_ignore_ascii_case(name))
-            });
+            let aimed = folders
+                .iter()
+                .find(|folder| folder_covers(folder, path))
+                .or_else(|| folders.iter().find(|folder| folder_named(folder, name)));
 
-            match existing {
+            match aimed {
+                // A library that already covers the media root, or an ancestor
+                // of it, is left exactly as it is. Adding the root to it would
+                // create the nested-path overlap Jellyfin rejects; creating a
+                // second library there would index everything twice.
+                Some(folder) if folder_covers(folder, path) => {}
+                // A library with our name but elsewhere is the user's: add the
+                // media root to it rather than leaving the root uncovered.
+                Some(folder) => {
+                    let folder_name = folder.name.as_deref().unwrap_or(name);
+                    self.add_media_path(api_key, folder_name, path)?;
+                    changes.push(format!("added {path} to Jellyfin library {folder_name}"));
+                }
                 None => {
                     self.add_virtual_folder(api_key, name, collection_type, path)?;
                     changes.push(format!("created Jellyfin library {name} at {path}"));
-                }
-                Some(folder) => {
-                    let folder_name = folder.name.as_deref().unwrap_or(name);
-                    let locations = folder.locations.as_deref().unwrap_or_default();
-                    if !locations
-                        .iter()
-                        .any(|location| normalize_path(location) == normalize_path(path))
-                    {
-                        self.add_media_path(api_key, folder_name, path)?;
-                        changes.push(format!("added {path} to Jellyfin library {folder_name}"));
-                    }
                 }
             }
         }
@@ -402,24 +402,20 @@ impl Jellyfin {
 
         // Re-read the folders so libraries just created above are included.
         let folders = self.list_virtual_folders(api_key)?;
-        for (name, collection_type, _) in MEDIA_LIBRARIES {
-            let Some(folder) = folders.iter().find(|folder| {
-                folder
-                    .collection_type
-                    .as_deref()
-                    .is_some_and(|value| value.eq_ignore_ascii_case(collection_type))
-                    || folder
-                        .name
-                        .as_deref()
-                        .is_some_and(|value| value.eq_ignore_ascii_case(name))
-            }) else {
-                continue;
-            };
-            if self.enable_realtime_monitoring(api_key, folder)? {
-                changes.push(format!(
-                    "enabled real-time monitoring for Jellyfin library {}",
-                    folder.name.as_deref().unwrap_or(name)
-                ));
+        for (name, _, path) in MEDIA_LIBRARIES {
+            // Every library under the media directory gets monitoring, not just
+            // one: an install from before the split keeps separate typed
+            // libraries, and each is still being imported into.
+            for folder in folders
+                .iter()
+                .filter(|folder| folder_covers(folder, path) || folder_named(folder, name))
+            {
+                if self.enable_realtime_monitoring(api_key, folder)? {
+                    changes.push(format!(
+                        "enabled real-time monitoring for Jellyfin library {}",
+                        folder.name.as_deref().unwrap_or(name)
+                    ));
+                }
             }
         }
 
@@ -539,10 +535,16 @@ impl Jellyfin {
         collection_type: &str,
         path: &str,
     ) -> io::Result<()> {
+        // An empty collection type must be absent, not empty: Jellyfin reads a
+        // `collectionType=` value as a request for that library type and
+        // rejects the empty string. Omitting it is how a mixed library is made.
+        let mut request =
+            ureq::post(&format!("{}/Library/VirtualFolders", self.base_url)).query("name", name);
+        if !collection_type.is_empty() {
+            request = request.query("collectionType", collection_type);
+        }
         let response = self.send_json(
-            ureq::post(&format!("{}/Library/VirtualFolders", self.base_url))
-                .query("name", name)
-                .query("collectionType", collection_type)
+            request
                 .query("paths", path)
                 .query("refreshLibrary", "false")
                 .set("X-Emby-Token", api_key),
@@ -619,6 +621,48 @@ impl Jellyfin {
             ))),
         }
     }
+}
+
+/// Whether the library is called `name`, which is how a library that exists but
+/// points somewhere else is recognised as ours to extend.
+fn folder_named(folder: &VirtualFolderInfo, name: &str) -> bool {
+    folder
+        .name
+        .as_deref()
+        .is_some_and(|value| value.eq_ignore_ascii_case(name))
+}
+
+/// Whether the media root is already accounted for by this library.
+///
+/// Both directions count. An ancestor covers it — a user with a library at `/`
+/// or at `/data/media` already has the media root indexed. A descendant covers
+/// it too: an install made before the split has separate `Movies` and `Shows`
+/// libraries under `/data/media`, and creating a library at the root would nest
+/// one inside the other, which Jellyfin does not support. Either way the root
+/// needs no library of its own.
+fn folder_covers(folder: &VirtualFolderInfo, path: &str) -> bool {
+    let target = normalize_path(path);
+    folder
+        .locations
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .any(|location| overlaps(location, target))
+}
+
+/// Whether either path is the other, an ancestor of it, or a descendant of it.
+fn overlaps(left: &str, right: &str) -> bool {
+    let left = normalize_path(left);
+    let right = normalize_path(right);
+    within(left, right) || within(right, left)
+}
+
+/// Whether `prefix` is `path` itself or an ancestor directory of it.
+fn within(prefix: &str, path: &str) -> bool {
+    if prefix == "/" {
+        return true;
+    }
+    path == prefix || path.starts_with(&format!("{prefix}/"))
 }
 
 fn normalize_path(path: &str) -> &str {
@@ -714,6 +758,20 @@ mod tests {
     fn passwords_have_a_minimum_length() {
         assert!(validate_password("12345678").is_ok());
         assert!(validate_password("short").is_err());
+    }
+
+    #[test]
+    fn path_overlap_is_symmetric_and_respects_directory_boundaries() {
+        // Equal paths, ancestors and descendants all overlap.
+        assert!(overlaps("/data/media", "/data/media"));
+        assert!(overlaps("/data", "/data/media"));
+        assert!(overlaps("/data/media/movies", "/data/media"));
+        assert!(overlaps("/", "/data/media"));
+        // A sibling with a shared prefix is a different directory.
+        assert!(!overlaps("/data/media", "/data/media2"));
+        assert!(!overlaps("/data/media", "/data/media-tv"));
+        // Trailing slashes are not significant.
+        assert!(overlaps("/data/media/", "/data/media/movies"));
     }
 
     #[test]

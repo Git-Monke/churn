@@ -339,39 +339,20 @@ fn fallback_finds_key_after_a_204_create_response() {
 }
 
 #[test]
-fn libraries_are_created_at_the_media_root_and_data_root_is_removed() {
-    let added_movie_path = Arc::new(AtomicBool::new(false));
-    let created_shows = Arc::new(AtomicBool::new(false));
-    let removed_data_root = Arc::new(AtomicBool::new(false));
+fn a_fresh_install_creates_one_mixed_library_at_the_media_root() {
+    let created = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let created_for_handler = Arc::clone(&created);
     let refreshed = Arc::new(AtomicBool::new(false));
-
-    let added_movie_path_for_handler = Arc::clone(&added_movie_path);
-    let created_shows_for_handler = Arc::clone(&created_shows);
-    let removed_data_root_for_handler = Arc::clone(&removed_data_root);
     let refreshed_for_handler = Arc::clone(&refreshed);
 
     let server = mock_server(
         move |request| match (request.method.as_str(), request.path()) {
-            ("GET", "/Library/VirtualFolders") => (
-                200,
-                r#"[{"Name":"Movies","Locations":["/data"],"CollectionType":"movies"}]"#.into(),
-            ),
-            ("POST", "/Library/VirtualFolders/Paths") => {
-                assert!(request.body.contains("/data/media/movies"));
-                added_movie_path_for_handler.store(true, Ordering::Relaxed);
-                (204, String::new())
-            }
+            ("GET", "/Library/VirtualFolders") => (200, "[]".into()),
             ("POST", "/Library/VirtualFolders") => {
-                assert!(request.target.contains("name=Shows"));
-                assert!(request.target.contains("collectionType=tvshows"));
-                assert!(request.target.contains("paths=%2Fdata%2Fmedia%2Ftv"));
-                created_shows_for_handler.store(true, Ordering::Relaxed);
-                (204, String::new())
-            }
-            ("DELETE", "/Library/VirtualFolders/Paths") => {
-                assert!(request.target.contains("name=Movies"));
-                assert!(request.target.contains("path=%2Fdata"));
-                removed_data_root_for_handler.store(true, Ordering::Relaxed);
+                created_for_handler
+                    .lock()
+                    .unwrap()
+                    .push(request.target.clone());
                 (204, String::new())
             }
             ("POST", "/Library/Refresh") => {
@@ -387,33 +368,178 @@ fn libraries_are_created_at_the_media_root_and_data_root_is_removed() {
         .ensure_libraries("api-key")
         .expect("library setup should succeed");
 
-    assert!(added_movie_path.load(Ordering::Relaxed));
-    assert!(created_shows.load(Ordering::Relaxed));
-    assert!(removed_data_root.load(Ordering::Relaxed));
-    assert!(refreshed.load(Ordering::Relaxed));
-    assert_eq!(changes.len(), 3);
+    let created = created.lock().unwrap();
+    assert_eq!(created.len(), 1, "exactly one library, at the media root");
+    assert!(created[0].contains("name=Media"));
+    assert!(created[0].contains("paths=%2Fdata%2Fmedia"));
     assert!(
-        changes
-            .iter()
-            .any(|change| change.contains("created Jellyfin library Shows"))
+        !created[0].contains("collectionType"),
+        "a mixed library omits the parameter entirely; an empty value is not the same"
     );
+    assert!(refreshed.load(Ordering::Relaxed));
+    assert_eq!(changes.len(), 1);
+    assert!(changes[0].contains("created Jellyfin library Media at /data/media"));
+}
+
+#[test]
+fn an_existing_library_covering_the_media_root_is_reused() {
+    // A user library that already includes the media root, an ancestor of it,
+    // or the root filesystem itself must be left completely alone: adding the
+    // root again would nest one library inside another.
+    for locations in [
+        r#"["/data/media"]"#,
+        r#"["/"]"#,
+        r#"["/mnt/other","/data/media"]"#,
+        // An install from before the split keeps one library per media folder.
+        // A root library around them would nest, which Jellyfin rejects.
+        r#"["/data/media/movies"]"#,
+        r#"["/data/media/tv"]"#,
+    ] {
+        let touched = Arc::new(AtomicBool::new(false));
+        let touched_for_handler = Arc::clone(&touched);
+        let body = format!(r#"[{{"Name":"My library","Locations":{locations}}}]"#);
+
+        let server = mock_server(
+            move |request| match (request.method.as_str(), request.path()) {
+                ("GET", "/Library/VirtualFolders") => (200, body.clone()),
+                ("POST", _) | ("DELETE", _) => {
+                    touched_for_handler.store(true, Ordering::Relaxed);
+                    (204, String::new())
+                }
+                _ => (404, "{}".into()),
+            },
+        );
+
+        let client = Jellyfin::new(&server.base_url, Duration::from_secs(2));
+        let changes = client
+            .ensure_libraries("api-key")
+            .expect("library check should succeed");
+
+        assert!(
+            !touched.load(Ordering::Relaxed),
+            "a library covering {locations} must not be changed"
+        );
+        assert!(changes.is_empty(), "nothing to report for {locations}");
+    }
+}
+
+/// The upgrade path: a pre-split install has two typed libraries under the
+/// media root. Creating a mixed library at the root would overlap both.
+#[test]
+fn a_pre_split_install_with_two_libraries_gains_no_root_library() {
+    let touched = Arc::new(AtomicBool::new(false));
+    let touched_for_handler = Arc::clone(&touched);
+
+    let server = mock_server(
+        move |request| match (request.method.as_str(), request.path()) {
+            ("GET", "/Library/VirtualFolders") => (
+                200,
+                r#"[
+                {"Name":"Movies","Locations":["/data/media/movies"],"CollectionType":"movies"},
+                {"Name":"Shows","Locations":["/data/media/tv"],"CollectionType":"tvshows"}
+            ]"#
+                .into(),
+            ),
+            ("POST", _) | ("DELETE", _) => {
+                touched_for_handler.store(true, Ordering::Relaxed);
+                (204, String::new())
+            }
+            _ => (404, "{}".into()),
+        },
+    );
+
+    let client = Jellyfin::new(&server.base_url, Duration::from_secs(2));
+    let changes = client
+        .ensure_libraries("api-key")
+        .expect("library setup should succeed");
+
+    assert!(
+        !touched.load(Ordering::Relaxed),
+        "a root library must not be created around the existing typed ones"
+    );
+    assert!(changes.is_empty());
+}
+
+#[test]
+fn a_library_elsewhere_is_left_alone_and_ours_is_created_alongside() {
+    let created = Arc::new(AtomicBool::new(false));
+    let created_for_handler = Arc::clone(&created);
+    let deleted = Arc::new(AtomicBool::new(false));
+    let deleted_for_handler = Arc::clone(&deleted);
+
+    let server = mock_server(
+        move |request| match (request.method.as_str(), request.path()) {
+            ("GET", "/Library/VirtualFolders") => (
+                200,
+                r#"[{"Name":"Films","Locations":["/mnt/other"]}]"#.into(),
+            ),
+            ("POST", "/Library/VirtualFolders") => {
+                created_for_handler.store(true, Ordering::Relaxed);
+                (204, String::new())
+            }
+            ("DELETE", _) => {
+                deleted_for_handler.store(true, Ordering::Relaxed);
+                (204, String::new())
+            }
+            ("POST", "/Library/Refresh") => (204, String::new()),
+            _ => (404, "{}".into()),
+        },
+    );
+
+    let client = Jellyfin::new(&server.base_url, Duration::from_secs(2));
+    let changes = client
+        .ensure_libraries("api-key")
+        .expect("library setup should succeed");
+
+    assert!(created.load(Ordering::Relaxed));
+    assert!(
+        !deleted.load(Ordering::Relaxed),
+        "the user's library is kept"
+    );
+    assert_eq!(changes.len(), 1);
+}
+
+#[test]
+fn a_library_pointing_at_the_download_root_is_still_removed() {
+    let removed = Arc::new(AtomicBool::new(false));
+    let removed_for_handler = Arc::clone(&removed);
+
+    let server = mock_server(
+        move |request| match (request.method.as_str(), request.path()) {
+            ("GET", "/Library/VirtualFolders") => (
+                200,
+                r#"[{"Name":"Media","Locations":["/data"],"ItemId":"media-id"}]"#.into(),
+            ),
+            ("DELETE", "/Library/VirtualFolders/Paths") => {
+                assert!(request.target.contains("name=Media"));
+                assert!(request.target.contains("path=%2Fdata"));
+                removed_for_handler.store(true, Ordering::Relaxed);
+                (204, String::new())
+            }
+            ("POST", "/Library/Refresh") => (204, String::new()),
+            _ => (404, "{}".into()),
+        },
+    );
+
+    let client = Jellyfin::new(&server.base_url, Duration::from_secs(2));
+    let changes = client
+        .ensure_libraries("api-key")
+        .expect("library setup should succeed");
+
+    assert!(removed.load(Ordering::Relaxed));
     assert!(
         changes
             .iter()
-            .any(|change| change.contains("removed /data from Jellyfin library Movies"))
+            .any(|change| change.contains("removed /data from Jellyfin library Media"))
     );
 }
 
 #[test]
-fn library_setup_is_a_noop_when_media_paths_are_already_correct() {
+fn library_setup_is_a_noop_when_the_media_root_is_already_covered() {
     let server = mock_server(|request| match (request.method.as_str(), request.path()) {
         ("GET", "/Library/VirtualFolders") => (
             200,
-            r#"[
-                {"Name":"Movies","Locations":["/data/media/movies"],"CollectionType":"movies"},
-                {"Name":"Shows","Locations":["/data/media/tv"],"CollectionType":"tvshows"}
-            ]"#
-            .into(),
+            r#"[{"Name":"Media","Locations":["/data/media"],"ItemId":"media-id"}]"#.into(),
         ),
         _ => (404, "{}".into()),
     });
@@ -428,7 +554,7 @@ fn library_setup_is_a_noop_when_media_paths_are_already_correct() {
 }
 
 #[test]
-fn real_time_monitoring_is_enabled_on_the_media_libraries() {
+fn real_time_monitoring_is_enabled_on_the_media_library() {
     let updates = Arc::new(std::sync::Mutex::new(Vec::new()));
     let updates_for_handler = Arc::clone(&updates);
 
@@ -438,18 +564,10 @@ fn real_time_monitoring_is_enabled_on_the_media_libraries() {
                 200,
                 r#"[
                 {
-                    "Name":"Movies",
-                    "Locations":["/data/media/movies"],
-                    "CollectionType":"movies",
-                    "ItemId":"movies-id",
+                    "Name":"Media",
+                    "Locations":["/data/media"],
+                    "ItemId":"media-id",
                     "LibraryOptions":{"EnableRealtimeMonitor":false,"SaveLocalMetadata":false}
-                },
-                {
-                    "Name":"Shows",
-                    "Locations":["/data/media/tv"],
-                    "CollectionType":"tvshows",
-                    "ItemId":"shows-id",
-                    "LibraryOptions":{"EnableRealtimeMonitor":true,"SaveLocalMetadata":true}
                 }
             ]"#
                 .into(),
@@ -471,13 +589,9 @@ fn real_time_monitoring_is_enabled_on_the_media_libraries() {
         .expect("library setup should succeed");
 
     let updates = updates.lock().unwrap();
-    assert_eq!(
-        updates.len(),
-        1,
-        "only the library without monitoring is updated"
-    );
+    assert_eq!(updates.len(), 1);
     let body: serde_json::Value = serde_json::from_str(&updates[0]).expect("json body");
-    assert_eq!(body["Id"], "movies-id");
+    assert_eq!(body["Id"], "media-id");
     assert_eq!(body["LibraryOptions"]["EnableRealtimeMonitor"], true);
     assert_eq!(
         body["LibraryOptions"]["SaveLocalMetadata"], false,
@@ -487,8 +601,63 @@ fn real_time_monitoring_is_enabled_on_the_media_libraries() {
     assert!(
         changes
             .iter()
-            .any(|change| change.contains("real-time monitoring") && change.contains("Movies"))
+            .any(|change| change.contains("real-time monitoring") && change.contains("Media"))
     );
+}
+
+/// Before the split there were two libraries, and both still need monitoring.
+#[test]
+fn real_time_monitoring_reaches_every_library_under_the_media_root() {
+    let updates = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let updates_for_handler = Arc::clone(&updates);
+
+    let server = mock_server(
+        move |request| match (request.method.as_str(), request.path()) {
+            ("GET", "/Library/VirtualFolders") => (
+                200,
+                r#"[
+                {
+                    "Name":"Movies",
+                    "Locations":["/data/media/movies"],
+                    "ItemId":"movies-id",
+                    "LibraryOptions":{"EnableRealtimeMonitor":false}
+                },
+                {
+                    "Name":"Shows",
+                    "Locations":["/data/media/tv"],
+                    "ItemId":"shows-id",
+                    "LibraryOptions":{"EnableRealtimeMonitor":false}
+                }
+            ]"#
+                .into(),
+            ),
+            ("POST", "/Library/VirtualFolders/LibraryOptions") => {
+                updates_for_handler
+                    .lock()
+                    .unwrap()
+                    .push(request.body.clone());
+                (204, String::new())
+            }
+            _ => (404, "{}".into()),
+        },
+    );
+
+    let client = Jellyfin::new(&server.base_url, Duration::from_secs(2));
+    client
+        .ensure_libraries("api-key")
+        .expect("library setup should succeed");
+
+    let updates = updates.lock().unwrap();
+    assert_eq!(updates.len(), 2, "both libraries are imported into");
+    let ids: Vec<String> = updates
+        .iter()
+        .map(|body| {
+            let value: serde_json::Value = serde_json::from_str(body).expect("json body");
+            value["Id"].as_str().unwrap().to_string()
+        })
+        .collect();
+    assert!(ids.contains(&"movies-id".to_string()));
+    assert!(ids.contains(&"shows-id".to_string()));
 }
 
 #[test]

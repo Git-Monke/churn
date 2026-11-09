@@ -7,7 +7,7 @@ priority: normal
 tags:
     - docs
 created_at: 2026-11-08T01:16:03Z
-updated_at: 2026-11-08T01:16:03Z
+updated_at: 2026-11-09T01:26:01Z
 parent: churn-mcj1
 blocked_by:
     - churn-17s1
@@ -67,4 +67,15 @@ beans, and refresh the OpenWiki pages. Purely docs/bean bookkeeping — no behav
 - [ ] `churn-eeni` notes the `MEDIA_DIR` follow-up.
 - [ ] OpenWiki pages refreshed via the documented process (or a recorded reason why a run
       was not needed).
-- [ ] The docs build succeeds (mdBook: `mdbook build docs` or the repo's documented command).
+- [x] The docs build succeeds (mdBook: `mdbook build docs` or the repo's documented command).
+
+## Progress
+
+Docs sweep done: README.md, docs/src/server.md, docs/src/introduction.md and
+docs/src/torrent.md now describe `DOWNLOAD_DIR`/`MEDIA_DIR`, the prompt order,
+the SSD/HDD recommendation, the nesting rule, adopt-in-place, and the legacy
+`DATA_DIR` migration. `mdbook build docs` succeeds.
+
+Deferred (bean stays open): superseded-bean pointers, the `churn-eeni` note, and
+the OpenWiki refresh. `docs/src/web-ui.md:240` needed no change — `/data/media`
+is still the container path.
