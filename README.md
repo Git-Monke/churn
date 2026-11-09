@@ -1,6 +1,8 @@
-# churn
+<p align="center">
+  <img src="assets/churn-logo.svg" alt="Churn — for those who hate streaming apps, and love open source" width="560">
+</p>
 
-<img src="assets/churn-logo.svg" alt="churn" width="220">
+# churn
 
 A self-hosted media stack that installs itself. One installer sets up the whole
 pipeline — search for media, find a torrent, download it, store it, watch it —
