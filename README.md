@@ -2,8 +2,6 @@
   <img src="assets/churn-logo.svg" alt="Churn — for those who hate streaming apps, and love open source" width="560">
 </p>
 
-# churn
-
 A self-hosted media stack that installs itself. One installer sets up the whole
 pipeline — search for media, find a torrent, download it, store it, watch it —
 and one interface to drive it all. No torrent stack headaches, no security
@@ -11,15 +9,10 @@ surprises.
 
 Two roles, one machine each (or both on the same box):
 
-| stack     | what it runs                                  | ports |
-| --------- | --------------------------------------------- | ----- |
-| `server`  | Jellyfin + Sonarr + Radarr + dashboard | 8096, 8989, 7878, 4000 (configurable) |
-| `torrent` | qBittorrent + Prowlarr + FlareSolverr tunnelled through Mullvad WireGuard | 8080, 9696, 8098 (localhost; configurable) |
-
-Every published host port defaults to its conventional value. A free default is
-used without asking; if it is already taken, churn suggests the nearest free
-port and asks which one to use. The chosen values live in each stack's `.env`,
-and reruns reuse them.
+| stack     | what it runs                                       | what it does |
+| --------- | -------------------------------------------------- | ------------ |
+| `server`  | Jellyfin + Sonarr + Radarr + dashboard | Manages your media, provides high-quality search results when looking for new movies and shows, and displays it all from one interface. |
+| `torrent` | qBittorrent + Prowlarr + FlareSolverr | Runs a full torrent and indexer stack inside a VPN-jailed container. VPN security is tested four times: during release, on download, before startup and during runtime. |
 
 ## Features
 
