@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 60">
+  <style>
+    .churn-text {
+      font-family: "Space Grotesk Variable", ui-sans-serif, system-serif, sans-serif;
+      font-weight: 600;
+      font-size: 36px;
+      letter-spacing: -0.02em;
+    }
+    .churn-accent {
+      color: #a78bfa;
+    }
+    .churn-primary {
+      color: #f472b6;
+    }
+  </style>
+  <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" class="churn-text">
+    <tspan x="50%" dy="-8" class="churn-primary">ch</tspan>
+    <tspan x="50%" dy="4" class="churn-accent">urn</tspan>
+  </text>
+</svg>
