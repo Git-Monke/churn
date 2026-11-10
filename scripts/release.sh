@@ -94,7 +94,7 @@ fi
 # could leak traffic, and nothing may be tagged or pushed.
 #
 # --dry-run stays static-only so a release can be rehearsed on a machine without
-# /dev/net/tun or WireGuard credentials. A real release always runs the live
+# /dev/net/tun or real VPN credentials. A real release always runs the live
 # proof and its negative controls.
 #
 # A release is forced: change detection exists to keep routine runs cheap, but at

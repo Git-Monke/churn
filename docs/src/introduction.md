@@ -22,7 +22,9 @@ host network without a VPN.
 The **torrent stack** is the acquisition side. Prowlarr talks to indexers,
 qBittorrent downloads releases, and FlareSolverr handles Cloudflare challenges.
 Every one of those containers shares gluetun's network namespace, so all of
-their traffic leaves through the Mullvad WireGuard tunnel.
+their traffic leaves through the VPN tunnel churn configured — Mullvad, IVPN,
+ProtonVPN, NordVPN or Surfshark over WireGuard, or Private Internet Access over
+OpenVPN because Gluetun has no native WireGuard support for it.
 
 The stacks share two host paths, mounted at fixed container paths everywhere: a
 download directory (`DOWNLOAD_DIR`) at `/data` and a media directory

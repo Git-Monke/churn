@@ -486,6 +486,12 @@ pub fn validate_data_dir(value: &str) -> Result<(), String> {
     if !path.is_absolute() {
         return Err("Needs to be an absolute path, e.g. /data/media.".into());
     }
+    // A control character is never part of a real path: it is how a truncated or
+    // garbled paste shows up, and it would otherwise be accepted whenever the
+    // nearest existing ancestor happens to be writable (always true as root).
+    if value.chars().any(|c| c.is_control() || c == '\u{7f}') {
+        return Err("The path contains a control character; check for a broken paste.".into());
+    }
     if path.exists() {
         if !path.is_dir() {
             return Err(format!("{} exists but is not a directory.", path.display()));

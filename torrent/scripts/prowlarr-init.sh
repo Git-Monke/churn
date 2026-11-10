@@ -441,8 +441,9 @@ EOF
 # Cloudflare returns HTTP 451 (Unavailable For Legal Reasons) for some sites
 # from countries with court-ordered blocks (for example EZTV, 1337x, YTS and
 # The Pirate Bay from a Dutch exit). FlareSolverr cannot solve a 451, so those
-# indexers only work when the VPN exit country has no such block. churn derives
-# SERVER_COUNTRIES from the selected Mullvad config; override it in torrent/.env.
+# indexers only work when the VPN exit country has no such block. churn writes
+# the chosen exit location to SERVER_COUNTRIES (SERVER_REGIONS for Private
+# Internet Access); change it in torrent/.env to pin a different exit.
 #
 # Override with PROWLARR_INDEXERS in torrent/.env, e.g. "eztv,yts".
 indexers=$(printf '%s' "${PROWLARR_INDEXERS:-eztv,yts,thepiratebay,1337x,limetorrents,torrentdownloads,uindex}" | tr -d '[:space:]')

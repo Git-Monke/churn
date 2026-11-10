@@ -10,7 +10,7 @@ tags:
     - testing
     - vpn
 created_at: 2026-11-06T06:07:52Z
-updated_at: 2026-11-08T00:06:08Z
+updated_at: 2026-11-10T21:27:39Z
 ---
 
 # Why
@@ -134,3 +134,31 @@ A release cannot be published unless the exact commit/tag being released has pas
 - [ ] Wire `release.yml` / `release.sh` to require the gate.
 - [ ] Document the release checklist and failure handling.
 - [ ] Run the gate against the current release and record the result.
+
+## Follow-up: provider-neutral gate (2026-11-10)
+
+The gate was written when Mullvad was the only provider. With six providers it
+now proves the same thing for all of them, and it proves it more directly:
+
+- `vpn-lib.sh` dropped `vpn_fetch_mullvad` / `vpn_is_mullvad_exit`. The exit
+  proof is now *the public address seen from inside the namespace equals the one
+  Gluetun reports on `/v1/publicip/ip`, and neither is private or CGNAT*
+  (`vpn_fetch_observed_exit`, `vpn_fetch_gluetun_exit`, `vpn_exit_matches_gluetun`).
+  That is stronger than "the exit belongs to provider X": it also catches egress
+  that bypassed the tunnel.
+- `vpn-status.sh` payload: `checks.tunnelExit` (was `mullvadExit`), top-level
+  `provider`/`protocol`, and `exit{ip,gluetunIp,matchesGluetun,country,organization}`
+  (was `mullvad{...}`).
+- `scripts/vpn-gate.sh`: `assert_mullvad_exit` → `assert_tunnel_exit`; the
+  namespace probe curls `${VPN_GATE_PROBE_URL:-https://ipinfo.io/json}` and is
+  compared against Gluetun's address; `load_stack_env` checks the credentials of
+  whichever provider `torrent/.env` names instead of hard-requiring WireGuard;
+  the static stage validates **both** protocols with committed fixtures
+  (`tests/vpn-gate/fixture.env` WireGuard, `tests/vpn-gate/fixture-pia.env`
+  OpenVPN) and the artifact records `provider`, `protocol` and `exit`.
+- The reverse-direction leak is now covered by `compose_gate.rs`
+  `every_provider_renders_a_safe_stack`, which renders the real compose file for
+  each of the six providers.
+
+Remaining gap, unchanged by this: the live stages still need real provider
+credentials, so CI runs only the static stage plus `tests/compose_gate.rs`.

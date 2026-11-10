@@ -2,8 +2,9 @@
 # Prove the VPN boundary before a release is published.
 #
 # The torrent stack ships with one promise: qBittorrent, Prowlarr and
-# FlareSolverr can only reach the internet through the Mullvad tunnel, behind a
-# kill switch that fails closed. This script is the proof of that promise.
+# FlareSolverr can only reach the internet through the VPN tunnel they were
+# configured with, behind a kill switch that fails closed. This script is the
+# proof of that promise, for any of the providers churn installs.
 # `scripts/release.sh` runs it before it touches a version and refuses to tag or
 # push if it fails.
 #
@@ -29,19 +30,24 @@
 #   VPN_GATE_ONLY=restore  scripts/vpn-gate.sh
 #
 # Stages:
-#   1. static    fmt, clippy -D warnings, cargo test, the real compose file plus
-#                one rendered variant per known leak path, shell syntax/lint
+#   1. static    cargo build/test, the real compose file plus one rendered
+#                variant per known leak path, shell syntax/lint
+#
+# The gate judges the VPN boundary, not code style: rustfmt and clippy are CI's
+# job (the `rust` job in .github/workflows/ci.yml), so a machine that only has a
+# partial Rust toolchain can still run the proof.
 #   2. live      the whole pinned stack in an isolated Compose project: the
 #                fail-closed vpn-check passes, vpn-status reports secure:true,
-#                and a probe inside the shared namespace exits via Mullvad
+#                and a probe inside the shared namespace exits via the tunnel
+#                address Gluetun reports (true for every provider)
 #   3. negative  each control, when broken, makes the checks fail closed: a DNS
 #                leak, a public HOST_IP, a broken kill switch, a blackholed
 #                tunnel
 #   4. restore   a freshly created namespace is secure again, then the sandbox is
 #                removed and .churn-state/vpn-gate.json is written
 #
-# Requirements for the live stages: Docker, /dev/net/tun, and WireGuard
-# credentials in torrent/.env (or VPN_GATE_ENV=<path>). The gate only ever uses
+# Requirements for the live stages: Docker, /dev/net/tun, and real credentials
+# for the configured provider in torrent/.env (or VPN_GATE_ENV=<path>). The gate only ever uses
 # the Compose project `churn-vpn-gate`, host ports 18080/19696/18098 and a temp
 # DOWNLOAD_DIR/MEDIA_DIR, so a run cannot touch an installed stack.
 #
@@ -54,7 +60,11 @@ cd "$(dirname "$0")/.."
 readonly PROJECT=churn-vpn-gate
 readonly GATE_DIR=.churn-state
 readonly ARTIFACT=.churn-state/vpn-gate.json
+# Two fixtures, one per protocol: WireGuard (the default for five of the six
+# providers) and OpenVPN (Private Internet Access). Both are rendered and
+# validated statically so a credential change cannot break one path unseen.
 readonly FIXTURE_ENV=tests/vpn-gate/fixture.env
+readonly FIXTURE_ENV_OPENVPN=tests/vpn-gate/fixture-pia.env
 readonly ISOLATED_OVERRIDE=tests/vpn-gate/isolated.yml
 readonly UNSAFE_DIR=tests/vpn-gate/unsafe
 readonly STACK_ENV=${VPN_GATE_ENV:-torrent/.env}
@@ -311,15 +321,14 @@ require_command() {
     fail "$1 is required" "install $1 and re-run"
 }
 
-# Resolve the toolchain before anything else. `cargo fmt` and `cargo clippy` are
-# separate executables that cargo finds on PATH, so a distribution cargo (for
-# example /usr/bin/cargo without the rustup components) can fail with
-# "no such command: fmt" while `rustc` and `cargo` still look installed.
+# Resolve the toolchain before anything else. The gate needs cargo and rustc to
+# build and test the validator, and `sudo` resets HOME to root's, which hides the
+# invoking user's rustup install and can leave a distribution cargo behind.
 #
 # The rule is: leave a toolchain that already works alone, and only reorder PATH
-# when the ambient one is incomplete or mixed. Moving a different cargo ahead of
-# the one the user builds with silently changes the compiler, which invalidates
-# target/ (E0514, read as a code problem) and breaks the gate for no reason.
+# when the ambient one is incomplete. Moving a different cargo ahead of the one
+# the user builds with silently changes the compiler, which invalidates target/
+# (E0514, read as a code problem) and breaks the gate for no reason.
 
 # The commit of the rustc a tool was built from: rustc prints 9 hex characters,
 # rustfmt and clippy-driver print 10; the 9-character prefix identifies the
@@ -329,39 +338,24 @@ rustc_commit_of() {
     sed -nE 's/.*\(([0-9a-f]{9}).*/\1/p' | head -n 1
 }
 
-# cargo, rustc, rustfmt and clippy-driver must all come from one rustc. A
-# distribution rustc with rustup-provided fmt/clippy looks installed but fails
-# with E0514 inside unrelated dependencies, so compare the commits.
-toolchain_is_consistent() {
-  local rustc_commit clippy_commit fmt_commit
-  rustc_commit=$(rustc_commit_of rustc)
-  [ -n "$rustc_commit" ] || return 1
-  clippy_commit=$(rustc_commit_of clippy-driver)
-  [ "$clippy_commit" = "$rustc_commit" ] || return 1
-  fmt_commit=$(rustc_commit_of rustfmt)
-  [ "$fmt_commit" = "$rustc_commit" ] || return 1
-}
-
-# Every piece resolves, and they agree on the compiler.
+# Only cargo and rustc are needed: the gate builds and tests the validator, and
+# runs `churn verify-vpn`. Style and lint checks are CI's job, so a partial
+# toolchain (no rustfmt/clippy component) is not a reason to fail here. A cache
+# filled by a different rustc is still caught, by the E0514 retry in rust_step.
 toolchain_usable() {
-  local tool
-  for tool in cargo rustc cargo-fmt cargo-clippy clippy-driver rustfmt; do
-    command -v "$tool" >/dev/null 2>&1 || return 1
-  done
-  toolchain_is_consistent
+  command -v cargo >/dev/null 2>&1 && command -v rustc >/dev/null 2>&1
 }
 
-# All four executables live in one directory (a rustup toolchain bin, or a
-# distribution install that ships the components).
+# Both executables live in one directory (a rustup toolchain bin, or a
+# distribution install).
 toolchain_dir_complete() {
-  [ -x "$1/cargo" ] && [ -x "$1/rustc" ] &&
-    [ -x "$1/cargo-fmt" ] && [ -x "$1/cargo-clippy" ]
+  [ -x "$1/cargo" ] && [ -x "$1/rustc" ]
 }
 
 # A build cache filled by another rustc fails with E0514, which reads like a code
 # error. `.rustc_info.json` cannot answer this: cargo rewrites it on every
-# invocation, so a `cargo fmt` that never touches an artifact is enough to make
-# it claim a match while target/debug still holds objects from another compiler.
+# invocation, so a command that never touches an artifact is enough to make it
+# claim a match while target/debug still holds objects from another compiler.
 # Detect the failure itself and retry in a cache the gate owns.
 e0514_seen() { [ -f "$1" ] && grep -q 'E0514' "$1"; }
 
@@ -415,8 +409,12 @@ pin_toolchain() {
     return 0
   fi
 
+  # `sudo script.sh` resets HOME to root's, which hides the rustup toolchain of
+  # the person who invoked it and leaves a distribution cargo without the
+  # components. Look in their home too.
   local candidate
-  for candidate in "$HOME/.cargo/bin" /usr/local/bin /usr/bin; do
+  for candidate in "$HOME/.cargo/bin" \
+    "${SUDO_USER:+/home/$SUDO_USER/.cargo/bin}" /usr/local/bin /usr/bin; do
     [ -n "$candidate" ] || continue
     if toolchain_dir_complete "$candidate"; then
       export PATH="$candidate:$PATH"
@@ -488,26 +486,11 @@ stage_static() {
 
   require_command cargo
   require_command rustc
-  # A cargo/clippy/rustc mismatch fails deep inside unrelated dependencies with
-  # E0514, which reads like a code problem. Detect it here and say what to do.
+  # A cache filled by another rustc fails deep inside unrelated dependencies
+  # with E0514, which reads like a code problem; rust_step retries in an
+  # isolated cache and names the real cause if that does not help.
   say "  toolchain: $(cargo --version), $(rustc --version)"
-  local rustc_commit
-  # clippy prints a 10-character commit, rustc prints 9; the 9-char prefix is
-  # what identifies the compiler.
-  rustc_commit=$(rustc --version | sed -E 's/^rustc [^ ]+ \(([0-9a-f]{9}).*/\1/')
-  if command -v clippy-driver >/dev/null 2>&1; then
-    local clippy_commit
-    clippy_commit=$(clippy-driver --version | sed -E 's/.*\(([0-9a-f]{9}).*/\1/')
-    say "  clippy:    $(clippy-driver --version)"
-    if [ "$clippy_commit" != "$rustc_commit" ]; then
-      fail "clippy and rustc come from different toolchains" \
-        "clippy-driver is $clippy_commit but rustc is $rustc_commit; run 'rustup component add clippy' for the same toolchain (and 'cargo clean') before releasing"
-    fi
-  fi
 
-  step "cargo fmt --check" cargo fmt --check
-  rust_step "cargo clippy" "the gate treats warnings as errors; see above" \
-    cargo clippy --locked --all-targets -- -D warnings
   rust_step "cargo test" "command failed: cargo test --locked" cargo test --locked
   rust_step "cargo build" "command failed: cargo build --locked --quiet" \
     cargo build --locked --quiet
@@ -525,13 +508,20 @@ stage_static() {
     say "  note: shellcheck is not installed here; CI installs and runs it"
   fi
 
-  say "  validating torrent/docker-compose.yml"
-  if ! "$(churn_bin)" verify-vpn --env-file "$FIXTURE_ENV" \
-    >"$tmp/verify-vpn.log" 2>&1; then
-    show_log "$tmp/verify-vpn.log"
-    fail "the shipped compose file does not isolate the torrent stack" \
-      "run: $(churn_bin) verify-vpn --env-file $FIXTURE_ENV"
-  fi
+  # Both protocols are validated: WireGuard (the default) and the OpenVPN path
+  # Private Internet Access needs. A credential or provider change that breaks
+  # one of them must fail here, before a release.
+  local fixture
+  for fixture in "$FIXTURE_ENV" "$FIXTURE_ENV_OPENVPN"; do
+    [ -f "$fixture" ] || fail "missing fixture $fixture" "the gate validates every protocol"
+    say "  validating torrent/docker-compose.yml with $fixture"
+    if ! "$(churn_bin)" verify-vpn --env-file "$fixture" \
+      >"$tmp/verify-vpn.log" 2>&1; then
+      show_log "$tmp/verify-vpn.log"
+      fail "the shipped compose file does not isolate the torrent stack" \
+        "run: $(churn_bin) verify-vpn --env-file $fixture"
+    fi
+  done
 
   local cases=$UNSAFE_DIR/cases.tsv
   [ -f "$cases" ] || fail "cases.tsv is missing" "expected $cases"
@@ -590,21 +580,34 @@ live_preflight() {
 # Export only what the stack needs. Values are never printed.
 load_stack_env() {
   local key value
-  for key in WIREGUARD_PRIVATE_KEY WIREGUARD_ADDRESSES SERVER_COUNTRIES HOST_IP \
-    TZ PUID PGID FLARESOLVERR_URL; do
+  for key in VPN_SERVICE_PROVIDER VPN_TYPE WIREGUARD_PRIVATE_KEY \
+    WIREGUARD_ADDRESSES OPENVPN_USER OPENVPN_PASSWORD SERVER_COUNTRIES \
+    SERVER_REGIONS HOST_IP TZ PUID PGID FLARESOLVERR_URL; do
     value=$(sed -n "s/^$key=//p" "$STACK_ENV" | tail -n 1)
     if [ -n "$value" ]; then
       export "$key=$value"
     fi
   done
-  [ -n "${WIREGUARD_PRIVATE_KEY:-}" ] ||
-    fail "no WireGuard key in $STACK_ENV" "WIREGUARD_PRIVATE_KEY is empty"
-  [ -n "${WIREGUARD_ADDRESSES:-}" ] ||
-    fail "no tunnel address in $STACK_ENV" "WIREGUARD_ADDRESSES is empty"
-  case "${WIREGUARD_PRIVATE_KEY}" in
-    AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= | *churn*first*)
-      fail "torrent/.env still holds the fixture placeholder key" \
-        "generate a real Mullvad WireGuard config before releasing"
+  # The live stage runs whatever provider the installed .env names, so the
+  # preflight checks that provider's credentials rather than assuming WireGuard.
+  case "${VPN_SERVICE_PROVIDER:-mullvad}" in
+    private\ internet\ access)
+      [ -n "${OPENVPN_USER:-}" ] ||
+        fail "no OpenVPN user in $STACK_ENV" "OPENVPN_USER is empty"
+      [ -n "${OPENVPN_PASSWORD:-}" ] ||
+        fail "no OpenVPN password in $STACK_ENV" "OPENVPN_PASSWORD is empty"
+      ;;
+    *)
+      [ -n "${WIREGUARD_PRIVATE_KEY:-}" ] ||
+        fail "no WireGuard key in $STACK_ENV" "WIREGUARD_PRIVATE_KEY is empty"
+      [ -n "${WIREGUARD_ADDRESSES:-}" ] ||
+        fail "no tunnel address in $STACK_ENV" "WIREGUARD_ADDRESSES is empty"
+      case "${WIREGUARD_PRIVATE_KEY}" in
+        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= | *churn*first*)
+          fail "torrent/.env still holds the fixture placeholder key" \
+            "generate a real WireGuard config for your provider before releasing"
+          ;;
+      esac
       ;;
   esac
 }
@@ -738,7 +741,7 @@ assert_secure_status() {
     if doc=$(status_json 2>"$tmp/status.err") &&
       printf '%s' "$doc" | jq -e '.secure == true' >/dev/null 2>&1; then
       if ! printf '%s' "$doc" | jq -e \
-        '.checks.mullvadExit and .checks.killSwitch and .checks.dns and
+        '.checks.tunnelExit and .checks.killSwitch and .checks.dns and
          .checks.ipv6 and .checks.firewallException' >/dev/null 2>&1; then
         printf '%s' "$doc" >"$tmp/status.json"
         jq '.checks' "$tmp/status.json" >&2 || true
@@ -770,27 +773,39 @@ report_coverage() {
   note "this is an application fault, not a VPN leak; the security checks above still hold"
 }
 
-# The exit must be Mullvad, not merely "some network", and the reported public
-# address must be a public address (a private or missing one would mean the
-# request never left the tunnel).
-assert_mullvad_exit() {
-  jq -e '.mullvad.mullvad_exit_ip == true' "$tmp/status.json" >/dev/null 2>&1 ||
-    { jq '.mullvad' "$tmp/status.json" >&2 || true
-      fail "the public exit is not a Mullvad exit" "vpn-status reported a non-Mullvad egress"; }
+# The exit must be the tunnel's, not merely "some network": the address the
+# internet sees from inside the namespace has to equal the one Gluetun says it
+# connected with. That is provider-neutral, so it holds for all six providers,
+# and it is stronger than "the exit belongs to provider X" because it also
+# catches an egress that avoided the tunnel.
+assert_tunnel_exit() {
+  local observed gluetun
+  observed=$(jq -r '.exit.ip // empty' "$tmp/status.json" 2>/dev/null || true)
+  gluetun=$(jq -r '.exit.gluetunIp // empty' "$tmp/status.json" 2>/dev/null || true)
 
-  jq -e '.mullvad.ip | type == "string" and length > 0' "$tmp/status.json" >/dev/null 2>&1 ||
-    { jq '.mullvad' "$tmp/status.json" >&2 || true
-      fail "vpn-status reported no public exit address" "the exit check did not complete"; }
+  jq -e '.checks.tunnelExit == true and .exit.matchesGluetun == true' \
+    "$tmp/status.json" >/dev/null 2>&1 ||
+    { jq '{provider, protocol, exit, checks}' "$tmp/status.json" >&2 || true
+      fail "the public exit is not the tunnel exit" \
+        "vpn-status reported observed=${observed:-none} gluetun=${gluetun:-none}"; }
 
-  if jq -e '.mullvad.ip | test("^(10\\.|127\\.|192\\.168\\.|169\\.254\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.)")' \
-    "$tmp/status.json" >/dev/null 2>&1; then
-    jq '.mullvad.ip' "$tmp/status.json" >&2 || true
-    fail "the reported public address is private" "egress is not exiting through Mullvad"
-  fi
+  [ -n "$observed" ] && [ -n "$gluetun" ] ||
+    fail "vpn-status reported no exit addresses" "the exit check did not complete"
+
+  case "$observed$gluetun" in
+    10.* | 127.* | 192.168.* | 169.254.* | 172.1[6-9].* | 172.2[0-9].* | 172.3[01].* | \
+      100.6[4-9].* | 100.[7-9][0-9].* | 100.1[01][0-9].* | 100.12[0-7].*)
+      fail "the reported exit address is private or CGNAT" \
+        "egress is not leaving through the tunnel: observed=$observed gluetun=$gluetun"
+      ;;
+  esac
+
+  say "  exit: $observed ($(jq -r '.exit.country // "?"' "$tmp/status.json")) is the tunnel Gluetun reports"
 }
 
 # Containers in the shared namespace must be in it, and a probe there must
-# independently observe a Mullvad exit.
+# independently observe the same exit address Gluetun reports. The probe is a
+# separate container, so it cannot be fooled by what vpn-status recorded.
 assert_namespace_membership() {
   local gluetun mode
   gluetun=$(docker inspect -f '{{.Id}}' "$(container_name gluetun)" 2>/dev/null || true)
@@ -804,13 +819,23 @@ assert_namespace_membership() {
   done
 
   if ! docker run --rm --network "container:$gluetun" curlimages/curl:8.23.0 \
-    -4 -fsS -m 20 https://am.i.mullvad.net/json >"$tmp/probe.json" 2>"$tmp/probe.err"; then
+    -4 -fsS -m 20 "${VPN_GATE_PROBE_URL:-https://ipinfo.io/json}" \
+    >"$tmp/probe.json" 2>"$tmp/probe.err"; then
     show_log "$tmp/probe.err"
-    fail "a probe in the shared namespace could not reach Mullvad" "the tunnel is not usable from the apps' namespace"
+    fail "a probe in the shared namespace could not reach the internet" \
+      "the tunnel is not usable from the apps' namespace"
   fi
-  jq -e '.mullvad_exit_ip == true' "$tmp/probe.json" >/dev/null 2>&1 ||
-    { jq '{mullvad_exit_ip, ip, country}' "$tmp/probe.json" >&2 || true
-      fail "the namespace probe is not a Mullvad exit" "apps would egress outside the tunnel"; }
+
+  local probed gluetun_ip
+  probed=$(jq -r '.ip // empty' "$tmp/probe.json" 2>/dev/null || true)
+  gluetun_ip=$(jq -r '.exit.gluetunIp // empty' "$tmp/status.json" 2>/dev/null || true)
+  [ -n "$gluetun_ip" ] ||
+    fail "vpn-status recorded no tunnel address" "cannot compare the namespace probe against it"
+  [ "$probed" = "$gluetun_ip" ] ||
+    { jq '{ip, country, org}' "$tmp/probe.json" >&2 || true
+      fail "the namespace probe egressed elsewhere" \
+        "probe saw ${probed:-none} but Gluetun reports $gluetun_ip"; }
+  say "  namespace probe: independent container sees $probed, the tunnel address"
 }
 
 stage_live() {
@@ -820,9 +845,9 @@ stage_live() {
   assert_vpn_check_passed
   say "  vpn-check reported PASS (the fail-closed gate accepted the namespace)"
   assert_secure_status
-  assert_mullvad_exit
+  assert_tunnel_exit
   assert_namespace_membership
-  say "  vpn-status: secure, Mullvad exit, kill switch, DNS, IPv6 all proven"
+  say "  vpn-status: secure, tunnel exit, kill switch, DNS, IPv6 all proven"
 }
 
 # ── stage 3: negative controls ──────────────────────────────────────────────
@@ -1033,7 +1058,7 @@ stage_restore() {
   wait_for_healthy vpn-status 180
   assert_vpn_check_passed
   assert_secure_status
-  assert_mullvad_exit
+  assert_tunnel_exit
   say "  recreated namespace: secure:true again"
 
   write_artifact
@@ -1053,6 +1078,7 @@ fingerprint() {
     src/main.rs \
     scripts/vpn-gate.sh \
     "$FIXTURE_ENV" \
+    "$FIXTURE_ENV_OPENVPN" \
     "$ISOLATED_OVERRIDE" \
     "$UNSAFE_DIR"/cases.tsv \
     "$UNSAFE_DIR"/*.yml \
@@ -1087,16 +1113,19 @@ write_artifact() {
         ok: true,
         unsafeLayoutsRejected: $staticCases,
         commands: [
-          "cargo fmt --check",
-          "cargo clippy --locked --all-targets -- -D warnings",
           "cargo test --locked",
+          "cargo build --locked",
           "churn verify-vpn --env-file tests/vpn-gate/fixture.env",
+          "churn verify-vpn --env-file tests/vpn-gate/fixture-pia.env",
           "churn verify-vpn --config (per unsafe layout)",
           "sh -n / bash -n / shellcheck"
         ]
       },
       live: {
         secure: $status.secure,
+        provider: $status.provider,
+        protocol: $status.protocol,
+        exit: $status.exit,
         checks: $status.checks,
         coverage: ($status.coverage | map({ (.id): .reachable }) | add),
         images: $images
@@ -1197,7 +1226,7 @@ if [ "$static_only" = 1 ] || ! needs_sandbox; then
   say ""
   say "static checks passed."
   if [ "$static_only" = 1 ] || [ -n "$requested" ]; then
-    say "The live proof (stages 2-4) needs Docker, /dev/net/tun and WireGuard"
+    say "The live proof (stages 2-4) needs Docker, /dev/net/tun and real VPN"
     say "credentials in $STACK_ENV; scripts/release.sh always runs it."
   fi
   exit 0
@@ -1221,6 +1250,6 @@ fi
 
 say ""
 say "VPN gate passed."
-say "  live:     secure:true, Mullvad exit, kill switch, DNS, IPv6 all proven"
+say "  live:     secure:true, tunnel exit, kill switch, DNS, IPv6 all proven"
 say "  negative: DNS leak, public HOST_IP, broken kill switch, dropped tunnel all failed closed"
 say "  artifact: $ARTIFACT"

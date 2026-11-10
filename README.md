@@ -88,11 +88,20 @@ The wizard first runs two preflight checks:
 
 Then it asks which roles this machine should run and collects what it needs:
 
-- **Mullvad WireGuard config archive** — download the zip from
-  [mullvad.net](https://mullvad.net/en/account/wireguard-config) and give churn
-  its path. It opens the zip and reads `PrivateKey` and IPv4 `Address` from
-  one of the `.conf` files. (Every file in one archive carries the same key and
-  address, so churn just picks the first one instead of asking.)
+- **VPN provider** — churn supports Mullvad, IVPN, ProtonVPN, NordVPN,
+  Surfshark and Private Internet Access. Pick one and churn prints that
+  provider's exact steps for generating credentials, then asks for them:
+  - WireGuard key for Mullvad, IVPN, ProtonVPN, NordVPN and Surfshark, plus
+    the interface address for Mullvad, IVPN and Surfshark (ProtonVPN and
+    NordVPN assign it for you). WireGuard is the default because torrent
+    traffic is throughput-bound.
+  - OpenVPN username and password, for Private Internet Access. It is the one
+    provider Gluetun has no native WireGuard support for, so it is the only
+    case where churn uses OpenVPN.
+
+  It also asks for an exit location and rejects one the provider does not
+  offer. Rerunning after a switch rewrites `torrent/.env` and drops the previous
+  provider's credentials, so a stale key can never be read by Gluetun.
 - **Download directory** (`DOWNLOAD_DIR`) — where qBittorrent writes in-progress
   downloads and seeds from. Recommended on an SSD or fast local disk: files are
   written and re-read while seeding, so a slow drive stutters playback. Defaults
@@ -237,7 +246,8 @@ Each location is migrated independently; nothing moves both at once.
 ```
 server/.env      DOWNLOAD_DIR, MEDIA_DIR, PUID, PGID, TZ, host ports,
                  JELLYFIN_API_KEY (after setup)
-torrent/.env     the above + HOST_IP + Mullvad credentials (and the archive path)
+torrent/.env     the above + HOST_IP + VPN provider, protocol, credentials
+                 and exit location
 ```
 
 `PUID`/`PGID` come from whoever owns the storage directory and `TZ` from the
@@ -265,7 +275,8 @@ and the full-access warning.
 
 The Services page has **Services** and **VPN** tabs. The VPN tab runs an
 on-demand leak test from the torrent stack's `vpn-status` agent and shows the
-verdict, the Mullvad exit IP/location, DNS and kill-switch checks, IPv6 state,
+verdict, the provider and protocol, the tunnel exit IP/location, DNS and
+kill-switch checks, IPv6 state,
 and whether qBittorrent, Prowlarr and FlareSolverr are sharing the protected
 network namespace.
 
@@ -448,12 +459,15 @@ Indexer availability depends on the VPN exit country. Courts in some countries
 order blocks for specific sites, and Cloudflare answers those with **HTTP 451
 (Unavailable For Legal Reasons)** — a legal block, not a challenge, so
 FlareSolverr cannot solve it. The Netherlands, for example, blocks EZTV, 1337x,
-YTS, The Pirate Bay and LimeTorrents. churn derives `SERVER_COUNTRIES` from the
-selected Mullvad config filename (`us-atl-wg-001.conf` -> `USA`) instead of
-hardcoding a country. To pin a different exit, set it in `torrent/.env`:
+YTS, The Pirate Bay and LimeTorrents. churn writes the exit location you picked
+to `VPN_LOCATION` and to the provider's own filter key — `SERVER_COUNTRIES`
+for most providers, `SERVER_REGIONS` for Private Internet Access — instead of
+hardcoding a country. To pin a different exit, change it in `torrent/.env`:
 
 ```bash
 SERVER_COUNTRIES=USA
+# Private Internet Access instead uses its own region names:
+# SERVER_REGIONS=US Seattle
 ```
 
 Prowlarr does not have a global "hide adult categories" setting. churn filters
@@ -467,7 +481,7 @@ still slip through.
 
 FlareSolverr only runs when Prowlarr detects a Cloudflare challenge, so ordinary
 indexers do not pay the Chromium startup cost. Its network traffic shares
-Gluetun's namespace and therefore exits through Mullvad like the other torrent
+Gluetun's namespace and therefore exits through the VPN like the other torrent
 containers.
 
 ## VPN leak protection
@@ -481,16 +495,18 @@ The torrent stack is designed to fail closed, not merely to prefer the VPN:
 - Gluetun's kill switch is explicitly enabled. The only non-VPN exception is
   `HOST_IP/32`, which must be a loopback/LAN address; a public or broad
   exception is rejected. IPv6 is disabled in the shared namespace because the
-  Mullvad import only configures IPv4.
+  imported tunnel config is IPv4-only.
 - Every sidecar with network access bind-mounts a static
   `torrent/resolv.conf` containing only
   `nameserver 127.0.0.1`, Gluetun's DNS-over-TLS resolver. Docker does not
   allow the `dns:` option together with `network_mode: service:gluetun`, so the
   mount is what prevents a host or Docker nameserver fallback.
 - Before qBittorrent, Prowlarr or FlareSolverr starts, `vpn-check` verifies that
-  the public exit is a Mullvad exit, that `eth0` cannot reach the internet
-  directly, and that DNS is using Gluetun's resolver. A failure stops the
-  dependent containers from starting.
+  the public exit is the tunnel exit — the address the internet sees from
+  inside the namespace equals the one Gluetun reports on its control API — that
+  `eth0` cannot reach the internet directly, and that DNS is using Gluetun's
+  resolver. The check is provider-neutral, so it holds for all six providers.
+  A failure stops the dependent containers from starting.
 - `vpn-status` stays running beside the apps and exposes the same live checks as
   JSON on `127.0.0.1:8098`. It shares Gluetun's namespace, so the dashboard's
   Services → VPN tab tests the same path qBittorrent uses. The port is bound to
@@ -642,9 +658,11 @@ whether to schedule itself at all.
 
 The full gate has four stages:
 
-1. **static** — `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`,
-   shellcheck, then `churn verify-vpn` against the shipped
-   `torrent/docker-compose.yml` rendered with `tests/vpn-gate/fixture.env`.
+1. **static** — `cargo test` and `cargo build`, shellcheck, then `churn
+   verify-vpn` against the shipped `torrent/docker-compose.yml` rendered with
+   both committed fixtures (WireGuard and OpenVPN). Formatting and lint checks
+   are deliberately not part of this gate — CI's `rust` job owns them — so the
+   proof can run on a machine with a plain cargo/rustc toolchain.
    Afterwards it renders each known-unsafe layout from
    `tests/vpn-gate/unsafe/cases.tsv` (a sidecar on its own network, a published
    sidecar port, a missing `resolv.conf` mount, IPv6 enabled, the firewall off,
@@ -655,7 +673,8 @@ The full gate has four stages:
    and `MEDIA_DIR`, then
    requires `vpn-check` to exit 0 with `PASS: torrent egress is confined to the
    VPN`, `vpn-status` to report `secure: true` with every check, and a probe
-   inside the shared namespace to observe a Mullvad exit. Service coverage is
+   inside the shared namespace to observe Gluetun's own exit address. Service
+   coverage is
    recorded and warned about, but not gated: an application that crashes is not
    a VPN leak.
 3. **negative** — makes each control fail on purpose and requires the checks to
@@ -664,11 +683,15 @@ The full gate has four stages:
 4. **restore** — recreates the namespace (dropping every injected rule), proves
    it is secure again, removes the sandbox and writes
    `.churn-state/vpn-gate.json` with the per-check results, image refs and a
-   fingerprint of the files that define the boundary. Exit IPs and the
-   WireGuard key are never recorded.
+   fingerprint of the files that define the boundary. Exit IPs and the VPN
+   credentials are never recorded.
 
-The live stages need Docker access, `/dev/net/tun` and WireGuard credentials in
-`torrent/.env` (or `VPN_GATE_ENV=<path>`). `--dry-run` releases run only the
+The live stages need Docker access, `/dev/net/tun` and real credentials for the
+configured provider in `torrent/.env` (or `VPN_GATE_ENV=<path>`). The static
+stage validates both protocols with committed fixtures — WireGuard
+(`tests/vpn-gate/fixture.env`) and OpenVPN
+(`tests/vpn-gate/fixture-pia.env`) — so a credential change cannot break one
+path unseen. `--dry-run` releases run only the
 static stage so a release can be rehearsed anywhere; a real release always runs
 the full gate.
 
@@ -693,10 +716,11 @@ mdbook build docs    # render the static site to docs/book
 
 `src/lib.rs` holds the testable core ([`question`](src/question.rs),
 [`mullvad`](src/mullvad.rs), [`stack`](src/stack.rs),
-[`envfile`](src/envfile.rs), [`system`](src/system.rs)); `src/main.rs` is the
-wizard flow. Dedupe of questions, the VPN-before-storage ordering, and parsing
-of Mullvad `.conf`/zip files are covered by `tests/installer.rs`; distro
-detection and root-uid parsing by `tests/system.rs`.
+[`envfile`](src/envfile.rs), [`vpn`](src/vpn.rs), [`system`](src/system.rs));
+`src/main.rs` is the wizard flow. Dedupe of questions, the VPN-before-storage
+ordering, and the per-provider credential questions are covered by
+`tests/installer.rs`; distro detection and root-uid parsing by
+`tests/system.rs`.
 
 `vendor/cliclack` is a local patch for path autocomplete: the first suggestion
 is selected automatically, Tab completes it without submitting, and Enter only

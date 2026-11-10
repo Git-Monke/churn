@@ -185,11 +185,12 @@ files from an in-progress download that was previously indexed, no longer appear
 
 The Services → VPN tab calls `GET /api/vpn`. The backend asks the torrent
 stack's `vpn-status` agent to run the same checks as `vpn-check`: the public
-exit must be Mullvad, direct `eth0` egress must be blocked, DNS must use
-Gluetun's resolver, IPv6 must be disabled, and the firewall exception must be a
-local address. The response also includes the exit IP, city/country, Mullvad
-server hostname, and whether qBittorrent, Prowlarr and FlareSolverr answer on
-their loopback ports inside the shared namespace.
+exit must be the address Gluetun reports for the tunnel, direct `eth0` egress
+must be blocked, DNS must use Gluetun's resolver, IPv6 must be disabled, and the
+firewall exception must be a local address. The response also includes the
+provider and protocol, the exit IP, country and organization, and whether
+qBittorrent, Prowlarr and FlareSolverr answer on their loopback ports inside the
+shared namespace.
 
 The agent listens on `127.0.0.1:8098` only and is never exposed on the LAN. If
 the torrent stack is not running, the tab shows an error with the command to

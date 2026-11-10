@@ -8,7 +8,7 @@ traffic are not allowed to start.
 
 | Service | Role | Network |
 | --- | --- | --- |
-| `gluetun` | Mullvad WireGuard client, firewall, DNS resolver, and port publisher | VPN namespace |
+| `gluetun` | VPN client (any supported provider), firewall, DNS resolver, and port publisher | VPN namespace |
 | `vpn-check` | One-shot startup verification of VPN exit, DNS, and kill switch | Shares gluetun |
 | `vpn-status` | On-demand leak test for the dashboard's VPN tab | Shares gluetun |
 | `qbittorrent` | Download client | Shares gluetun |
@@ -21,7 +21,7 @@ traffic are not allowed to start.
 Before starting the stack, churn starts a throwaway probe container on the
 Compose network and verifies it has an IPv4 default route. A gluetun log line
 `default route not found` means Docker's bridge or the existing Compose network
-is broken, not that the Mullvad credentials are wrong.
+is broken, not that the VPN credentials are wrong.
 
 Only `gluetun` joins a Docker network. The other network-capable containers use
 `network_mode: "service:gluetun"` and therefore have no independent route to
@@ -52,21 +52,30 @@ other machines, bind the published port to
 
 ## VPN and leak protection
 
-- gluetun connects to Mullvad over WireGuard.
+- gluetun connects to the VPN provider churn was configured with. Mullvad,
+  IVPN, ProtonVPN, NordVPN and Surfshark run over WireGuard, which is the
+  default: torrenting is throughput-bound and WireGuard is markedly faster than
+  OpenVPN. Private Internet Access is the exception, because Gluetun has no
+  native WireGuard support for it, so it runs over OpenVPN with a VPN
+  configuration username and password.
 - Its firewall, or kill switch, blocks egress except through the tunnel. The
   only non-VPN exception is `HOST_IP/32`, used so Prowlarr can reach Sonarr and
   Radarr on the host's LAN address.
 - Every networked sidecar mounts `torrent/resolv.conf`, which contains only
   `nameserver 127.0.0.1`. DNS is answered by gluetun's local DoT resolver.
-- IPv6 is disabled in the shared namespace because the Mullvad import
-  configures an IPv4 tunnel only.
-- `vpn-check` requires a Mullvad exit, verifies that direct `eth0` egress is
-  blocked, and verifies the DNS configuration. qBittorrent, Prowlarr, and
-  FlareSolverr wait for it to complete successfully.
+- IPv6 is disabled in the shared namespace because the imported tunnel config
+  is IPv4-only.
+- `vpn-check` requires the public exit to be the tunnel exit: the address the
+  internet sees from inside the namespace must equal the one Gluetun reports on
+  its control API (`/v1/publicip/ip`), and neither may be private or CGNAT. That
+  is provider-neutral, and stronger than "the exit belongs to provider X"
+  because it also catches egress that avoided the tunnel. It also verifies that
+  direct `eth0` egress is blocked and that the DNS configuration is right.
+  qBittorrent, Prowlarr, and FlareSolverr wait for it to complete successfully.
 - `vpn-status` runs the same checks on demand from the same network namespace
   and serves them as JSON on `127.0.0.1:8098`. The dashboard's Services → VPN
-  tab uses it to show the live exit IP, boundary checks, and which torrent apps
-  are reachable inside the protected namespace.
+  tab uses it to show the provider, protocol, live exit IP, boundary checks, and
+  which torrent apps are reachable inside the protected namespace.
 - `churn verify-vpn` applies the same rules to a `docker compose config`
   document. The installer runs it before starting the stack, and
   `scripts/vpn-gate.sh` runs it for the release gate.
@@ -107,8 +116,9 @@ ships still satisfies them. Before any release is tagged or pushed,
 always freshly proven (outside a release, the gate skips itself when nothing it
 covers has changed). The full gate:
 
-1. renders `torrent/docker-compose.yml` with a committed fake environment and
-   requires `churn verify-vpn` to accept it;
+1. renders `torrent/docker-compose.yml` with committed fake environments — one
+   WireGuard, one OpenVPN/Private Internet Access — and requires
+   `churn verify-vpn` to accept both, so neither protocol can break unseen;
 2. renders every known-unsafe variant in `tests/vpn-gate/unsafe/` (a sidecar on
    its own network or publishing its own port, a missing `resolv.conf` mount, a
    sidecar that starts before `vpn-check`, IPv6 enabled, the firewall off, a
@@ -116,17 +126,20 @@ covers has changed). The full gate:
    requires each one to be rejected for the expected reason;
 3. starts the whole pinned stack in a throwaway Compose project, requires
    `vpn-check` to pass, `vpn-status` to report `secure: true` with every check,
-   and a probe in the shared namespace to see a Mullvad exit (unreachable apps
-   are reported as a warning, not a gate failure: an app crash is not a leak);
+   and a probe in a separate container inside the shared namespace to see the
+   same address Gluetun reports (unreachable apps are reported as a warning,
+   not a gate failure: an app crash is not a leak);
 4. breaks each control on purpose (a leaking `resolv.conf`, a public `HOST_IP`,
    an `iptables` rule that re-opens `eth0`, a blackholed tunnel) and requires
    the checks to fail closed;
 5. recreates the namespace, proves it is secure again, removes the sandbox and
    writes `.churn-state/vpn-gate.json`.
 
-CI runs the deterministic part (stages 1 and the `tests/compose_gate.rs` tests)
-on every pull request and again on the release tag, so a hand-pushed `v*` tag
-cannot publish either. See the README's "The VPN release gate" section for the
+CI runs the deterministic part (stage 1 and the `tests/compose_gate.rs` tests,
+including a rendered stack for all six providers) on every pull request and
+again on the release tag, so a hand-pushed `v*` tag cannot publish either.
+Formatting and clippy are not part of the VPN gate: they judge style, not the
+boundary, and CI's Rust job runs them separately. See the README's "The VPN release gate" section for the
 commands.
 
 ## Wiring and storage
@@ -145,9 +158,11 @@ Filtering is by category, so miscategorised adult releases can still appear.
 Indexer results also depend on where the VPN exits. Some countries have
 court-ordered blocks for sites such as EZTV, 1337x, YTS, The Pirate Bay and
 LimeTorrents; Cloudflare serves those as HTTP 451, which FlareSolverr cannot
-bypass. churn derives `SERVER_COUNTRIES` from the selected Mullvad config
-filename (for example `us-atl-wg-001.conf` becomes `USA`). Set
-`SERVER_COUNTRIES` in `torrent/.env` to pin an exit country explicitly.
+bypass. churn writes the exit location you chose to `VPN_LOCATION` and to the
+provider's own filter key: `SERVER_COUNTRIES` for every provider except Private
+Internet Access, which uses `SERVER_REGIONS` and its own region names (`US
+Seattle`). A key that belongs to a different provider is rejected before the
+stack starts. Set the key in `torrent/.env` to pin a different exit.
 
 The stack shares `${DOWNLOAD_DIR}` with the server stack at `/data`, and
 `${MEDIA_DIR}` at `/data/media`, so completed downloads are visible to Sonarr,
