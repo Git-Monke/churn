@@ -1,7 +1,7 @@
 ---
 # churn-yjd6
 title: churn update reconciles created, removed and changed containers
-status: todo
+status: completed
 type: feature
 priority: normal
 tags:
@@ -9,7 +9,7 @@ tags:
     - compose
     - installer
 created_at: 2026-11-10T22:41:11Z
-updated_at: 2026-11-10T22:41:11Z
+updated_at: 2026-11-10T23:11:46Z
 ---
 
 ## Problem
