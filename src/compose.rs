@@ -88,12 +88,28 @@ pub struct PsPublisher {
 }
 
 /// Parse `docker compose ps --format json`; an empty project prints nothing.
+///
+/// Compose used to print one JSON array; since v2 it prints one JSON object per
+/// line (JSONL). Both shapes are accepted so a `ps` from an older plugin does
+/// not silently report zero services.
 pub fn parse_ps(output: &str) -> serde_json::Result<Vec<PsService>> {
     let output = output.trim();
     if output.is_empty() {
         return Ok(Vec::new());
     }
-    serde_json::from_str(output)
+    if output.starts_with('[') {
+        return serde_json::from_str(output);
+    }
+
+    let mut services = Vec::new();
+    for line in output.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        services.push(serde_json::from_str(line)?);
+    }
+    Ok(services)
 }
 
 /// Format a raw Compose tail line for an error message.
@@ -159,5 +175,30 @@ mod tests {
     #[test]
     fn empty_compose_ps_output_is_an_empty_list() {
         assert!(parse_ps("  \n").unwrap().is_empty());
+    }
+
+    #[test]
+    fn compose_ps_one_object_per_line_is_parsed() {
+        // What Compose v2 actually prints for a two-container project.
+        let services = parse_ps(
+            concat!(
+                r#"{"Service":"gluetun","Publishers":[{"URL":"127.0.0.1","TargetPort":8080,"PublishedPort":8081,"Protocol":"tcp"}]}"#,
+                "\n",
+                r#"{"Service":"qbittorrent","Publishers":[]}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+
+        assert_eq!(services.len(), 2, "{services:?}");
+        assert_eq!(services[0].service, "gluetun");
+        assert_eq!(services[0].publishers[0].published_port, 8081);
+        assert_eq!(services[1].service, "qbittorrent");
+        assert!(services[1].publishers.is_empty());
+    }
+
+    #[test]
+    fn malformed_jsonl_reports_an_error() {
+        assert!(parse_ps("{\"Service\":\"a\"}\nnot json\n").is_err());
     }
 }

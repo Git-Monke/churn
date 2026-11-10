@@ -35,15 +35,21 @@ existing library, which churn adopts in place.
 
 ## Updating
 
-Once installed, update the churn binary and the server dashboard together:
+Once installed, update the churn binary, the server dashboard and the installed
+stacks together:
 
 ```bash
 sudo churn update
 ```
 
 This verifies the release binary's checksum, replaces the running CLI, pulls the
-matching dashboard image, and recreates only the dashboard container. Use
-`churn update --check` to compare versions without changing anything.
+matching dashboard image, and reconciles every installed stack with the compose
+files that ship in the new binary: containers a release added are created,
+removed ones are pruned, and changed ones are recreated, while unchanged
+containers keep running. The torrent stack is reconciled only after the VPN
+isolation and default route checks pass. Use `churn update --check` to compare
+versions without changing anything, and `churn update --dry-run` to see what
+would be created or recreated.
 
 ## This book
 

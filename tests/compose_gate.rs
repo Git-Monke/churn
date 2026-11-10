@@ -131,6 +131,41 @@ fn the_shipped_compose_file_isolates_every_networked_service() {
     );
 }
 
+/// Every service the shipped torrent stack is expected to contain.
+///
+/// `churn update` reconciles an existing install against this file, so a
+/// service listed here is what reaches an install that predates the service.
+/// A service that disappears from this list should disappear from the stack too
+/// (the reconcile prunes it with `--remove-orphans`).
+const TORRENT_SERVICES: &[&str] = &[
+    "gluetun",
+    "vpn-check",
+    "vpn-status",
+    "flaresolverr",
+    "qbittorrent-init",
+    "qbittorrent",
+    "qbit-watch",
+    "prowlarr",
+    "prowlarr-init",
+];
+
+#[test]
+fn the_shipped_torrent_stack_has_exactly_the_expected_services() {
+    let config = render(&[], &[]).expect("the shipped compose file must render");
+    let services = config
+        .get("services")
+        .and_then(|services| services.as_object())
+        .expect("the rendered compose file must have services");
+    let mut present: Vec<&str> = services.keys().map(String::as_str).collect();
+    present.sort_unstable();
+    let mut expected = TORRENT_SERVICES.to_vec();
+    expected.sort_unstable();
+    assert_eq!(
+        present, expected,
+        "torrent/docker-compose.yml services drifted; a released service must be added here so churn update brings it to existing installs"
+    );
+}
+
 #[test]
 fn the_fixture_holds_no_real_credentials() {
     let env = std::fs::read_to_string(fixture_env()).expect("fixture env");

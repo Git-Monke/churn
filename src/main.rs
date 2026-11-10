@@ -54,8 +54,9 @@ USAGE:
 COMMANDS:
     show              print the URLs for the installed services; does not need
                       root and does not start or change anything
-    update            update the churn binary and/or the server dashboard to the
-                      latest release; see update options below
+    update            update the churn binary, the server dashboard and the
+                      installed stacks to the latest release; see update options
+                      below
     uninstall         stop and remove the stack containers, then delete their
                       generated config, cache and .env files; media and
                       downloads are kept. Stacks that were never installed are
@@ -71,7 +72,8 @@ COMMANDS:
 
 OPTIONS:
     --stacks <LIST>   comma separated: server,torrent (skips the menu; with
-                      uninstall, show or migrate, limits what is handled)
+                      uninstall, show, update or migrate, limits what is
+                      handled)
     --dry-run         show the plan; write, remove, copy and start nothing
     -y, --yes         skip the final confirmation
     -h, --help        show this help
@@ -103,8 +105,11 @@ UPDATE OPTIONS:
     --check           print installed and latest versions; change nothing
     --to <VERSION>    update to a specific X.Y.Z instead of the latest release
     --image <REF>     override the dashboard image reference (development)
-    --binary-only     update the churn binary, skip the dashboard
-    --dashboard-only  update the dashboard, skip the churn binary
+    --binary-only     update the churn binary only; leaves the dashboard and
+                      the installed stacks untouched
+    --dashboard-only  skip the churn binary; still updates the dashboard image
+                      and reconciles the installed stacks (used internally by
+                      the re-exec after a binary update)
     --force           re-download/re-pull even when already up to date";
 
 #[derive(Default)]
@@ -251,15 +256,8 @@ fn validate_args(args: &Args) -> Result<(), String> {
         return Err("--move and --keep-old are mutually exclusive".to_string());
     }
 
-    if args.update {
-        if args.binary_only && args.dashboard_only {
-            return Err("--binary-only and --dashboard-only are mutually exclusive".to_string());
-        }
-        if let Some(stacks) = &args.stacks
-            && stacks.iter().any(|stack| *stack != Stack::Server)
-        {
-            return Err("churn update only supports the server stack".to_string());
-        }
+    if args.update && args.binary_only && args.dashboard_only {
+        return Err("--binary-only and --dashboard-only are mutually exclusive".to_string());
     }
     Ok(())
 }
@@ -1127,6 +1125,108 @@ fn start_stacks(chosen: &[Stack], dry_run: bool) -> io::Result<()> {
     Ok(())
 }
 
+/// Installed stacks out of `chosen`, in start order.
+///
+/// A stack counts as installed once its generated compose file is on disk: that
+/// is what `churn uninstall` and the installer already use to decide whether a
+/// stack exists, and it keeps a server-only or torrent-only host from getting a
+/// stack it never asked for.
+fn installed_stacks(chosen: &[Stack]) -> Vec<Stack> {
+    installed_stacks_in(&envfile::root(), chosen)
+}
+
+/// [`installed_stacks`] against an explicit root, so it is testable without the
+/// real install directory.
+fn installed_stacks_in(root: &Path, chosen: &[Stack]) -> Vec<Stack> {
+    stack::start_order(
+        chosen
+            .iter()
+            .copied()
+            .filter(|stack| stack.is_installed_in(root))
+            .collect(),
+    )
+}
+
+/// Bring every installed stack in line with the compose file that ships in this
+/// binary, then reconcile its containers.
+///
+/// This is what makes a release that adds, removes or changes a service reach an
+/// existing install: [`assets::materialize`] rewrites the compose file and the
+/// scripts it mounts, and `up -d --remove-orphans` creates new services,
+/// recreates changed ones and removes containers whose service is gone. The
+/// pinned app images are not touched, so this never upgrades Jellyfin, Sonarr,
+/// Radarr, qBittorrent or Prowlarr.
+fn reconcile_stacks(chosen: &[Stack], dry_run: bool) -> io::Result<()> {
+    let installed = installed_stacks(chosen);
+    if installed.is_empty() {
+        return Ok(());
+    }
+
+    for (index, stack) in installed.iter().enumerate() {
+        let header = format!(
+            "[{}/{}] reconciling {}",
+            index + 1,
+            installed.len(),
+            stack.key()
+        );
+
+        if dry_run {
+            // `churn update --dry-run` needs no root, so a Docker it cannot
+            // reach is reported rather than fatal: the rest of the plan is
+            // still worth printing.
+            let progress = spinner();
+            progress.start(&header);
+            let mut plan: Vec<String> = Vec::new();
+            match system::compose_up_dry_run(&stack.dir(), &mut |line| plan.push(line.to_string()))
+            {
+                Ok(()) => {
+                    progress.stop(format!("would reconcile {}", stack.key()));
+                    for line in plan {
+                        println!("  {line}");
+                    }
+                }
+                Err(err) => {
+                    progress.stop(format!("cannot inspect {}", stack.key()));
+                    log::warning(format!("could not preview {}: {err}", stack.key()))?;
+                }
+            }
+            continue;
+        }
+
+        assets::materialize(&envfile::root(), *stack)?;
+
+        if *stack == Stack::Torrent {
+            // Never reconcile the torrent stack without proving it still
+            // confines every networked service to Gluetun.
+            let progress = spinner();
+            progress.start("checking torrent VPN isolation");
+            if let Err(err) = system::verify_torrent_isolation(&stack.dir()) {
+                progress.stop("torrent VPN isolation check failed");
+                return Err(err);
+            }
+            progress.stop("torrent VPN isolation check passed");
+
+            let progress = spinner();
+            progress.start("checking Docker's torrent network route");
+            if let Err(err) = system::verify_compose_default_route(&stack.dir(), "gluetun") {
+                progress.stop("Docker's torrent network has no default route");
+                return Err(err);
+            }
+            progress.stop("Docker's torrent network has a default route");
+        }
+
+        let mut live = LiveLog::start(header);
+        match system::compose_up_reconcile(&stack.dir(), &mut |line| live.push(line)) {
+            Ok(()) => live.success(format!("reconciled {}", stack.key())),
+            Err(err) => {
+                live.error(format!("failed to reconcile {}", stack.key()));
+                return Err(err);
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Stop/remove containers and delete generated state, while keeping the media
 /// and download directories.
 fn uninstall(args: Args) -> io::Result<bool> {
@@ -1805,6 +1905,21 @@ fn update_host(args: &Args) -> io::Result<()> {
     let want_binary = !args.dashboard_only;
     let want_dashboard = !args.binary_only && installed;
 
+    // Which stacks take part in the reconcile. `--binary-only` asks for the
+    // binary alone, so it touches no containers; `--stacks` narrows the default
+    // of "every installed stack". The re-exec child carries `--dashboard-only`
+    // and must still reconcile, because it owns the new compose assets.
+    let reconcile_targets: Vec<Stack> = if args.binary_only {
+        Vec::new()
+    } else {
+        args.stacks.clone().unwrap_or_else(|| Stack::ALL.to_vec())
+    };
+    let installed_targets = installed_stacks(&reconcile_targets);
+    // Stack drift is not visible as a version difference, so a host that is
+    // already on the latest release may still need a reconcile (that is how a
+    // service added in an earlier release reaches an old install).
+    let reconcile_needed = !installed_targets.is_empty();
+
     let binary_path = if want_binary {
         Some(current_binary_path()?)
     } else {
@@ -1831,7 +1946,7 @@ fn update_host(args: &Args) -> io::Result<()> {
         log::warning("running from a source checkout; skipping the churn binary update")?;
     }
 
-    if !binary_needs && !dashboard_needs {
+    if !binary_needs && !dashboard_needs && !reconcile_needed {
         let message = if want_binary && !binary_managed && current_binary != target {
             "running from a source checkout; skipping the churn binary update".to_string()
         } else if server_installed() {
@@ -1890,6 +2005,22 @@ fn update_host(args: &Args) -> io::Result<()> {
             println!("  current  {old_ref}");
             println!("  target   {target_ref}");
         }
+        if reconcile_needed {
+            println!("stacks");
+            for stack in &installed_targets {
+                println!("  reconcile {}", stack.key());
+            }
+        }
+        if let Some(stacks) = &args.stacks {
+            let skipped: Vec<&str> = stacks
+                .iter()
+                .filter(|stack| !installed_targets.contains(stack))
+                .map(|stack| stack.key())
+                .collect();
+            if !skipped.is_empty() {
+                println!("  skip      {} (not installed)", skipped.join(", "));
+            }
+        }
     }
 
     if args.dry_run {
@@ -1901,15 +2032,20 @@ fn update_host(args: &Args) -> io::Result<()> {
                 "would pull and recreate dashboard from {target_ref}"
             ))?;
         }
+        if reconcile_needed {
+            reconcile_stacks(&reconcile_targets, true)?;
+        }
         finish_update(child, "dry run complete — nothing downloaded or started")?;
         return Ok(());
     }
 
-    let prompt = match (binary_needs, dashboard_needs) {
-        (true, true) => "Update churn and restart the dashboard?",
-        (true, false) => "Update churn?",
-        (false, true) => "Pull and restart the dashboard?",
-        (false, false) => "Nothing to update",
+    let prompt = match (binary_needs, dashboard_needs, reconcile_needed) {
+        (true, true, _) => "Update churn, restart the dashboard and reconcile the stacks?",
+        (true, false, true) => "Update churn and reconcile the stacks?",
+        (true, false, false) => "Update churn?",
+        (false, true, _) => "Pull and restart the dashboard and reconcile the stacks?",
+        (false, false, true) => "Reconcile the installed stacks with the compose files?",
+        (false, false, false) => "Nothing to update",
     };
     if !args.yes && !confirm(prompt).initial_value(true).interact()? {
         if !child {
@@ -1920,14 +2056,15 @@ fn update_host(args: &Args) -> io::Result<()> {
 
     if binary_needs {
         let exe = self_update(&target)?;
-        if !want_dashboard || !dashboard_needs {
+        if !dashboard_needs && !reconcile_needed {
             update::remove_binary_backup(&exe)?;
             finish_update(child, format!("churn updated to {target}"))?;
             return Ok(());
         }
 
         // The new binary owns the new compose assets. Re-exec it for the
-        // dashboard half; --dashboard-only keeps this from recursing.
+        // docker half; it carries `--dashboard-only`, which only means "the
+        // binary is already current", so it still reconciles the stacks.
         let mut command = Command::new(&exe);
         command
             .arg("update")
@@ -1941,6 +2078,14 @@ fn update_host(args: &Args) -> io::Result<()> {
         if args.force {
             command.arg("--force");
         }
+        if let Some(stacks) = &args.stacks {
+            let list = stacks
+                .iter()
+                .map(|stack| stack.key())
+                .collect::<Vec<_>>()
+                .join(",");
+            command.arg("--stacks").arg(list);
+        }
         command.env("CHURN_UPDATE_CHILD", "1");
         let err = command.exec();
         let _ = update::restore_binary(&exe);
@@ -1949,28 +2094,53 @@ fn update_host(args: &Args) -> io::Result<()> {
         )));
     }
 
-    if want_dashboard && dashboard_needs {
-        if !system::docker_ready() {
-            return Err(io::Error::other(
-                "docker with the compose plugin is required to update the dashboard",
-            ));
-        }
-        if let Err(err) = update_dashboard(&target_ref, &old_ref, args.force) {
-            let backup = if child { backup_hint() } else { None };
-            return Err(io::Error::other(match backup {
-                Some(path) => format!("{err}\nprevious churn binary kept at {}", path.display()),
-                None => err.to_string(),
-            }));
-        }
+    if ((want_dashboard && dashboard_needs) || reconcile_needed) && !system::docker_ready() {
+        return Err(io::Error::other(
+            "docker with the compose plugin is required to update the dashboard and the stacks",
+        ));
+    }
+
+    if want_dashboard
+        && dashboard_needs
+        && let Err(err) = update_dashboard(&target_ref, &old_ref, args.force)
+    {
+        let backup = if child { backup_hint() } else { None };
+        return Err(io::Error::other(match backup {
+            Some(path) => format!("{err}\nprevious churn binary kept at {}", path.display()),
+            None => err.to_string(),
+        }));
+    }
+
+    if reconcile_needed && let Err(err) = reconcile_stacks(&reconcile_targets, false) {
+        let backup = if child { backup_hint() } else { None };
+        return Err(io::Error::other(match backup {
+            Some(path) => format!("{err}\nprevious churn binary kept at {}", path.display()),
+            None => err.to_string(),
+        }));
     }
 
     cleanup_update_backup();
-    let message = if want_dashboard {
-        format!("churn {current_binary}; dashboard {target_ref}")
+    let dashboard_part = if want_dashboard {
+        format!("; dashboard {target_ref}")
     } else {
-        format!("churn {current_binary}")
+        String::new()
     };
-    finish_update(child, message)?;
+    let stacks_part = if reconcile_needed {
+        format!(
+            "; stacks reconciled ({})",
+            installed_targets
+                .iter()
+                .map(|stack| stack.key())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    } else {
+        String::new()
+    };
+    finish_update(
+        child,
+        format!("churn {current_binary}{dashboard_part}{stacks_part}"),
+    )?;
     Ok(())
 }
 
@@ -2379,6 +2549,8 @@ mod tests {
                 "show" => args.show = true,
                 "update" => args.update = true,
                 "uninstall" => args.uninstall = true,
+                "--binary-only" => args.binary_only = true,
+                "--dashboard-only" => args.dashboard_only = true,
                 "migrate" => args.migrate = true,
                 "verify-vpn" => args.verify_vpn = true,
                 "--dry-run" => args.dry_run = true,
@@ -2426,5 +2598,68 @@ mod tests {
             panic!("two commands should be rejected");
         };
         assert!(err.contains("cannot be combined"), "{err}");
+    }
+
+    #[test]
+    fn update_accepts_the_torrent_stack() {
+        // Reaching a torrent-only service added in a later release means update
+        // has to be able to reconcile the torrent stack.
+        let args = parse(&["update", "--stacks", "server,torrent"])
+            .expect("update --stacks server,torrent parses");
+        assert!(args.update);
+        assert_eq!(
+            args.stacks.as_deref(),
+            Some(&[Stack::Server, Stack::Torrent][..])
+        );
+    }
+
+    #[test]
+    fn update_rejects_both_halves_at_once() {
+        let Err(err) = parse(&["update", "--binary-only", "--dashboard-only"]) else {
+            panic!("--binary-only with --dashboard-only should be rejected");
+        };
+        assert!(err.contains("mutually exclusive"), "{err}");
+    }
+
+    /// A root directory holding compose files for exactly `installed`.
+    fn root_with(label: &str, installed: &[Stack]) -> PathBuf {
+        let root =
+            std::env::temp_dir().join(format!("churn-reconcile-{}-{label}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        for stack in installed {
+            let stack_dir = root.join(stack.key());
+            fs::create_dir_all(&stack_dir).expect("stack dir");
+            fs::write(stack_dir.join("docker-compose.yml"), "services: {}\n").expect("compose");
+        }
+        root
+    }
+
+    #[test]
+    fn only_the_stacks_that_are_installed_are_reconciled() {
+        let root = root_with("torrent-only", &[Stack::Torrent]);
+        assert_eq!(
+            installed_stacks_in(&root, &Stack::ALL),
+            vec![Stack::Torrent]
+        );
+        fs::remove_dir_all(&root).unwrap();
+
+        let root = root_with("both", &[Stack::Server, Stack::Torrent]);
+        // Server first: prowlarr-init reads the Sonarr/Radarr keys written by it.
+        assert_eq!(
+            installed_stacks_in(&root, &[Stack::Torrent, Stack::Server]),
+            vec![Stack::Server, Stack::Torrent]
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_stack_that_was_not_asked_for_is_not_reconciled() {
+        let root = root_with("narrowed", &Stack::ALL);
+        assert_eq!(
+            installed_stacks_in(&root, &[Stack::Server]),
+            vec![Stack::Server]
+        );
+        assert!(installed_stacks_in(&root, &[]).is_empty());
+        fs::remove_dir_all(&root).unwrap();
     }
 }

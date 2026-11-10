@@ -47,16 +47,25 @@ image, and configures the services.
 
 ## Update
 
-Update the churn CLI and the server dashboard to the latest release:
+Update the churn CLI, the server dashboard and the installed stacks to the
+latest release:
 
 ```bash
 sudo churn update
 ```
 
 `churn update` downloads and checksum-verifies the same release binary that
-`install.sh` installs, replaces it atomically, then pulls the matching dashboard
-image and recreates only the dashboard container. The previous binary is kept
-as `churn.previous` until the dashboard is healthy.
+`install.sh` installs and replaces it atomically, pulls the matching dashboard
+image, then reconciles both stacks against the compose files that ship in the
+new binary. Reconciling means containers added in a release are created,
+removed ones are pruned, and changed ones are recreated; containers that did not
+change are left running. The previous binary is kept as `churn.previous` until
+the dashboard is healthy and the stacks are reconciled.
+
+Drift is not visible as a version difference, so `churn update` still reconciles
+when the version is already current. A stack that is not installed is skipped,
+and the torrent stack is only touched after the VPN isolation and default route
+checks pass.
 
 Check versions without changing anything (no root required):
 
@@ -64,9 +73,11 @@ Check versions without changing anything (no root required):
 churn update --check
 ```
 
-Use `--binary-only` or `--dashboard-only` to update one part, and `--to 0.1.4`
-to pin a specific release. Jellyfin, Sonarr and Radarr stay on their pinned
-versions.
+Use `--binary-only` to update the CLI alone, `--dashboard-only` to skip the CLI
+but still update the dashboard and reconcile the stacks, `--stacks server` to
+reconcile one stack, and `--to 0.1.4` to pin a specific release. `--dry-run`
+lists the containers that would be created or recreated. Jellyfin, Sonarr,
+Radarr, qBittorrent and Prowlarr stay on their pinned image versions.
 
 ## Usage from a source checkout
 

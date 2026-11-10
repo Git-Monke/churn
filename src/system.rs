@@ -161,6 +161,31 @@ pub fn compose_up(dir: &Path, on_event: &mut dyn FnMut(&str)) -> io::Result<()> 
     compose_run(dir, "up", &["up", "-d"], on_event)
 }
 
+/// Reconcile an installed project with its compose file: create new services,
+/// recreate the ones whose configuration changed, and remove containers whose
+/// service no longer exists.
+///
+/// `up -d` alone does the first two, but it only warns about orphan containers
+/// left by a removed service, so `--remove-orphans` is what makes this a
+/// reconcile rather than an append. Unchanged services are left running, and
+/// `network_mode: service:` sidecars follow their owner when it is recreated.
+pub fn compose_up_reconcile(dir: &Path, on_event: &mut dyn FnMut(&str)) -> io::Result<()> {
+    compose_run(dir, "up", &["up", "-d", "--remove-orphans"], on_event)
+}
+
+/// The same reconcile, without changing anything.
+///
+/// Compose prints one `Running`/`Starting`/`Recreating`/`Removing` line per
+/// container, so the plan is visible before anything is touched.
+pub fn compose_up_dry_run(dir: &Path, on_event: &mut dyn FnMut(&str)) -> io::Result<()> {
+    compose_run(
+        dir,
+        "up",
+        &["up", "-d", "--remove-orphans", "--dry-run"],
+        on_event,
+    )
+}
+
 /// Published host ports for an existing Compose project in `dir`.
 ///
 /// `--all` includes stopped containers so a reinstall can still reuse the ports
