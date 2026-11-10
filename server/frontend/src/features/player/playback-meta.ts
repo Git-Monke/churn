@@ -4,7 +4,7 @@ export const TICKS_PER_SECOND = 10_000_000;
 
 /** Offer the next episode this long before the file ends, absent a marker. */
 export const UP_NEXT_LEAD_SECONDS = 20;
-export const UP_NEXT_COUNTDOWN_SECONDS = 3;
+export const UP_NEXT_COUNTDOWN_SECONDS = 5;
 
 /** A saved position this close to the end is not worth resuming. */
 export const RESUME_END_MARGIN_SECONDS = 30;

@@ -85,15 +85,29 @@ pub fn storage_path(env: &EnvMap, key: &str) -> Option<String> {
 
 /// Write `managed` keys in order, keeping any unrelated keys from a previous run.
 pub fn write_merged(path: &Path, managed: &[(&str, String)]) -> io::Result<()> {
+    write_merged_dropping(path, managed, &[])
+}
+
+/// [`write_merged`] with keys that must not survive from the previous file.
+///
+/// Used when a managed set changes shape — a VPN provider switch leaves the
+/// other protocol's credentials behind — so the old keys are deleted rather
+/// than preserved by the generic "keep unrelated keys" rule.
+pub fn write_merged_dropping(
+    path: &Path,
+    managed: &[(&str, String)],
+    extra_dropped: &[&str],
+) -> io::Result<()> {
     let existing = read(path);
     // A pre-split install stored one path under `DATA_DIR`. Once `DOWNLOAD_DIR`
     // is managed, the old key must go: keeping it under "preserved" would leave
     // two keys claiming the same thing.
-    let dropped: &[&str] = if managed.iter().any(|(key, _)| *key == "DOWNLOAD_DIR") {
-        &["DATA_DIR"]
+    let mut dropped: Vec<&str> = if managed.iter().any(|(key, _)| *key == "DOWNLOAD_DIR") {
+        vec!["DATA_DIR"]
     } else {
-        &[]
+        Vec::new()
     };
+    dropped.extend_from_slice(extra_dropped);
     let extras: Vec<(&String, &String)> = existing
         .iter()
         .filter(|(key, _)| {

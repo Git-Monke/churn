@@ -7,9 +7,10 @@ use std::path::{Path, PathBuf};
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use cliclack::{input, log};
+use cliclack::{input, log, password, select};
 
 use crate::ports::{self, Port};
+use crate::vpn::VpnProvider;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, PartialOrd, Ord)]
 pub enum Section {
@@ -27,15 +28,17 @@ pub enum Question {
     DownloadDir,
     MediaDir,
     Port(Port),
-    WireguardArchive,
-    WireguardConfig,
+    VpnProvider,
     WireguardPrivateKey,
     WireguardAddresses,
+    OpenvpnUser,
+    OpenvpnPassword,
+    VpnLocation,
 }
 
 impl Question {
     /// Every variant, used to prefill answers from a previous `.env`.
-    pub const ALL: [Question; 13] = [
+    pub const ALL: [Question; 15] = [
         Question::DownloadDir,
         Question::MediaDir,
         Question::Port(Port::Jellyfin),
@@ -45,39 +48,42 @@ impl Question {
         Question::Port(Port::Qbittorrent),
         Question::Port(Port::Prowlarr),
         Question::Port(Port::VpnStatus),
-        Question::WireguardArchive,
-        Question::WireguardConfig,
+        Question::VpnProvider,
         Question::WireguardPrivateKey,
         Question::WireguardAddresses,
-    ];
-
-    /// Answers filled in from the archive, shown in the plan but never asked.
-    pub const DETAILS: [Question; 3] = [
-        Question::WireguardConfig,
-        Question::WireguardPrivateKey,
-        Question::WireguardAddresses,
+        Question::OpenvpnUser,
+        Question::OpenvpnPassword,
+        Question::VpnLocation,
     ];
 
     pub fn section(self) -> Section {
         match self {
-            Question::WireguardArchive
-            | Question::WireguardConfig
+            Question::VpnProvider
             | Question::WireguardPrivateKey
-            | Question::WireguardAddresses => Section::Vpn,
+            | Question::WireguardAddresses
+            | Question::OpenvpnUser
+            | Question::OpenvpnPassword
+            | Question::VpnLocation => Section::Vpn,
             Question::DownloadDir | Question::MediaDir | Question::Port(_) => Section::Storage,
         }
     }
 
     /// Name of the key this answer is stored under in `.env`.
+    ///
+    /// [`Question::VpnProvider`] stores Gluetun's own `VPN_SERVICE_PROVIDER`
+    /// value, and [`Question::VpnLocation`] stores the neutral `VPN_LOCATION`.
+    /// Both round-trip: a rerun reads back exactly what it wrote.
     pub fn env_key(self) -> &'static str {
         match self {
             Question::DownloadDir => "DOWNLOAD_DIR",
             Question::MediaDir => "MEDIA_DIR",
             Question::Port(port) => port.env_key(),
-            Question::WireguardArchive => "WIREGUARD_ARCHIVE",
-            Question::WireguardConfig => "WIREGUARD_CONFIG",
+            Question::VpnProvider => "VPN_SERVICE_PROVIDER",
             Question::WireguardPrivateKey => "WIREGUARD_PRIVATE_KEY",
             Question::WireguardAddresses => "WIREGUARD_ADDRESSES",
+            Question::OpenvpnUser => "OPENVPN_USER",
+            Question::OpenvpnPassword => "OPENVPN_PASSWORD",
+            Question::VpnLocation => "VPN_LOCATION",
         }
     }
 
@@ -86,15 +92,51 @@ impl Question {
             Question::DownloadDir => "Where should in-progress downloads live?",
             Question::MediaDir => "Where should downloaded media be stored?",
             Question::Port(port) => port.label(),
-            Question::WireguardArchive => "Path to the Mullvad WireGuard config zip",
-            Question::WireguardConfig => "WireGuard config file",
+            Question::VpnProvider => "Which VPN do you use?",
             Question::WireguardPrivateKey => "WireGuard private key",
             Question::WireguardAddresses => "WireGuard interface address",
+            Question::OpenvpnUser => "OpenVPN username",
+            Question::OpenvpnPassword => "OpenVPN password",
+            Question::VpnLocation => "Which server location?",
         }
     }
 
+    /// Questions whose answer must never appear in a plan summary or a log.
     pub fn is_secret(self) -> bool {
-        matches!(self, Question::WireguardPrivateKey)
+        matches!(
+            self,
+            Question::WireguardPrivateKey | Question::OpenvpnPassword
+        )
+    }
+
+    /// Whether this question is part of `provider`'s configured protocol.
+    ///
+    /// The wizard asks the provider first and then drops everything that does
+    /// not apply, so a ProtonVPN user is never shown an OpenVPN password prompt
+    /// and a PIA user is never asked for a WireGuard key.
+    pub fn applies_to(self, provider: VpnProvider) -> bool {
+        match self {
+            Question::WireguardPrivateKey => provider.uses_wireguard(),
+            Question::WireguardAddresses => provider.needs_address(),
+            Question::OpenvpnUser | Question::OpenvpnPassword => !provider.uses_wireguard(),
+            Question::VpnProvider | Question::VpnLocation => true,
+            Question::DownloadDir | Question::MediaDir | Question::Port(_) => true,
+        }
+    }
+
+    /// The question that owns `env_key`, for reading a stored `.env` value
+    /// back into an answer. Ports and the provider share the reverse lookup.
+    pub fn from_env_key(key: &str) -> Option<Question> {
+        Question::ALL
+            .into_iter()
+            .find(|question| question.env_key() == key)
+    }
+
+    /// The provider stored in `answers`, falling back to the default.
+    pub fn provider_from(value: Option<&str>) -> VpnProvider {
+        value
+            .and_then(VpnProvider::from_gluetun_id)
+            .unwrap_or(VpnProvider::DEFAULT)
     }
 
     /// Port prompt used by the resolver. Rejects ports another churn service
@@ -137,7 +179,7 @@ impl Question {
     /// Validation is handled here rather than with `Input::validate` so that a
     /// rejected answer gets a fresh prompt: cliclack keeps the typed buffer on
     /// error, which makes a mistyped path impossible to correct.
-    pub fn ask(self, stored: Option<&str>) -> io::Result<String> {
+    pub fn ask(self, stored: Option<&str>, stored_provider: Option<&str>) -> io::Result<String> {
         match self {
             Question::DownloadDir => ask_directory(self.label(), stored.or(Some("/data")), "/data"),
             // The media default is derived from the download answer, which this
@@ -149,34 +191,127 @@ impl Question {
                     .unwrap_or_else(|| port.default_port());
                 self.ask_port(port, default, &[])
             }
-            Question::WireguardArchive => {
-                let mut default = stored.map(normalize_path).unwrap_or_default();
-                loop {
-                    let mut prompt = input(self.label())
-                        .placeholder("~/Downloads/mullvad_wireguard_linux_us_all.zip")
-                        .autocomplete(file_path_suggestions);
-                    if !default.is_empty() {
-                        prompt = prompt.default_input(&default);
-                    }
-                    let value: String = prompt.interact()?;
-                    let path = expand_tilde(value.trim());
-                    let display = path.to_string_lossy().to_string();
-                    match crate::mullvad::entries(&path) {
-                        Ok(_) => return Ok(display),
-                        Err(message) => {
-                            log::error(message)?;
-                            default = display;
-                        }
-                    }
-                }
+            Question::VpnProvider => Ok(ask_provider(stored)?.gluetun_id().to_string()),
+            Question::WireguardPrivateKey => ask_wireguard_key(stored),
+            Question::WireguardAddresses => ask_wireguard_address(stored),
+            Question::OpenvpnUser => ask_openvpn_user(stored),
+            Question::OpenvpnPassword => ask_openvpn_password(),
+            Question::VpnLocation => {
+                let provider = Question::provider_from(stored_provider);
+                ask_location(provider, stored)
             }
-            Question::WireguardConfig
-            | Question::WireguardPrivateKey
-            | Question::WireguardAddresses => Err(io::Error::other(
-                "internal error: WireGuard credentials come from the config archive",
-            )),
         }
     }
+}
+
+/// Ask which provider this install tunnels through.
+fn ask_provider(stored: Option<&str>) -> io::Result<VpnProvider> {
+    let current = Question::provider_from(stored);
+    let mut prompt = select("Which VPN do you use?");
+    for provider in VpnProvider::ALL {
+        prompt = prompt.item(provider, provider.label(), provider.hint());
+    }
+    prompt.initial_value(current).interact()
+}
+
+fn ask_wireguard_key(stored: Option<&str>) -> io::Result<String> {
+    let mut default = stored.map(str::trim).unwrap_or_default().to_string();
+    loop {
+        let mut prompt = input(Question::WireguardPrivateKey.label())
+            .placeholder("wOEI9rqqbDwnN8/Bpp22sVz48T71vJ4fYmFWujulwUU=");
+        if !default.is_empty() {
+            prompt = prompt.default_input(&default);
+        }
+        let value: String = prompt.interact()?;
+        match validate_wireguard_key(value.trim()) {
+            Ok(()) => return Ok(value.trim().to_string()),
+            Err(message) => {
+                log::error(message)?;
+                default.clear();
+            }
+        }
+    }
+}
+
+fn ask_wireguard_address(stored: Option<&str>) -> io::Result<String> {
+    let default = stored.map(str::trim).unwrap_or_default().to_string();
+    loop {
+        let mut prompt = input(Question::WireguardAddresses.label())
+            .placeholder("10.64.0.2/32")
+            .validate(|value: &String| validate_wireguard_address(value.trim()));
+        if !default.is_empty() {
+            prompt = prompt.default_input(&default);
+        }
+        match prompt.interact::<String>() {
+            Ok(value) => return Ok(value.trim().to_string()),
+            // cliclack keeps the rejected buffer on error, which turns a typo
+            // into an uncorrectable prompt; start over with the same default.
+            Err(error) => log::error(error.to_string())?,
+        }
+    }
+}
+
+fn ask_openvpn_user(stored: Option<&str>) -> io::Result<String> {
+    let default = stored.map(str::trim).unwrap_or_default().to_string();
+    loop {
+        let mut prompt = input(Question::OpenvpnUser.label())
+            .placeholder("p1234567")
+            .validate(|value: &String| {
+                if value.trim().is_empty() {
+                    Err("An OpenVPN username is required.".to_string())
+                } else {
+                    Ok(())
+                }
+            });
+        if !default.is_empty() {
+            prompt = prompt.default_input(&default);
+        }
+        match prompt.interact::<String>() {
+            Ok(value) => return Ok(value.trim().to_string()),
+            Err(error) => log::error(error.to_string())?,
+        }
+    }
+}
+
+/// A password is never prefilled: an empty prompt is a deliberate re-entry, not
+/// a lost answer, and cliclack cannot show a default without leaking its length.
+fn ask_openvpn_password() -> io::Result<String> {
+    loop {
+        match password(Question::OpenvpnPassword.label())
+            .mask('*')
+            .interact()
+        {
+            Ok(value) => return Ok(value),
+            Err(error) => log::error(error.to_string())?,
+        }
+    }
+}
+
+/// Location picker: filterable, restricted to the provider's embedded list.
+fn ask_location(provider: VpnProvider, stored: Option<&str>) -> io::Result<String> {
+    let locations = provider.locations();
+    let current = stored.map(str::trim).unwrap_or_default();
+    // Case-insensitive match, so a hand-edited `netherlands` still lands on the
+    // right entry instead of silently defaulting to the first one.
+    let initial = locations
+        .iter()
+        .copied()
+        .find(|known| known.eq_ignore_ascii_case(current))
+        .unwrap_or_else(|| {
+            provider
+                .default_location()
+                .unwrap_or_else(|| locations.first().copied().unwrap_or("Netherlands"))
+        });
+
+    let mut prompt = select(format!("Which {} location?", provider.label()))
+        .filter_mode()
+        .max_rows(12);
+    for location in locations {
+        prompt = prompt.item(*location, *location, String::new());
+    }
+    // `T` is `&'static str` here so the embedded list is never copied; the
+    // answer is owned from the moment it leaves the prompt.
+    prompt.initial_value(initial).interact().map(str::to_string)
 }
 
 /// Ask for a writable directory with the same completion rules as the installer.
@@ -254,11 +389,6 @@ pub fn normalize_path(value: &str) -> String {
         normalized.pop();
     }
     normalized
-}
-
-/// Suggestions for prompts that accept a file or directory path.
-fn file_path_suggestions(input: &str) -> Vec<String> {
-    complete_paths(input, true)
 }
 
 /// Suggestions for prompts that only accept a directory path.
@@ -405,12 +535,12 @@ fn nearest_existing(path: &Path) -> PathBuf {
 
 pub fn validate_wireguard_key(value: &str) -> Result<(), String> {
     let decoded = STANDARD.decode(value).map_err(
-        |_| "Not valid base64 — copy the \"PrivateKey\" value from the Mullvad .conf config.",
+        |_| "Not valid base64 — copy the \"PrivateKey\" value from your provider's WireGuard config.",
     )?;
     match decoded.len() {
         32 => Ok(()),
         other => Err(format!(
-            "Decoded to {other} bytes, expected 32 — this may be the Mullvad account key instead of a WireGuard key."
+            "Decoded to {other} bytes, expected 32 — this is an account key rather than a WireGuard key."
         )),
     }
 }

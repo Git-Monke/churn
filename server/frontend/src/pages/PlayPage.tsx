@@ -623,6 +623,14 @@ export function PlayPage({
       return;
     }
     if (!item || resumeAppliedRef.current) {
+      // A stream rebuilt for the same item (e.g. a window-focus refetch
+      // returned a new play session) must continue from the playhead, not
+      // restart: the resume ref was already consumed by the first load.
+      const resumeSeconds = currentTicks();
+      if (resumeSeconds > 0) {
+        seekTo(video, Math.round(resumeSeconds * TICKS_PER_SECOND));
+      }
+      void video.play().catch(() => {});
       return;
     }
     resumeAppliedRef.current = true;

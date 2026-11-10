@@ -8,6 +8,7 @@ use crate::envfile::{self, EnvMap};
 use crate::ports::{self, Port};
 use crate::question::{Question, Section};
 use crate::security;
+use crate::vpn::VpnProvider;
 
 pub type Answers = HashMap<Question, String>;
 
@@ -20,17 +21,10 @@ pub const DASHBOARD_IMAGE_ENV: &str = "CHURN_DASHBOARD_IMAGE";
 /// setup writes the API key.
 pub const DASHBOARD_SERVICE: &str = "dashboard";
 
-/// Fallback Mullvad location written to `SERVER_COUNTRIES` when the selected
-/// config does not identify a known country.
-///
-/// Country selection is intentionally not a prompt: churn derives the exit
-/// country from the Mullvad config filename (`us-atl-wg-001.conf` -> `USA`).
-/// Set `SERVER_COUNTRIES` in `torrent/.env` to override it.
-pub const FALLBACK_SERVER_COUNTRIES: &str = "Netherlands";
-
-/// The value older churn releases wrote regardless of the selected config.
-/// Reruns treat it as generated state so they can adopt the config's country.
-const LEGACY_SERVER_COUNTRIES: &str = "Netherlands";
+/// Location written when neither a stored choice nor the provider default is
+/// usable. Every provider's embedded list contains it except PIA, whose list is
+/// region-shaped, so [`VpnProvider::default_location`] is consulted first.
+pub const FALLBACK_VPN_LOCATION: &str = "Netherlands";
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Stack {
@@ -51,9 +45,7 @@ impl Stack {
     pub fn description(self) -> &'static str {
         match self {
             Stack::Server => "Jellyfin + Sonarr + Radarr media server",
-            Stack::Torrent => {
-                "qBittorrent + Prowlarr + FlareSolverr behind a Mullvad WireGuard tunnel"
-            }
+            Stack::Torrent => "qBittorrent + Prowlarr + FlareSolverr behind a Gluetun VPN tunnel",
         }
     }
 
@@ -68,7 +60,12 @@ impl Stack {
                 Question::Port(Port::Dashboard),
             ],
             Stack::Torrent => &[
-                Question::WireguardArchive,
+                Question::VpnProvider,
+                Question::WireguardPrivateKey,
+                Question::WireguardAddresses,
+                Question::OpenvpnUser,
+                Question::OpenvpnPassword,
+                Question::VpnLocation,
                 Question::DownloadDir,
                 Question::MediaDir,
                 Question::Port(Port::Qbittorrent),
@@ -251,28 +248,35 @@ impl Stack {
         }
 
         if self == Stack::Torrent {
-            managed.push(("VPN_SERVICE_PROVIDER", "mullvad".to_string()));
-            managed.push(("VPN_TYPE", "wireguard".to_string()));
+            let provider = answer_provider(answers, stored_env);
+            managed.push(("VPN_SERVICE_PROVIDER", provider.gluetun_id().to_string()));
+            managed.push(("VPN_TYPE", provider.protocol().as_env().to_string()));
+            // Only the keys this provider's protocol actually reads, so a
+            // provider switch never leaves a stale credential of the wrong
+            // type behind in the file.
             for question in [
-                Question::WireguardArchive,
-                Question::WireguardConfig,
                 Question::WireguardPrivateKey,
                 Question::WireguardAddresses,
+                Question::OpenvpnUser,
+                Question::OpenvpnPassword,
             ] {
-                if let Some(value) = answers.get(&question) {
-                    managed.push((question.env_key(), value.clone()));
+                if !question.applies_to(provider) {
+                    continue;
                 }
+                let value = answers
+                    .get(&question)
+                    .cloned()
+                    .or_else(|| stored_env.get(question.env_key()).cloned())
+                    .unwrap_or_default();
+                managed.push((question.env_key(), value));
             }
-            // No country prompt for now: keep a hand-edited choice, else use
-            // the country encoded in the selected Mullvad config filename.
-            let config_entry = answers
-                .get(&Question::WireguardConfig)
-                .or_else(|| stored_env.get("WIREGUARD_CONFIG"));
-            let countries = server_countries(
-                stored_env.get("SERVER_COUNTRIES").map(String::as_str),
-                config_entry.map(String::as_str),
-            );
-            managed.push(("SERVER_COUNTRIES", countries));
+            // Written twice on purpose: `VPN_LOCATION` is the provider-neutral
+            // key churn reads back on a rerun, and the provider's own key is
+            // what Gluetun actually parses. Both hold the same value, so a
+            // hand-edit of either is visible in the file.
+            let location = vpn_location(answers, stored_env, provider);
+            managed.push(("VPN_LOCATION", location.clone()));
+            managed.push((provider.location_key(), location));
             // Prowlarr and Sonarr/Radarr live in different network namespaces;
             // both reach each other through this address (same-machine setups).
             // When detection fails, keep a hand-edited HOST_IP from .env.
@@ -285,9 +289,32 @@ impl Stack {
         managed
     }
 
+    /// `.env` keys that must not survive this run.
+    ///
+    /// The generic writer preserves unrelated keys, which is right for
+    /// hand-added settings and wrong for state churn itself used to own: the
+    /// other protocol's credentials after a provider switch, and the archive
+    /// keys that predate typed credentials.
+    pub fn dropped_env(self, answers: &Answers) -> Vec<&'static str> {
+        if self != Stack::Torrent {
+            return Vec::new();
+        }
+        let mut stored_env = envfile::read(&self.other().env_path());
+        stored_env.extend(envfile::read(&self.env_path()));
+        let provider = answer_provider(answers, &stored_env);
+        let mut dropped = crate::vpn::stale_credential_keys(provider);
+        dropped.extend(crate::vpn::stale_location_keys(provider));
+        dropped.extend(["WIREGUARD_ARCHIVE", "WIREGUARD_CONFIG"]);
+        dropped
+    }
+
     pub fn apply(self, answers: &Answers) -> io::Result<PathBuf> {
         let path = self.env_path();
-        envfile::write_merged(&path, &self.managed_env(answers))?;
+        envfile::write_merged_dropping(
+            &path,
+            &self.managed_env(answers),
+            &self.dropped_env(answers),
+        )?;
         Ok(path)
     }
 }
@@ -389,18 +416,38 @@ fn dashboard_image_from(override_image: Option<String>) -> String {
         .unwrap_or_else(|| format!("{DASHBOARD_IMAGE_REPO}:{}", env!("CARGO_PKG_VERSION")))
 }
 
-fn server_countries(existing: Option<&str>, config_entry: Option<&str>) -> String {
-    let existing = existing.map(str::trim).filter(|value| !value.is_empty());
-    // `Netherlands` was hardcoded by older releases; migrate it instead of
-    // preserving the bug on rerun. Any other value is an explicit override.
-    if let Some(value) = existing.filter(|value| *value != LEGACY_SERVER_COUNTRIES) {
-        return value.to_string();
-    }
-    config_entry
-        .and_then(crate::mullvad::country_for_entry)
-        .map(str::to_string)
-        .or_else(|| existing.map(str::to_string))
-        .unwrap_or_else(|| FALLBACK_SERVER_COUNTRIES.to_string())
+/// The provider an install is configured for.
+///
+/// The answer wins; otherwise the value a previous run wrote is read back so a
+/// rerun keeps the provider the user originally chose. `VPN_SERVICE_PROVIDER`
+/// is Gluetun's own key, so it is also what a hand-edited `.env` uses.
+fn answer_provider(answers: &Answers, stored_env: &EnvMap) -> VpnProvider {
+    answers
+        .get(&Question::VpnProvider)
+        .map(String::as_str)
+        .or_else(|| stored_env.get("VPN_SERVICE_PROVIDER").map(String::as_str))
+        .and_then(VpnProvider::from_gluetun_id)
+        .unwrap_or(VpnProvider::DEFAULT)
+}
+
+/// The location written as both `VPN_LOCATION` and the provider's filter key.
+///
+/// A stored value that the provider does not know is discarded rather than
+/// written: Gluetun would silently pick a server in some other country, which
+/// is worse than an obviously default choice.
+fn vpn_location(answers: &Answers, stored_env: &EnvMap, provider: VpnProvider) -> String {
+    let candidates = [
+        answers.get(&Question::VpnLocation).map(String::as_str),
+        stored_env.get("VPN_LOCATION").map(String::as_str),
+        stored_env.get(provider.location_key()).map(String::as_str),
+    ];
+    candidates
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .find(|value| !value.is_empty() && provider.validate_location(value).is_ok())
+        .unwrap_or_else(|| provider.default_location().unwrap_or(FALLBACK_VPN_LOCATION))
+        .to_string()
 }
 
 /// Every unique question across the chosen stacks, VPN before Storage.
@@ -454,37 +501,124 @@ mod tests {
         );
     }
 
+    fn answers_with(pairs: &[(Question, &str)]) -> Answers {
+        pairs
+            .iter()
+            .map(|(question, value)| (*question, (*value).to_string()))
+            .collect()
+    }
+
     #[test]
-    fn server_country_comes_from_the_selected_config() {
-        assert_eq!(server_countries(None, Some("us-atl-wg-001.conf")), "USA");
+    fn provider_answer_wins_and_stored_value_is_the_fallback() {
+        let stored: EnvMap = [("VPN_SERVICE_PROVIDER".to_string(), "ivpn".to_string())]
+            .into_iter()
+            .collect();
         assert_eq!(
-            server_countries(Some(""), Some("se-sto-wg-002.conf")),
+            answer_provider(
+                &answers_with(&[(Question::VpnProvider, "nordvpn")]),
+                &stored
+            ),
+            VpnProvider::NordVpn
+        );
+        assert_eq!(answer_provider(&Answers::new(), &stored), VpnProvider::Ivpn);
+        // An unknown or hand-mangled value must not become a bogus provider.
+        let junk: EnvMap = [("VPN_SERVICE_PROVIDER".to_string(), "nope".to_string())]
+            .into_iter()
+            .collect();
+        assert_eq!(
+            answer_provider(&Answers::new(), &junk),
+            VpnProvider::DEFAULT
+        );
+    }
+
+    #[test]
+    fn location_prefers_the_answer_then_the_provider_key() {
+        let stored: EnvMap = [("SERVER_COUNTRIES".to_string(), "Sweden".to_string())]
+            .into_iter()
+            .collect();
+        assert_eq!(
+            vpn_location(
+                &answers_with(&[(Question::VpnLocation, "Norway")]),
+                &stored,
+                VpnProvider::Mullvad
+            ),
+            "Norway"
+        );
+        assert_eq!(
+            vpn_location(&Answers::new(), &stored, VpnProvider::Mullvad),
             "Sweden"
         );
     }
 
     #[test]
-    fn explicit_country_overrides_the_config_and_legacy_default_is_migrated() {
+    fn location_unknown_to_the_provider_falls_back_to_its_default() {
+        // "US Seattle" is a PIA region; a Mullvad install must not write it.
+        let stored: EnvMap = [("VPN_LOCATION".to_string(), "US Seattle".to_string())]
+            .into_iter()
+            .collect();
         assert_eq!(
-            server_countries(Some("Switzerland"), Some("us-atl-wg-001.conf")),
-            "Switzerland"
+            vpn_location(&Answers::new(), &stored, VpnProvider::Mullvad),
+            VpnProvider::Mullvad.default_location().unwrap()
         );
         assert_eq!(
-            server_countries(Some(LEGACY_SERVER_COUNTRIES), Some("us-atl-wg-001.conf")),
-            "USA"
+            vpn_location(&Answers::new(), &stored, VpnProvider::PrivateInternetAccess),
+            "US Seattle"
         );
     }
 
     #[test]
-    fn unknown_config_falls_back_to_existing_or_default() {
-        assert_eq!(
-            server_countries(None, Some("readme.conf")),
-            FALLBACK_SERVER_COUNTRIES
-        );
-        assert_eq!(
-            server_countries(Some(LEGACY_SERVER_COUNTRIES), None),
-            LEGACY_SERVER_COUNTRIES
-        );
+    fn torrent_env_writes_one_protocol_and_both_location_keys() {
+        let answers = answers_with(&[
+            (Question::VpnProvider, "private internet access"),
+            (Question::OpenvpnUser, "p1234567"),
+            (Question::OpenvpnPassword, "hunter2"),
+            (Question::VpnLocation, "US Seattle"),
+            (
+                Question::WireguardPrivateKey,
+                "wOEI9rqqbDwnN8/Bpp22sVz48T71vJ4fYmFWujulwUU=",
+            ),
+        ]);
+        let env: HashMap<&str, String> = Stack::Torrent
+            .managed_env_with(&answers, &EnvMap::new())
+            .into_iter()
+            .collect();
+
+        assert_eq!(env["VPN_SERVICE_PROVIDER"], "private internet access");
+        assert_eq!(env["VPN_TYPE"], "openvpn");
+        assert_eq!(env["OPENVPN_USER"], "p1234567");
+        assert_eq!(env["OPENVPN_PASSWORD"], "hunter2");
+        assert_eq!(env["SERVER_REGIONS"], "US Seattle");
+        assert_eq!(env["VPN_LOCATION"], "US Seattle");
+        assert!(!env.contains_key("WIREGUARD_PRIVATE_KEY"));
+        assert!(!env.contains_key("SERVER_COUNTRIES"));
+    }
+
+    #[test]
+    fn torrent_env_omits_the_address_when_the_provider_needs_no_address() {
+        let answers = answers_with(&[
+            (Question::VpnProvider, "protonvpn"),
+            (Question::VpnLocation, "Netherlands"),
+        ]);
+        let stored: EnvMap = [
+            ("WIREGUARD_PRIVATE_KEY".to_string(), "abc".to_string()),
+            (
+                "WIREGUARD_ADDRESSES".to_string(),
+                "10.64.0.2/32".to_string(),
+            ),
+        ]
+        .into_iter()
+        .collect();
+        let env: HashMap<&str, String> = Stack::Torrent
+            .managed_env_with(&answers, &stored)
+            .into_iter()
+            .collect();
+
+        assert_eq!(env["VPN_TYPE"], "wireguard");
+        assert_eq!(env["WIREGUARD_PRIVATE_KEY"], "abc");
+        // ProtonVPN takes the key alone; writing a stale address would be a
+        // leftover from whichever provider needed one before.
+        assert!(!env.contains_key("WIREGUARD_ADDRESSES"));
+        assert_eq!(env["SERVER_COUNTRIES"], "Netherlands");
     }
 
     #[test]

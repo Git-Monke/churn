@@ -23,7 +23,6 @@ use churn::envfile;
 use churn::jellyfin::{self, Credentials, Jellyfin};
 use churn::live::LiveLog;
 use churn::migrate;
-use churn::mullvad;
 use churn::ports::{self, Port};
 use churn::question;
 use churn::question::{Question, Section};
@@ -32,6 +31,7 @@ use churn::stack::{
 };
 use churn::system;
 use churn::update;
+use churn::vpn::VpnProvider;
 
 const HELP: &str = "\
 churn — installer for the torrent/media stack
@@ -330,8 +330,27 @@ fn ask_questions(
     for question in questions {
         let section = question.section();
         if current != Some(section) {
-            explain(section);
+            // Before the provider prompt the stored value is the only hint.
+            let provider = Question::provider_from(
+                answered_provider(&answers).or_else(|| stored(&Question::VpnProvider)),
+            );
+            explain(section, provider);
             current = Some(section);
+        }
+        if *question == Question::VpnProvider {
+            let chosen = question.ask(stored(question), None)?;
+            let provider = Question::provider_from(Some(&chosen));
+            explain_vpn_credentials(provider)?;
+            // A provider switch invalidates the previous protocol's answers:
+            // keeping a ProtonVPN key while switching to PIA would write a
+            // credential the tunnel never reads.
+            answers.retain(|key, _| key.applies_to(provider));
+            answers.insert(*question, provider.gluetun_id().to_string());
+            continue;
+        }
+        let provider = Question::provider_from(answered_provider(&answers));
+        if !question.applies_to(provider) {
+            continue;
         }
         storage_hint(*question);
         if let Question::Port(port) = question {
@@ -346,22 +365,6 @@ fn ask_questions(
             answers.insert(*question, value.to_string());
             continue;
         }
-        if *question == Question::WireguardArchive {
-            loop {
-                let archive = question.ask(stored(question))?;
-                match mullvad::select_config(Path::new(&archive)) {
-                    Ok((entry, config)) => {
-                        answers.insert(Question::WireguardArchive, archive);
-                        answers.insert(Question::WireguardConfig, entry);
-                        answers.insert(Question::WireguardPrivateKey, config.private_key);
-                        answers.insert(Question::WireguardAddresses, config.address);
-                        break;
-                    }
-                    Err(message) => log::error(message)?,
-                }
-            }
-            continue;
-        }
         let mut default = stored(question)
             .map(str::to_string)
             .or_else(|| media_default(*question, &answers));
@@ -372,7 +375,7 @@ fn ask_questions(
             && let Some(download) = answers.get(&Question::DownloadDir)
         {
             loop {
-                let media = question.ask(default.as_deref())?;
+                let media = question.ask(default.as_deref(), answered_provider(&answers))?;
                 match question::validate_storage_paths(download, &media) {
                     Ok(()) => {
                         answers.insert(*question, media);
@@ -386,10 +389,72 @@ fn ask_questions(
             }
             continue;
         }
-        answers.insert(*question, question.ask(default.as_deref())?);
+        if *question == Question::VpnLocation && assume_yes {
+            // `-y` never opens the picker: keep the stored choice when it is
+            // valid for the provider, otherwise fall back to its default.
+            let provider = Question::provider_from(answered_provider(&answers));
+            let location = default
+                .as_deref()
+                .filter(|value| provider.validate_location(value).is_ok())
+                .map(str::to_string)
+                .or_else(|| provider.default_location().map(str::to_string))
+                .unwrap_or_else(|| "Netherlands".to_string());
+            answers.insert(*question, location);
+            continue;
+        }
+        if *question == Question::OpenvpnPassword
+            && assume_yes
+            && let Some(value) = stored(question)
+        {
+            // Reuse a stored password even though it is never offered as a
+            // prompt default: `-y` must not stop on a secret it already has.
+            answers.insert(*question, value.to_string());
+            continue;
+        }
+        answers.insert(
+            *question,
+            question.ask(default.as_deref(), answered_provider(&answers))?,
+        );
     }
     ensure_storage_paths(&answers)?;
+    if let Some(provider) = answered_provider(&answers).and_then(VpnProvider::from_gluetun_id) {
+        ensure_credentials(provider, &answers)?;
+    }
     Ok(answers)
+}
+
+/// Refuse to continue without the credentials this provider's protocol needs.
+///
+/// Gluetun accepts an empty key at start-up and only fails the handshake later,
+/// which looks like a broken VPN rather than a missing answer, so the check is
+/// here where the fix is obvious.
+fn ensure_credentials(provider: VpnProvider, answers: &Answers) -> io::Result<()> {
+    let missing = provider.missing_credentials(|key| {
+        Question::from_env_key(key).and_then(|question| answers.get(&question).cloned())
+    });
+    if missing.is_empty() {
+        return Ok(());
+    }
+    let names = missing
+        .iter()
+        .map(|key| describe_env_key(key))
+        .collect::<Vec<_>>()
+        .join(", ");
+    Err(io::Error::other(format!(
+        "{} over {} still needs: {names}.\n\
+         Run churn interactively once to enter them, or add the keys to\n\
+         torrent/.env and rerun.",
+        provider.label(),
+        provider.protocol().label()
+    )))
+}
+
+/// The provider the user has answered so far, if any.
+fn answered_provider(answers: &Answers) -> Option<&str> {
+    answers
+        .get(&Question::VpnProvider)
+        .map(String::as_str)
+        .filter(|value| !value.is_empty())
 }
 
 /// Default for the media prompt: the download answer the user just gave.
@@ -472,17 +537,22 @@ fn resolve_port(
         .map_err(|_| io::Error::other("internal error: invalid port answer"))
 }
 
-fn explain(section: Section) {
+fn explain(section: Section, _provider: VpnProvider) {
     match section {
         Section::Vpn => {
+            // Deliberately provider-neutral: this note prints *before* the
+            // picker, so naming a provider here would be wrong for everyone
+            // who chooses differently. The credential instructions come from
+            // `explain_vpn_credentials` once the choice is known.
             let _ = note(
                 "Where to get these",
-                "mullvad.net → Account → WireGuard config → download zip\n\
-                 Point churn at the downloaded .zip. It reads PrivateKey and the\n\
-                 IPv4 Address from one of the .conf files (any file works — they\n\
-                 share the same key).\n\n\
-                 Paths: Tab completes, ↑/↓ choose, Enter submits.\n\n\
-                 The key is written only to torrent/.env, which is gitignored.",
+                "All traffic goes through Gluetun, which supports these providers\n\
+                 natively. churn asks for the credentials Gluetun needs and writes\n\
+                 them only to torrent/.env, which is gitignored.\n\n\
+                 WireGuard is used wherever the provider supports it: it is\n\
+                 markedly faster than OpenVPN, which matters for torrenting.\n\
+                 Private Internet Access is the one exception — Gluetun has no\n\
+                 native WireGuard support for it, so it uses OpenVPN.",
             );
         }
         Section::Storage => {
@@ -496,6 +566,41 @@ fn explain(section: Section) {
                  Paths: Tab completes, ↑/↓ choose, Enter submits.",
             );
         }
+    }
+}
+
+/// Provider-specific credential instructions, printed after the picker.
+///
+/// This is the "where do I click" half of the VPN setup, and it is the part
+/// that actually differs per provider, so it cannot live in the section note.
+fn explain_vpn_credentials(provider: VpnProvider) -> io::Result<()> {
+    let _ = note(
+        format!("{} · {}", provider.label(), provider.protocol().label()),
+        format!(
+            "{}\n\n\
+             Prompts that follow: {}.\n\
+             The location list is embedded, so it works offline and only offers\n\
+             servers Gluetun actually knows about.",
+            provider.help(),
+            provider
+                .required_env()
+                .iter()
+                .map(|key| describe_env_key(key))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    );
+    Ok(())
+}
+
+/// Human name for a credential key, used in the note above the prompts.
+fn describe_env_key(key: &str) -> &'static str {
+    match key {
+        "WIREGUARD_PRIVATE_KEY" => "WireGuard private key",
+        "WIREGUARD_ADDRESSES" => "WireGuard interface address",
+        "OPENVPN_USER" => "OpenVPN username",
+        "OPENVPN_PASSWORD" => "OpenVPN password",
+        _ => "credential",
     }
 }
 
@@ -579,7 +684,23 @@ fn show_plan(chosen: &[Stack], questions: &[Question], answers: &Answers) -> io:
         lines.push_str(&format!("{:<8} {}\n", stack.key(), stack.description()));
     }
     lines.push('\n');
-    for question in questions.iter().copied().chain(Question::DETAILS) {
+    // One line that makes a wrong provider or location obvious before anything
+    // is written, rather than after a failed health check. The raw Gluetun id
+    // ("private internet access") is not what the user picked in the picker.
+    if let Some(value) = answered_provider(answers) {
+        let provider = Question::provider_from(Some(value));
+        let location = answers
+            .get(&Question::VpnLocation)
+            .map(String::as_str)
+            .unwrap_or("(provider default)");
+        lines.push_str(&format!(
+            "{:<30} {} · {} · {location}\n",
+            "VPN",
+            provider.label(),
+            provider.protocol().label()
+        ));
+    }
+    for question in questions.iter().copied() {
         if let Some(value) = stack::summary(question, answers) {
             lines.push_str(&format!("{:<30} {value}\n", question.label()));
         }

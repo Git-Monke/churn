@@ -1,14 +1,11 @@
 use std::fs;
-use std::io::Write;
 use std::process::Command;
 
 use churn::envfile;
-use churn::mullvad;
 use churn::ports::{self, Port};
 use churn::question::{self, Question, Section};
 use churn::stack::{self, Answers, Stack};
-use zip::ZipWriter;
-use zip::write::SimpleFileOptions;
+use churn::vpn::VpnProvider;
 
 #[test]
 fn storage_is_asked_once_when_both_stacks_selected() {
@@ -19,10 +16,67 @@ fn storage_is_asked_once_when_both_stacks_selected() {
     }
 
     // Everything else is still asked, so we did not dedupe too aggressively.
-    assert!(questions.contains(&Question::WireguardArchive));
-    // Credentials come from the archive instead of separate prompts.
-    assert!(!questions.contains(&Question::WireguardPrivateKey));
-    assert!(!questions.contains(&Question::WireguardAddresses));
+    assert!(questions.contains(&Question::VpnProvider));
+    // Credentials are typed in, because no provider's archive is portable.
+    assert!(questions.contains(&Question::WireguardPrivateKey));
+    assert!(questions.contains(&Question::VpnLocation));
+}
+
+#[test]
+fn every_provider_credential_question_is_collected_for_the_wizard_to_filter() {
+    let questions = stack::collect_questions(&[Stack::Torrent]);
+    // All of them are collected; `applies_to` decides at ask time which to show.
+    for question in [
+        Question::VpnProvider,
+        Question::WireguardPrivateKey,
+        Question::WireguardAddresses,
+        Question::OpenvpnUser,
+        Question::OpenvpnPassword,
+        Question::VpnLocation,
+    ] {
+        assert!(questions.contains(&question), "{question:?} missing");
+    }
+}
+
+#[test]
+fn provider_filters_the_credential_questions_it_does_not_use() {
+    let pia = VpnProvider::PrivateInternetAccess;
+    assert!(!Question::WireguardPrivateKey.applies_to(pia));
+    assert!(!Question::WireguardAddresses.applies_to(pia));
+    assert!(Question::OpenvpnUser.applies_to(pia));
+    assert!(Question::OpenvpnPassword.applies_to(pia));
+    assert!(Question::VpnLocation.applies_to(pia));
+
+    let proton = VpnProvider::ProtonVpn;
+    assert!(Question::WireguardPrivateKey.applies_to(proton));
+    // ProtonVPN takes the key alone, so the address must never be asked.
+    assert!(!Question::WireguardAddresses.applies_to(proton));
+    assert!(!Question::OpenvpnUser.applies_to(proton));
+
+    // Storage questions are provider-independent.
+    assert!(Question::DownloadDir.applies_to(pia));
+}
+
+#[test]
+fn provider_round_trips_through_the_generated_env_value() {
+    for provider in VpnProvider::ALL {
+        assert_eq!(
+            VpnProvider::from_gluetun_id(provider.gluetun_id()),
+            Some(provider),
+            "{} did not round-trip",
+            provider.label()
+        );
+        assert_eq!(
+            Question::provider_from(Some(provider.gluetun_id())),
+            provider
+        );
+    }
+    // A stale or hand-mangled value must not become a bogus provider.
+    assert_eq!(
+        Question::provider_from(Some("whatever")),
+        VpnProvider::DEFAULT
+    );
+    assert_eq!(Question::provider_from(None), VpnProvider::DEFAULT);
 }
 
 #[test]
@@ -339,105 +393,5 @@ fn env_upsert_updates_one_key_without_reformatting_the_file() {
     assert_eq!(written.matches("JELLYFIN_API_KEY=").count(), 1);
     assert!(written.contains("JELLYFIN_API_KEY=newer"));
 
-    fs::remove_dir_all(&dir).unwrap();
-}
-
-#[test]
-fn derives_the_exit_country_from_the_config_filename() {
-    assert_eq!(
-        mullvad::country_for_entry("us-atl-wg-001.conf"),
-        Some("USA")
-    );
-    assert_eq!(
-        mullvad::country_for_entry("nl-ams-wg-002.conf"),
-        Some("Netherlands")
-    );
-    assert_eq!(mullvad::country_for_entry("gb-lon-wg-101.conf"), Some("UK"));
-    assert_eq!(
-        mullvad::country_for_entry("some/nested/gb-man-wg-003.conf"),
-        Some("UK")
-    );
-}
-
-#[test]
-fn unknown_config_filenames_do_not_guess_a_country() {
-    assert_eq!(mullvad::country_for_entry("readme.conf"), None);
-    assert_eq!(mullvad::country_for_entry("zz-place-wg-001.conf"), None);
-    assert_eq!(mullvad::country_for_entry(""), None);
-}
-
-const CONF: &str = "\
-[Interface]
-# Device: Square Dragon
-PrivateKey = sBIsVvs1dBhkR8UAbY+1lTXchldJEMTV3H3Br/PQfkI=
-Address = 10.65.160.71/32,fc00:bbbb:bbbb:bb01::2:a046/128
-DNS = 10.64.0.1
-
-[Peer]
-PublicKey = nvyBkaEXHwyPBAm8spGB0TFzf2W5wPAl8EEuJ0t+bzs=
-AllowedIPs = 0.0.0.0/0,::0/0
-Endpoint = 45.134.140.130:51820
-";
-
-#[test]
-fn parses_private_key_and_ipv4_address_from_conf() {
-    let config = mullvad::parse(CONF).unwrap();
-    assert_eq!(
-        config.private_key,
-        "sBIsVvs1dBhkR8UAbY+1lTXchldJEMTV3H3Br/PQfkI="
-    );
-    assert_eq!(config.address, "10.65.160.71/32");
-}
-
-#[test]
-fn conf_parser_rejects_incomplete_or_invalid_configs() {
-    assert!(mullvad::parse("[Interface]\nAddress = 10.0.0.1/32\n").is_err());
-    assert!(
-        mullvad::parse("[Interface]\nPrivateKey = sBIsVvs1dBhkR8UAbY+1lTXchldJEMTV3H3Br/PQfkI=\n")
-            .is_err()
-    );
-    assert!(
-        mullvad::parse("[Interface]\nPrivateKey = not-a-key\nAddress = 10.0.0.1/32\n").is_err()
-    );
-    assert!(
-        mullvad::parse(
-            "[Interface]\nPrivateKey = sBIsVvs1dBhkR8UAbY+1lTXchldJEMTV3H3Br/PQfkI=\nAddress = fd00::1/128\n"
-        )
-        .is_err(),
-        "IPv6-only configs have no address gluetun can use"
-    );
-}
-
-#[test]
-fn reads_conf_entries_from_a_zip_archive() {
-    let dir = std::env::temp_dir().join(format!("churn-zip-test-{}", std::process::id()));
-    fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("configs.zip");
-    {
-        let mut zip = ZipWriter::new(fs::File::create(&path).unwrap());
-        zip.start_file("b.conf", SimpleFileOptions::default())
-            .unwrap();
-        zip.write_all(CONF.as_bytes()).unwrap();
-        zip.start_file("a.conf", SimpleFileOptions::default())
-            .unwrap();
-        zip.write_all(CONF.as_bytes()).unwrap();
-        zip.start_file("readme.txt", SimpleFileOptions::default())
-            .unwrap();
-        zip.write_all(b"ignore me").unwrap();
-        zip.finish().unwrap();
-    }
-
-    let entries = mullvad::entries(&path).unwrap();
-    assert_eq!(entries, vec!["a.conf", "b.conf"]);
-    let config = mullvad::load(&path, "a.conf").unwrap();
-    assert_eq!(config.address, "10.65.160.71/32");
-
-    // Hundreds of configs must not become a prompt: pick the first sorted one.
-    let (selected, config) = mullvad::select_config(&path).unwrap();
-    assert_eq!(selected, "a.conf");
-    assert_eq!(
-        config.private_key,
-        mullvad::parse(CONF).unwrap().private_key
-    );
     fs::remove_dir_all(&dir).unwrap();
 }
