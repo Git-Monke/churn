@@ -27,7 +27,7 @@ ipv6-enabled	disable IPv6	ipv6-enabled.yml	-
 firewall-off	FIREWALL	firewall-off.yml	-
 keep-nameserver	DNS_KEEP_NAMESERVER	keep-nameserver.yml	-
 plaintext-dns	plaintext	plaintext-dns.yml	-
-other-provider	VPN_SERVICE_PROVIDER=mullvad	other-provider.yml	-
+unknown-provider	is not supported	unknown-provider.yml	-
 no-vpn-status	no vpn-status dashboard agent	no-vpn-status.yml	-
 status-port-public	must bind 127.0.0.1	status-port-public.yml	-
 status-agent-bridge	must share Gluetun	status-agent-bridge.yml	-

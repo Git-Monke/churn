@@ -104,7 +104,7 @@ export interface StatsResponse {
 }
 
 export type VpnCheckId =
-  | "mullvad_exit"
+  | "tunnel_exit"
   | "kill_switch"
   | "dns"
   | "ipv6"
@@ -120,11 +120,9 @@ export interface VpnCheck {
 export interface VpnExit {
   ip?: string;
   country?: string;
-  city?: string;
-  hostname?: string;
   organization?: string;
-  serverType?: string;
-  mullvadExit: boolean;
+  /** Whether the observed exit equals the address Gluetun connected with. */
+  matchesGluetun: boolean;
 }
 
 export type VpnCoverageId = "qbittorrent" | "prowlarr" | "flaresolverr";
@@ -139,6 +137,10 @@ export interface VpnStatusResponse {
   checkedAt: string;
   durationMs: number;
   secure: boolean;
+  /** Gluetun's provider id, e.g. "mullvad" or "private internet access". */
+  provider: string;
+  /** Gluetun's transport, e.g. "wireguard" or "openvpn". */
+  protocol: string;
   exit: VpnExit;
   checks: VpnCheck[];
   coverage: VpnCoverageEntry[];

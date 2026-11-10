@@ -157,7 +157,7 @@ CHURN_HOST_IP=192.168.1.20 churn show
 
 ## Uninstall
 
-`--uninstall` stops and removes the stack containers with `docker compose
+`churn uninstall` stops and removes the stack containers with `docker compose
 down --remove-orphans`, then deletes the generated app state:
 
 ```
@@ -166,15 +166,17 @@ torrent/config     torrent/.env
 ```
 
 The download and media directories (`DOWNLOAD_DIR`, `MEDIA_DIR`), Docker images,
-and the committed compose files and scripts are left untouched. If Docker Compose fails to remove
-a stack, churn stops before deleting any config so the containers and their
-credentials stay consistent.
+and the committed compose files and scripts are left untouched. A stack that was
+never installed is skipped with a note instead of failing, so uninstalling a
+partially installed machine still removes whatever is there. If Docker Compose
+fails to remove a stack that *is* installed, churn stops before deleting any
+config so the containers and their credentials stay consistent.
 
 ```bash
-sudo ./target/release/churn --uninstall              # both stacks
-sudo ./target/release/churn --uninstall --dry-run    # show the plan only
-sudo ./target/release/churn --uninstall --stacks torrent
-sudo ./target/release/churn --uninstall --yes        # no confirmation
+sudo ./target/release/churn uninstall              # both stacks
+sudo ./target/release/churn uninstall --dry-run    # show the plan only
+sudo ./target/release/churn uninstall --stacks torrent
+sudo ./target/release/churn uninstall --yes        # no confirmation
 ```
 
 ## Migrating storage

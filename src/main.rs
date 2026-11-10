@@ -39,13 +39,15 @@ churn — installer for the torrent/media stack
 Must be run as root (for example: sudo churn). If Docker is missing, churn
 offers to install it for the detected Linux distribution. After writing each
 stack's .env, it starts the stack with docker compose up -d and completes Jellyfin
-first-run setup, writing a generated API key to server/.env. Use --uninstall to
-stop/remove the containers and delete generated config without touching the media and download directories.
+first-run setup, writing a generated API key to server/.env. Use `churn uninstall`
+to stop/remove the containers and delete generated config without touching the
+media and download directories.
 
 USAGE:
     churn [OPTIONS]
     churn show [--stacks <LIST>]
     churn update [OPTIONS]
+    churn uninstall [--stacks <LIST>] [--dry-run] [-y]
     churn migrate [--to <PATH>] [OPTIONS]
     churn verify-vpn [--dir <PATH>] [--env-file <PATH>] [--config <PATH|->]
 
@@ -54,6 +56,10 @@ COMMANDS:
                       root and does not start or change anything
     update            update the churn binary and/or the server dashboard to the
                       latest release; see update options below
+    uninstall         stop and remove the stack containers, then delete their
+                      generated config, cache and .env files; media and
+                      downloads are kept. Stacks that were never installed are
+                      skipped
     migrate           copy a storage directory to a new host path, verify the
                       copy, rewrite both .env files and restart the stacks; the
                       old copy is kept unless --move is given. Moves the media
@@ -65,10 +71,7 @@ COMMANDS:
 
 OPTIONS:
     --stacks <LIST>   comma separated: server,torrent (skips the menu; with
-                      --uninstall, show or migrate, limits what is handled)
-    --uninstall       stop and remove the stack containers, then delete their
-                      generated config, cache and .env files; media and
-                      downloads are kept
+                      uninstall, show or migrate, limits what is handled)
     --dry-run         show the plan; write, remove, copy and start nothing
     -y, --yes         skip the final confirmation
     -h, --help        show this help
@@ -141,6 +144,7 @@ fn parse_args() -> Result<Args, String> {
             }
             "show" => args.show = true,
             "update" => args.update = true,
+            "uninstall" => args.uninstall = true,
             "migrate" => args.migrate = true,
             "--media" => args.migrate_target = Some(migrate::StorageTarget::Media),
             "--download" => args.migrate_target = Some(migrate::StorageTarget::Download),
@@ -169,7 +173,6 @@ fn parse_args() -> Result<Args, String> {
             "--binary-only" => args.binary_only = true,
             "--dashboard-only" => args.dashboard_only = true,
             "--force" => args.force = true,
-            "--uninstall" => args.uninstall = true,
             "--move" | "--delete-old" => args.move_old = true,
             "--keep-old" | "--copy" => args.keep_old = true,
             "--allow-network-fs" => args.allow_network_fs = true,
@@ -194,6 +197,11 @@ fn parse_args() -> Result<Args, String> {
             other if other.starts_with("--image=") => {
                 args.image = Some(other["--image=".len()..].to_string());
             }
+            // Uninstall used to be a flag. Name the new form instead of letting
+            // the generic "unknown option" message hide it.
+            "--uninstall" => {
+                return Err("uninstall is a command: run 'churn uninstall'".to_string());
+            }
             other => return Err(format!("unknown option {other:?}")),
         }
     }
@@ -214,7 +222,7 @@ fn validate_args(args: &Args) -> Result<(), String> {
     .count();
     if commands > 1 {
         return Err(
-            "'show', 'update', '--uninstall', 'migrate' and 'verify-vpn' cannot be combined"
+            "'show', 'update', 'uninstall', 'migrate' and 'verify-vpn' cannot be combined"
                 .to_string(),
         );
     }
@@ -1160,12 +1168,33 @@ fn uninstall(args: Args) -> io::Result<bool> {
         return Ok(true);
     }
 
-    if !system::docker_ready() {
+    // A stack that was never installed has no directory to run compose in, so
+    // there is nothing to stop and nothing to fail on. Report it once per stack
+    // rather than letting `docker compose` fail with a bare ENOENT.
+    let installed: Vec<Stack> = chosen
+        .iter()
+        .copied()
+        .filter(|stack| stack.is_installed())
+        .collect();
+    for stack in chosen.iter().filter(|stack| !stack.is_installed()) {
+        log::info(format!(
+            "{} is not installed ({}) — nothing to remove",
+            stack.key(),
+            stack.dir().display()
+        ))?;
+    }
+
+    if !installed.is_empty() && !system::docker_ready() {
         log::warning("docker is not available — skipping container removal")?;
     } else {
         let mut errors = Vec::new();
-        for (index, stack) in chosen.iter().enumerate() {
-            let header = format!("[{}/{}] removing {}", index + 1, chosen.len(), stack.key());
+        for (index, stack) in installed.iter().enumerate() {
+            let header = format!(
+                "[{}/{}] removing {}",
+                index + 1,
+                installed.len(),
+                stack.key()
+            );
             let mut live = LiveLog::start(header);
             match system::compose_down(&stack.dir(), &mut |line| live.push(line)) {
                 Ok(()) => live.success(format!("removed {} containers", stack.key())),
@@ -1184,6 +1213,7 @@ fn uninstall(args: Args) -> io::Result<bool> {
     }
 
     let progress = spinner();
+    let mut removed = 0usize;
     for stack in &chosen {
         for path in stack.state_paths() {
             progress.start(format!("removing {}", path.display()));
@@ -1196,11 +1226,16 @@ fn uninstall(args: Args) -> io::Result<bool> {
             } else {
                 fs::remove_file(&path)?;
             }
+            removed += 1;
             progress.stop(format!("removed {}", path.display()));
         }
     }
 
-    outro("uninstalled — data and compose files were left in place")?;
+    if removed == 0 {
+        outro("nothing to uninstall — no generated files were found")?;
+    } else {
+        outro("uninstalled — data and compose files were left in place")?;
+    }
     Ok(true)
 }
 
@@ -2324,5 +2359,72 @@ fn main() -> ExitCode {
             let _ = outro_cancel(format!("failed: {err}"));
             ExitCode::FAILURE
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Parse a command line the way `main` does, without touching `argv`.
+    fn parse(argv: &[&str]) -> Result<Args, String> {
+        let mut args = Args::default();
+        let mut raw = argv.iter().map(|value| value.to_string());
+        while let Some(arg) = raw.next() {
+            match arg.as_str() {
+                "--stacks" | "-s" => {
+                    let value = raw.next().ok_or("--stacks needs a value")?;
+                    args.stacks = Some(parse_stack_list(&value)?);
+                }
+                "show" => args.show = true,
+                "update" => args.update = true,
+                "uninstall" => args.uninstall = true,
+                "migrate" => args.migrate = true,
+                "verify-vpn" => args.verify_vpn = true,
+                "--dry-run" => args.dry_run = true,
+                "-y" | "--yes" => args.yes = true,
+                "--uninstall" => {
+                    return Err("uninstall is a command: run 'churn uninstall'".to_string());
+                }
+                other => return Err(format!("unknown option {other:?}")),
+            }
+        }
+        validate_args(&args)?;
+        Ok(args)
+    }
+
+    #[test]
+    fn uninstall_is_a_command() {
+        let args = parse(&["uninstall"]).expect("churn uninstall parses");
+        assert!(args.uninstall);
+        assert!(!args.show && !args.update && !args.migrate && !args.verify_vpn);
+    }
+
+    #[test]
+    fn uninstall_accepts_the_shared_options() {
+        let args = parse(&["uninstall", "--stacks", "torrent", "--dry-run", "-y"])
+            .expect("uninstall options parse");
+        assert!(args.uninstall);
+        assert_eq!(args.stacks.as_deref(), Some(&[Stack::Torrent][..]));
+        assert!(args.dry_run);
+        assert!(args.yes);
+    }
+
+    #[test]
+    fn the_old_uninstall_flag_points_at_the_command() {
+        // The bare `os error 2` report happened with the flag, so the message
+        // has to name the replacement rather than say "unknown option".
+        let Err(err) = parse(&["--uninstall"]) else {
+            panic!("--uninstall should be rejected");
+        };
+        assert!(err.contains("churn uninstall"), "{err}");
+    }
+
+    #[test]
+    fn uninstall_cannot_be_combined_with_another_command() {
+        let Err(err) = parse(&["uninstall", "show"]) else {
+            panic!("two commands should be rejected");
+        };
+        assert!(err.contains("cannot be combined"), "{err}");
     }
 }

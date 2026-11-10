@@ -30,7 +30,7 @@ export function VpnStatusPanel() {
       <section className="flex flex-col gap-3">
         <SectionHeading
           title="VPN"
-          description="Live proof that qBittorrent traffic is still confined to Mullvad"
+          description="Live proof that qBittorrent traffic stays inside the VPN tunnel"
         />
         <Skeleton className="h-40 rounded-xl" />
         <div className="grid gap-4 md:grid-cols-2">
@@ -46,7 +46,7 @@ export function VpnStatusPanel() {
       <section className="flex flex-col gap-3">
         <SectionHeading
           title="VPN"
-          description="Live proof that qBittorrent traffic is still confined to Mullvad"
+          description="Live proof that qBittorrent traffic stays inside the VPN tunnel"
         />
         <Alert variant="destructive">
           <CircleAlertIcon />
@@ -87,7 +87,7 @@ export function VpnStatusPanel() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <SectionHeading
           title="VPN"
-          description="Live proof that qBittorrent traffic is still confined to Mullvad"
+          description="Live proof that qBittorrent traffic stays inside the VPN tunnel"
         />
         <Button
           variant="outline"
@@ -179,7 +179,7 @@ function ProtectedBanner({ data }: { data: VpnStatusResponse }) {
         </span>
         <div className="flex flex-col gap-1">
           <p className="font-heading text-lg font-semibold">
-            Your torrents are protected by Mullvad
+            Your torrents are protected by {providerLabel(data)}
           </p>
           <p className="text-sm text-muted-foreground">
             All boundary checks passed. No direct route, DNS resolver or IPv6 path
@@ -187,7 +187,8 @@ function ProtectedBanner({ data }: { data: VpnStatusResponse }) {
           </p>
           <p className="text-xs text-muted-foreground">
             Public exit {data.exit.ip ?? "unknown"}
-            {formatLocation(data.exit) ? ` · ${formatLocation(data.exit)}` : ""}
+            {data.exit.country ? ` · ${data.exit.country}` : ""}
+            {` · ${formatProtocol(data.protocol)}`}
           </p>
         </div>
       </CardContent>
@@ -249,7 +250,7 @@ function LeakBanner({ data }: { data: VpnStatusResponse }) {
 
 function DataPoints({ data }: { data: VpnStatusResponse }) {
   const ipv6 = data.checks.find((check) => check.id === "ipv6");
-  const provider = [data.exit.organization, data.exit.serverType]
+  const provider = [data.exit.organization, formatProtocol(data.protocol)]
     .filter(Boolean)
     .join(" · ");
 
@@ -264,13 +265,8 @@ function DataPoints({ data }: { data: VpnStatusResponse }) {
       <CardContent>
         <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <DataPoint label="Public exit IP" value={data.exit.ip ?? "Unknown"} mono />
-          <DataPoint label="Exit location" value={formatLocation(data.exit) || "Unknown"} />
-          <DataPoint
-            label="Mullvad server"
-            value={data.exit.hostname ?? "Not reported"}
-            mono
-          />
-          <DataPoint label="Provider" value={provider || "Mullvad VPN"} />
+          <DataPoint label="Exit location" value={data.exit.country || "Unknown"} />
+          <DataPoint label="Provider" value={provider || "Unknown"} />
           <DataPoint
             label="DNS resolver"
             value={data.dnsNameservers.join(", ") || "Not configured"}
@@ -339,8 +335,27 @@ function SectionHeading({ title, description }: { title: string; description: st
   );
 }
 
-function formatLocation(exit: VpnStatusResponse["exit"]): string {
-  return [exit.city, exit.country].filter(Boolean).join(", ");
+/** Gluetun ids are lowercase, so "private internet access" reads badly as-is. */
+function providerLabel(data: VpnStatusResponse): string {
+  const known: Record<string, string> = {
+    mullvad: "Mullvad",
+    ivpn: "IVPN",
+    protonvpn: "Proton VPN",
+    nordvpn: "NordVPN",
+    surfshark: "Surfshark",
+    "private internet access": "Private Internet Access",
+  };
+  return known[data.provider] ?? data.provider;
+}
+
+function formatProtocol(protocol: string): string {
+  if (protocol === "wireguard") {
+    return "WireGuard";
+  }
+  if (protocol === "openvpn") {
+    return "OpenVPN";
+  }
+  return protocol;
 }
 
 function formatDuration(durationMs: number): string {

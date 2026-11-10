@@ -91,6 +91,24 @@ impl Stack {
         self.dir().join(".env")
     }
 
+    /// The compose file this stack is started and removed with.
+    pub fn compose_path(self) -> PathBuf {
+        self.dir().join("docker-compose.yml")
+    }
+
+    /// Whether this stack was ever installed under `root`.
+    ///
+    /// Uninstall uses this to skip a stack that was never set up: `docker
+    /// compose down` in a missing directory fails in `Command::spawn` with a
+    /// bare `ENOENT`, which reads as a churn fault rather than "nothing to do".
+    pub fn is_installed_in(self, root: &Path) -> bool {
+        root.join(self.key()).join("docker-compose.yml").is_file()
+    }
+
+    pub fn is_installed(self) -> bool {
+        self.is_installed_in(&envfile::root())
+    }
+
     /// Generated state that an uninstall removes.
     ///
     /// These are only app configuration, caches and the generated `.env`; the
@@ -124,7 +142,7 @@ impl Stack {
                 ),
             ],
             Stack::Torrent => {
-                let compose = self.dir().join("docker-compose.yml");
+                let compose = self.compose_path();
                 vec![
                     format!(
                         "docker compose -f '{}' logs vpn-check    # confirms torrent egress is VPN-only",
@@ -619,6 +637,25 @@ mod tests {
         // leftover from whichever provider needed one before.
         assert!(!env.contains_key("WIREGUARD_ADDRESSES"));
         assert_eq!(env["SERVER_COUNTRIES"], "Netherlands");
+    }
+
+    #[test]
+    fn a_stack_is_installed_only_once_its_compose_file_exists() {
+        let root = std::env::temp_dir().join(format!("churn-installed-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("torrent")).unwrap();
+
+        assert!(!Stack::Server.is_installed_in(&root), "no directory at all");
+        assert!(
+            !Stack::Torrent.is_installed_in(&root),
+            "directory but no compose file"
+        );
+
+        std::fs::write(root.join("torrent/docker-compose.yml"), "services: {}\n").unwrap();
+        assert!(Stack::Torrent.is_installed_in(&root));
+        assert!(!Stack::Server.is_installed_in(&root));
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

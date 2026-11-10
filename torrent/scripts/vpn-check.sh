@@ -7,8 +7,12 @@
 #
 #   * /etc/resolv.conf uses Gluetun's local DNS resolver only (no host/Docker
 #     nameserver fallback that could leak DNS outside the tunnel),
-#   * a request to Mullvad's exit checker reports a Mullvad exit IP, and
+#   * the exit address Gluetun believes it connected with is the address the
+#     internet reports from inside this namespace, and
 #   * the physical Docker interface (eth0) cannot reach the internet directly.
+#
+# The exit-IP comparison works for every provider Gluetun supports, so no
+# provider gets a bespoke check here.
 #
 # The firewall in Gluetun is the actual kill switch. This check catches a
 # broken firewall, a wrong VPN provider/config or a broad
@@ -22,6 +26,7 @@ set -eu
 . "${VPN_LIB_PATH:-/scripts/vpn-lib.sh}"
 
 host_ip=${HOST_IP:-}
+provider=${VPN_SERVICE_PROVIDER:-unknown}
 attempts=${VPN_CHECK_ATTEMPTS:-20}
 delay=${VPN_CHECK_DELAY_SECONDS:-2}
 
@@ -44,6 +49,7 @@ if [ -n "$host_ip" ]; then
 else
     log "HOST_IP is unset; firewall exception is loopback only"
 fi
+log "provider is $provider (${VPN_TYPE:-unknown})"
 
 # Gluetun's DNS server listens on 127.0.0.1 in the shared namespace. Every
 # resolver listed here must be that server; a second upstream could be used
@@ -60,22 +66,27 @@ log "DNS uses Gluetun's local resolver"
 
 attempt=1
 while [ "$attempt" -le "$attempts" ]; do
-    if vpn_fetch_mullvad; then
+    if vpn_fetch_observed_exit; then
         break
     fi
     if [ "$attempt" -eq "$attempts" ]; then
-        fail "could not reach ${VPN_CHECK_URL:-https://am.i.mullvad.net/json} after $attempts attempts (is the VPN connected?)"
+        fail "could not reach ${VPN_CHECK_URL:-https://ipinfo.io/json} after $attempts attempts (is the VPN connected?)"
     fi
-    log "waiting for Mullvad egress ($attempt/$attempts)"
+    log "waiting for $provider egress ($attempt/$attempts)"
     attempt=$((attempt + 1))
     sleep "$delay"
 done
 
-if ! vpn_is_mullvad_exit; then
-    printf '%s\n' "${VPN_MULLVAD_BODY:-}" >&2
-    fail "public egress is not a Mullvad exit"
+if ! vpn_fetch_gluetun_exit; then
+    fail "Gluetun does not report a tunnel exit IP (is the tunnel up?)"
 fi
-log "egress is a Mullvad exit"
+if ! vpn_exit_matches_gluetun; then
+    printf 'gluetun exit: %s\nobserved exit: %s\n' \
+        "${VPN_GLUETUN_EXIT_IP:-none}" "${VPN_OBSERVED_IP:-none}" >&2
+    printf '%s\n' "${VPN_OBSERVED_BODY:-}" >&2
+    fail "public egress does not match the tunnel exit"
+fi
+log "egress is the $provider tunnel exit ($VPN_OBSERVED_IP)"
 
 if [ ! -e /sys/class/net/eth0 ]; then
     fail "non-VPN interface eth0 is missing; refusing to assume it is blocked"

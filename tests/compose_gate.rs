@@ -373,6 +373,48 @@ fn the_storage_mounts_follow_the_env_it_is_given() {
     }
 }
 
+/// Every provider churn can write must render the shipped compose file *and*
+/// pass the validator. The per-provider unit tests prove the rules; this
+/// proves the file that ships satisfies them for all six.
+#[test]
+fn every_provider_renders_a_safe_stack() {
+    for provider in churn::vpn::VpnProvider::ALL {
+        let credential_keys = [
+            "WIREGUARD_PRIVATE_KEY",
+            "WIREGUARD_ADDRESSES",
+            "OPENVPN_USER",
+            "OPENVPN_PASSWORD",
+        ];
+        let mut pairs: Vec<(&str, Option<&str>)> = vec![
+            ("VPN_SERVICE_PROVIDER", Some(provider.gluetun_id())),
+            ("VPN_TYPE", Some(provider.protocol().as_env())),
+            ("SERVER_COUNTRIES", Some("")),
+            ("SERVER_REGIONS", Some("")),
+        ];
+        for key in credential_keys {
+            // Blank the other protocol's keys exactly as churn does on a
+            // provider switch, so this also covers the stale-key case.
+            let value = if provider.required_env().contains(&key) {
+                Some("placeholder")
+            } else {
+                Some("")
+            };
+            pairs.push((key, value));
+        }
+        pairs.push((provider.location_key(), provider.default_location()));
+
+        let config = render_with_storage(&pairs)
+            .unwrap_or_else(|err| panic!("{}: compose refused to render: {err}", provider.label()));
+        assert_eq!(
+            churn::security::verify_torrent_isolation(&config),
+            Ok(()),
+            "{} over {} was rejected",
+            provider.label(),
+            provider.protocol().label()
+        );
+    }
+}
+
 #[test]
 fn verify_vpn_reads_the_env_file_it_is_given() {
     // The same code path CI and scripts/vpn-gate.sh use, exercised end to end

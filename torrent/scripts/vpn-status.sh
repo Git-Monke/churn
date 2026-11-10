@@ -31,7 +31,7 @@ while IFS= read -r line; do
 done
 
 # Keep the whole request comfortably below the backend timeout, even when the
-# VPN is reconnecting and the Mullvad lookup has to retry.
+# VPN is reconnecting and the exit lookup has to retry.
 VPN_CHECK_CONNECT_TIMEOUT=${VPN_CHECK_CONNECT_TIMEOUT:-3}
 VPN_CHECK_MAX_TIME=${VPN_CHECK_MAX_TIME:-6}
 VPN_CHECK_DIRECT_CONNECT_TIMEOUT=${VPN_CHECK_DIRECT_CONNECT_TIMEOUT:-2}
@@ -56,7 +56,7 @@ attempts=${VPN_STATUS_ATTEMPTS:-2}
 delay=${VPN_STATUS_RETRY_DELAY_SECONDS:-1}
 attempt=1
 while :; do
-    if vpn_fetch_mullvad; then
+    if vpn_fetch_observed_exit; then
         break
     fi
     if [ "$attempt" -ge "$attempts" ]; then
@@ -66,9 +66,10 @@ while :; do
     sleep "$delay"
 done
 
-mullvad_exit=0
-if vpn_is_mullvad_exit; then
-    mullvad_exit=1
+vpn_fetch_gluetun_exit || true
+tunnel_exit=0
+if vpn_exit_matches_gluetun; then
+    tunnel_exit=1
 fi
 
 kill_switch=0
@@ -95,7 +96,7 @@ if vpn_service_reachable "${FLARESOLVERR_URL:-http://127.0.0.1:8191}"; then
 fi
 
 secure=false
-if [ "$mullvad_exit" = 1 ] &&
+if [ "$tunnel_exit" = 1 ] &&
     [ "$kill_switch" = 1 ] &&
     [ "$dns" = 1 ] &&
     [ "$ipv6" = 1 ] &&
@@ -111,13 +112,12 @@ json_bool() {
     fi
 }
 
-# Only embed the Mullvad body if it looks like a JSON object. The endpoint
-# returns JSON; a captive portal or proxy error page must not break the whole
-# response.
-mullvad_json=${VPN_MULLVAD_BODY:-}
-case "$mullvad_json" in
+# Only embed the exit body if it looks like a JSON object. The endpoint returns
+# JSON; a captive portal or proxy error page must not break the whole response.
+observed_json=${VPN_OBSERVED_BODY:-}
+case "$observed_json" in
     \{*\}) ;;
-    *) mullvad_json='{}' ;;
+    *) observed_json='{}' ;;
 esac
 
 if [ "$firewall_exception" = 1 ]; then
@@ -140,14 +140,23 @@ cat <<EOF
   "checkedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "durationMs": $duration_ms,
   "secure": $secure,
+  "provider": "$(vpn_json_token "${VPN_SERVICE_PROVIDER:-unknown}")",
+  "protocol": "$(vpn_json_token "${VPN_TYPE:-unknown}")",
   "checks": {
-    "mullvadExit": $(json_bool "$mullvad_exit"),
+    "tunnelExit": $(json_bool "$tunnel_exit"),
     "killSwitch": $(json_bool "$kill_switch"),
     "dns": $(json_bool "$dns"),
     "ipv6": $(json_bool "$ipv6"),
     "firewallException": $(json_bool "$firewall_exception")
   },
-  "mullvad": $mullvad_json,
+  "exit": {
+    "ip": "$(vpn_json_token "${VPN_OBSERVED_IP:-}")",
+    "gluetunIp": "$(vpn_json_token "${VPN_GLUETUN_EXIT_IP:-}")",
+    "matchesGluetun": $(json_bool "$tunnel_exit"),
+    "country": "$(vpn_json_text "$(vpn_json_value "$observed_json" country)")",
+    "organization": "$(vpn_json_text "$(vpn_json_value "$observed_json" org)")"
+  },
+  "observed": $observed_json,
   "dns": { "nameservers": [${nameservers}] },
   "firewall": {
     "directEgressBlocked": $(json_bool "$kill_switch"),

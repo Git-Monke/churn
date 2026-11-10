@@ -1,7 +1,7 @@
 ---
 # churn-xpg5
 title: Support multiple VPN providers in the installer (WireGuard first, PIA over OpenVPN)
-status: todo
+status: in-progress
 type: feature
 priority: normal
 tags:
@@ -9,7 +9,7 @@ tags:
     - installer
     - torrent
 created_at: 2026-11-06T07:26:02Z
-updated_at: 2026-11-10T20:14:23Z
+updated_at: 2026-11-10T21:22:20Z
 ---
 
 ## Problem
@@ -225,16 +225,16 @@ The live stage currently asserts "a probe in the shared namespace sees a Mullvad
 ## Acceptance criteria
 
 - [ ] A fresh Mullvad install asks for the WireGuard key and a country, writes `VPN_SERVICE_PROVIDER=mullvad`, `VPN_TYPE=wireguard`, `WIREGUARD_PRIVATE_KEY`, `WIREGUARD_ADDRESSES`, `SERVER_COUNTRIES`, `VPN_LOCATION`, starts Gluetun, and passes `vpn-check`.
-- [ ] No install path downloads, parses or requires a provider `.zip`; `src/mullvad.rs`, `WIREGUARD_ARCHIVE` and `WIREGUARD_CONFIG` are gone.
+- [x] No install path downloads, parses or requires a provider `.zip`; `src/mullvad.rs`, `WIREGUARD_ARCHIVE` and `WIREGUARD_CONFIG` are gone.
 - [ ] Each of IVPN, ProtonVPN, NordVPN and Surfshark installs with a typed WireGuard key (plus address where the provider needs one) and its country picker, and writes only that provider's keys.
 - [ ] PIA installs with OpenVPN username/password and a `SERVER_REGIONS` value from the embedded list, and writes no `WIREGUARD_*` key.
-- [ ] The provider picker is the first VPN question and the follow-up prompts only include questions valid for that provider.
-- [ ] Country/region selection rejects anything outside the embedded per-provider list and never needs the network.
-- [ ] Rerun preserves provider, credentials and location; changing provider removes the previous provider's keys from `torrent/.env` with no stale `WIREGUARD_*` or `OPENVPN_*` left behind.
-- [ ] `churn verify-vpn` accepts all six providers and still fails an unknown provider, a protocol/provider mismatch, an empty credential, a stale location key, and every existing leak case.
-- [ ] `vpn-check` and the dashboard VPN tab work for a non-Mullvad provider, and no `am.i.mullvad.net` call, `mullvad_exit` check id, `mullvadExit` field or Mullvad-only label remains in `torrent/scripts/`, `server/backend/` or `server/frontend/`.
-- [ ] `wiring`: no VPN password or private key appears in the plan, summary, logs or dashboard payload; `OPENVPN_PASSWORD` is masked like the WireGuard key.
-- [ ] `cargo test`, `cargo clippy`, `cargo fmt --check`, `shellcheck` on `torrent/scripts/*.sh`, the dashboard build/tests, and the `tests/vpn-gate` matrix all pass.
+- [x] The provider picker is the first VPN question and the follow-up prompts only include questions valid for that provider.
+- [x] Country/region selection rejects anything outside the embedded per-provider list and never needs the network.
+- [x] Rerun preserves provider, credentials and location; changing provider removes the previous provider's keys from `torrent/.env` with no stale `WIREGUARD_*` or `OPENVPN_*` left behind.
+- [x] `churn verify-vpn` accepts all six providers and still fails an unknown provider, a protocol/provider mismatch, an empty credential, a stale location key, and every existing leak case.
+- [x] `vpn-check` and the dashboard VPN tab work for a non-Mullvad provider, and no `am.i.mullvad.net` call, `mullvad_exit` check id, `mullvadExit` field or Mullvad-only label remains in `torrent/scripts/`, `server/backend/` or `server/frontend/`.
+- [x] `wiring`: no VPN password or private key appears in the plan, summary, logs or dashboard payload; `OPENVPN_PASSWORD` is masked like the WireGuard key.
+- [x] `cargo test`, `cargo clippy`, `cargo fmt --check`, `shellcheck` on `torrent/scripts/*.sh`, the dashboard build/tests, and the `tests/vpn-gate` matrix all pass.
 
 ## Out of scope (follow-ups)
 
@@ -250,8 +250,46 @@ The live stage currently asserts "a probe in the shared namespace sees a Mullvad
 - Removing the Mullvad exit check means a Mullvad user loses the "am I really on Mullvad" assertion and keeps only "my egress is the tunnel". Accepted: the kill switch plus tunnel-IP equality is what the check is actually for, and the account/provider identity is already proven by a successful WireGuard handshake.
 - `churn verify-vpn` gains a provider-aware check that reads `torrent/.env`; today it only renders Compose. Confirm it is acceptable for that command to fail when the `.env` credential is empty even though Compose would start.
 
+## Partial completion
+
+Steps 1–8 and 10's dashboard half are done and committed; the acceptance items
+still unticked above need a real install of each provider (or a fixture) to
+confirm the wizard end to end. Remaining work lives in:
+
+- `churn-earo` — release gate: `scripts/vpn-gate.sh` still probes
+  `am.i.mullvad.net` and asserts `.checks.mullvadExit` / `.mullvad.*`
+  (todo #9 of the provider work). Needs both a WireGuard and a PIA OpenVPN
+  fixture.
+- `torrent/.env.example` and `docs/src/torrent.md` still describe the Mullvad
+  zip import (todo #10).
+
 ## Related
 
 - `Gate releases on full-stack torrent VPN leak verification` (churn-earo) — the release gate must exercise both protocols, not just Mullvad WireGuard.
 - `Restart qBittorrent when the VPN reconnects` (churn-axcr) — `qbit-watch.sh` already uses provider-neutral Gluetun control endpoints; no change expected, but re-verify against an OpenVPN provider.
 - `Separate media and download locations` — unaffected, but touches the same `torrent/.env` writer.
+
+## Summary of Changes
+
+- `src/vpn.rs` (new): `VpnProvider` (six providers) with `gluetun_id`, `protocol`,
+  `needs_address`, `required_env`, `location_key`, `locations`, `default_location`,
+  `help`, `from_gluetun_id`, `validate_location`; `scripts/vpn-servers.sh`
+  regenerates the embedded lists from `qmcgaw/gluetun:v3.41.3`.
+- `src/question.rs`: provider-aware questions, `applies_to`, typed key and
+  address prompts, `OpenvpnUser`/`OpenvpnPassword`, a filterable `VpnLocation`.
+- `src/stack.rs`: writes exactly the selected provider's keys plus `VPN_LOCATION`
+  and the provider's location key; stale keys of the other protocol are dropped.
+- `src/main.rs`: provider-first wizard, provider-specific credential help,
+  non-interactive reruns reuse the stored provider.
+- `src/security.rs`: `check_vpn_provider`/`check_vpn_location` validate provider,
+  protocol, credentials and location keys for all six providers.
+- `torrent/docker-compose.yml`: `${VAR:-}` instead of `:?run churn first` for the
+  provider keys; every firewall/DNS/IPv6 line unchanged.
+- `torrent/scripts/`: the Mullvad exit check is replaced by the generalised
+  proof that the observed exit equals Gluetun's tunnel address
+  (`vpn_fetch_gluetun_exit`, `vpn_fetch_observed_exit`, `vpn_exit_matches_gluetun`);
+  the status payload carries `provider`, `protocol`, `exit.*` and `checks.tunnelExit`.
+- Dashboard (`server/backend/src/upstream/vpn.ts`, `types.ts` in backend and
+  frontend, `VpnStatusPanel.tsx`, `test/routes.test.ts`): no Mullvad field or
+  label remains; the panel names the provider and protocol instead.
+- `src/mullvad.rs`, the `zip` dependency and the config-zip flow are gone.

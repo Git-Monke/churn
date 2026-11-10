@@ -44,9 +44,12 @@ export function mapVpnStatus(payload: unknown): VpnStatusResponse {
   const durationMs = requireNumber(root.durationMs, "durationMs");
   const secure = requireBoolean(root.secure, "secure");
 
+  const provider = requireString(root.provider, "provider");
+  const protocol = requireString(root.protocol, "protocol");
+
   const checksRaw = requireObject(root.checks, "checks");
   const checks = {
-    mullvadExit: requireBoolean(checksRaw.mullvadExit, "checks.mullvadExit"),
+    tunnelExit: requireBoolean(checksRaw.tunnelExit, "checks.tunnelExit"),
     killSwitch: requireBoolean(checksRaw.killSwitch, "checks.killSwitch"),
     dns: requireBoolean(checksRaw.dns, "checks.dns"),
     ipv6: requireBoolean(checksRaw.ipv6, "checks.ipv6"),
@@ -56,15 +59,15 @@ export function mapVpnStatus(payload: unknown): VpnStatusResponse {
     ),
   };
 
-  const mullvad = asObject(root.mullvad) ?? {};
+  // The exit identity is whatever ipinfo reports through the tunnel, so it is
+  // provider-neutral: an IP, a country and an organisation. There is no
+  // provider-specific server name or server type to read.
+  const exitRaw = requireObject(root.exit, "exit");
   const exit: VpnExit = {
-    ip: optionalString(mullvad.ip),
-    country: optionalString(mullvad.country),
-    city: optionalString(mullvad.city),
-    hostname: optionalString(mullvad.mullvad_exit_ip_hostname),
-    organization: optionalString(mullvad.organization),
-    serverType: optionalString(mullvad.mullvad_server_type),
-    mullvadExit: checks.mullvadExit,
+    ip: optionalString(exitRaw.ip),
+    country: optionalString(exitRaw.country),
+    organization: optionalString(exitRaw.organization),
+    matchesGluetun: requireBoolean(exitRaw.matchesGluetun, "exit.matchesGluetun"),
   };
 
   const dns = requireObject(root.dns, "dns");
@@ -90,12 +93,13 @@ export function mapVpnStatus(payload: unknown): VpnStatusResponse {
     reachable: reachable.get(id) ?? false,
   }));
 
+  const exitDescription =
+    `${exit.ip ?? "unknown"}${exit.country ? ` in ${exit.country}` : ""}`;
+
   const checkDetails: Record<VpnCheckId, string> = {
-    mullvad_exit: checks.mullvadExit
-      ? exit.hostname
-        ? `The public exit is ${exit.hostname}`
-        : "The public exit is a Mullvad server"
-      : "The public exit is not recognised as a Mullvad server",
+    tunnel_exit: checks.tunnelExit
+      ? `The public exit matches Gluetun's tunnel address (${exitDescription})`
+      : `The public exit (${exitDescription}) does not match Gluetun's tunnel address`,
     kill_switch: checks.killSwitch
       ? "Direct traffic through eth0 cannot reach the internet"
       : "Traffic through eth0 reached the internet; the kill switch is not effective",
@@ -117,7 +121,7 @@ export function mapVpnStatus(payload: unknown): VpnStatusResponse {
   };
 
   const checkLabels: Record<VpnCheckId, string> = {
-    mullvad_exit: "Public exit is a Mullvad server",
+    tunnel_exit: "Public exit is the tunnel's exit",
     kill_switch: "Direct interface egress is blocked",
     dns: "DNS uses Gluetun's tunnel resolver",
     ipv6: "IPv6 is disabled in the shared namespace",
@@ -125,14 +129,14 @@ export function mapVpnStatus(payload: unknown): VpnStatusResponse {
   };
 
   const checkOrder: VpnCheckId[] = [
-    "mullvad_exit",
+    "tunnel_exit",
     "kill_switch",
     "dns",
     "ipv6",
     "firewall_exception",
   ];
   const checkPassed: Record<VpnCheckId, boolean> = {
-    mullvad_exit: checks.mullvadExit,
+    tunnel_exit: checks.tunnelExit,
     kill_switch: checks.killSwitch,
     dns: checks.dns,
     ipv6: checks.ipv6,
@@ -149,6 +153,8 @@ export function mapVpnStatus(payload: unknown): VpnStatusResponse {
     checkedAt,
     durationMs,
     secure,
+    provider,
+    protocol,
     exit,
     checks: checkList,
     coverage,

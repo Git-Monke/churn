@@ -49,22 +49,56 @@ vpn_nameservers_json() {
     ' /etc/resolv.conf 2>/dev/null
 }
 
-# Fetch Mullvad's exit checker once. Sets VPN_MULLVAD_BODY on success.
-vpn_fetch_mullvad() {
-    VPN_MULLVAD_BODY=$(curl -4 -fsS \
-        --connect-timeout "${VPN_CHECK_CONNECT_TIMEOUT:-5}" \
-        --max-time "${VPN_CHECK_MAX_TIME:-15}" \
-        "${VPN_CHECK_URL:-https://am.i.mullvad.net/json}" 2>/dev/null) || {
-        VPN_MULLVAD_BODY=
-        return 1
-    }
-    return 0
+# Extract a JSON string value without jq (the curl image ships no JSON tool).
+# Only used on the two small documents fetched below.
+vpn_json_value() {
+    printf '%s' "${1:-}" |
+        sed -n 's/.*"'"$2"'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' |
+        head -n 1
 }
 
-vpn_is_mullvad_exit() {
-    [ -n "${VPN_MULLVAD_BODY:-}" ] || return 1
-    printf '%s\n' "$VPN_MULLVAD_BODY" |
-        grep -Eq '"mullvad_exit_ip"[[:space:]]*:[[:space:]]*true'
+# What Gluetun believes its own tunnel address is. This is provider-neutral:
+# every provider's tunnel is reflected by the same control endpoint, so no
+# provider needs a bespoke exit checker. Sets VPN_GLUETUN_EXIT_IP.
+vpn_fetch_gluetun_exit() {
+    body=$(curl -4 -fsS \
+        --connect-timeout "${VPN_GLUETUN_CONNECT_TIMEOUT:-2}" \
+        --max-time "${VPN_GLUETUN_MAX_TIME:-4}" \
+        "${VPN_GLUETUN_CONTROL_URL:-http://127.0.0.1:8000}/v1/publicip/ip" 2>/dev/null) || {
+        VPN_GLUETUN_EXIT_IP=
+        return 1
+    }
+    VPN_GLUETUN_EXIT_IP=$(vpn_json_value "$body" public_ip)
+    [ -n "$VPN_GLUETUN_EXIT_IP" ]
+}
+
+# What the internet sees when the request leaves this namespace. Sent through
+# the tunnel, so a kill switch that silently falls back to eth0 shows up here as
+# a mismatch instead of looking like a healthy VPN. Sets VPN_OBSERVED_BODY and
+# VPN_OBSERVED_IP.
+vpn_fetch_observed_exit() {
+    VPN_OBSERVED_BODY=$(curl -4 -fsS \
+        --connect-timeout "${VPN_CHECK_CONNECT_TIMEOUT:-5}" \
+        --max-time "${VPN_CHECK_MAX_TIME:-15}" \
+        "${VPN_CHECK_URL:-https://ipinfo.io/json}" 2>/dev/null) || {
+        VPN_OBSERVED_BODY=
+        VPN_OBSERVED_IP=
+        return 1
+    }
+    VPN_OBSERVED_IP=$(vpn_json_value "$VPN_OBSERVED_BODY" ip)
+    [ -n "$VPN_OBSERVED_IP" ]
+}
+
+# The proof that egress is the tunnel, for any provider: the address Gluetun
+# says it connected with must equal the address the outside world reports.
+# Both sides must be a public IPv4 address, so a private or loopback value on
+# either side cannot satisfy the match.
+vpn_exit_matches_gluetun() {
+    [ -n "${VPN_GLUETUN_EXIT_IP:-}" ] || return 1
+    [ -n "${VPN_OBSERVED_IP:-}" ] || return 1
+    vpn_is_local_ipv4 "$VPN_GLUETUN_EXIT_IP" && return 1
+    vpn_is_local_ipv4 "$VPN_OBSERVED_IP" && return 1
+    [ "$VPN_GLUETUN_EXIT_IP" = "$VPN_OBSERVED_IP" ]
 }
 
 # Prove the kill switch: bind the request to the non-VPN Docker interface. If
@@ -80,8 +114,8 @@ vpn_direct_egress_blocked() {
     return 0
 }
 
-# IPv6 is disabled in the shared namespace because Mullvad's IPv4 import does
-# not configure an IPv6 tunnel.
+# IPv6 is disabled in the shared namespace: the imported tunnel config is
+# IPv4-only, so an enabled IPv6 stack would offer a route around it.
 vpn_ipv6_disabled() {
     [ "$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null)" = "1" ]
 }
@@ -110,7 +144,15 @@ vpn_duration_ms() {
 }
 
 # Strip anything that could break a JSON string. Used for IP/address fields
-# that are embedded directly by the status agent.
+# that are embedded directly by the status agent, where a narrow charset is
+# exactly right.
 vpn_json_token() {
     printf '%s' "${1:-}" | tr -cd 'A-Za-z0-9:._/-'
+}
+
+# Like vpn_json_token, but keeps spaces and punctuation so a provider's country
+# and organisation names stay readable. Removes only what would end the string
+# or start an escape.
+vpn_json_text() {
+    printf '%s' "${1:-}" | tr -d '"' | tr -d '\134' | tr -d '\000-\037\177'
 }

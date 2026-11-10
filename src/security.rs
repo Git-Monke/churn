@@ -7,6 +7,8 @@
 
 use serde_json::{Map, Value};
 
+use crate::vpn::VpnProvider;
+
 const GLUETUN: &str = "gluetun";
 const GLUETUN_NETNS: &str = "service:gluetun";
 const FILTERED_NETWORK: &str = "none";
@@ -72,12 +74,8 @@ fn check_gluetun(service: &Value, problems: &mut Vec<String>) {
         .cloned()
         .unwrap_or_default();
 
-    if env_str(&env, "VPN_SERVICE_PROVIDER") != Some("mullvad") {
-        problems.push("gluetun must use VPN_SERVICE_PROVIDER=mullvad".to_string());
-    }
-    if env_str(&env, "VPN_TYPE") != Some("wireguard") {
-        problems.push("gluetun must use VPN_TYPE=wireguard".to_string());
-    }
+    check_vpn_provider(&env, problems);
+
     if !truthy(env_str(&env, FIREWALL_ENABLED)) {
         problems.push(format!("gluetun must explicitly set {FIREWALL_ENABLED}=on"));
     }
@@ -108,6 +106,85 @@ fn check_gluetun(service: &Value, problems: &mut Vec<String>) {
             "gluetun must disable IPv6 in the shared namespace (net.ipv6.conf.all.disable_ipv6=1)"
                 .to_string(),
         );
+    }
+}
+
+/// The tunnel itself: a known provider, the protocol it supports, the
+/// credentials that protocol reads, and a location the provider actually has.
+///
+/// This is what replaces the old `mullvad` + `wireguard` literal check. Every
+/// provider is held to the same rule, so a PIA install is not "wrong" for
+/// lacking a WireGuard key and a Mullvad install with `VPN_TYPE=openvpn` is.
+fn check_vpn_provider(env: &Map<String, Value>, problems: &mut Vec<String>) {
+    let accepted = VpnProvider::ALL
+        .iter()
+        .map(|provider| provider.gluetun_id())
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let Some(id) = env_str(env, "VPN_SERVICE_PROVIDER").filter(|id| !id.trim().is_empty()) else {
+        problems.push(format!(
+            "gluetun must set VPN_SERVICE_PROVIDER to one of: {accepted}"
+        ));
+        return;
+    };
+    let Some(provider) = VpnProvider::from_gluetun_id(id) else {
+        problems.push(format!(
+            "gluetun VPN_SERVICE_PROVIDER {id:?} is not supported; use one of: {accepted}"
+        ));
+        return;
+    };
+
+    let expected = provider.protocol().as_env();
+    match env_str(env, "VPN_TYPE") {
+        Some(actual) if actual == expected => {}
+        Some(actual) => problems.push(format!(
+            "{} only supports VPN_TYPE={expected}, found {actual:?}",
+            provider.label()
+        )),
+        None => problems.push(format!(
+            "gluetun must set VPN_TYPE={expected} for {}",
+            provider.label()
+        )),
+    }
+
+    for key in provider.required_env() {
+        if env_str(env, key).map(str::trim).is_none_or(str::is_empty) {
+            problems.push(format!(
+                "{} over {} requires a non-empty {key}",
+                provider.label(),
+                provider.protocol().label()
+            ));
+        }
+    }
+
+    check_vpn_location(provider, env, problems);
+}
+
+/// A location key must be the one this provider reads, and every entry in it
+/// must be a location the provider actually has.
+///
+/// The stale-key half matters after a provider switch: Gluetun ignores a filter
+/// key it does not read, so a leftover `SERVER_REGIONS` would silently widen the
+/// PIA install to the whole world instead of the chosen region.
+fn check_vpn_location(provider: VpnProvider, env: &Map<String, Value>, problems: &mut Vec<String>) {
+    for key in ["SERVER_COUNTRIES", "SERVER_REGIONS"] {
+        let Some(value) = env_str(env, key).map(str::trim).filter(|v| !v.is_empty()) else {
+            continue;
+        };
+        if key != provider.location_key() {
+            problems.push(format!(
+                "{} reads its location from {}, so {key} must be empty (found {value:?})",
+                provider.label(),
+                provider.location_key()
+            ));
+            continue;
+        }
+        for entry in value.split(',').map(str::trim).filter(|e| !e.is_empty()) {
+            if let Err(message) = provider.validate_location(entry) {
+                problems.push(format!("{key}: {message}"));
+            }
+        }
     }
 }
 
@@ -386,13 +463,54 @@ mod tests {
         })
     }
 
-    fn safe_config() -> Value {
+    /// The environment Gluetun needs for `provider`, filled with fake values.
+    /// Both location keys exist in the real compose file, so this mirrors that:
+    /// the one the provider does not read is empty.
+    fn provider_env(provider: VpnProvider) -> Value {
+        let mut env = Map::new();
+        env.insert("VPN_SERVICE_PROVIDER".into(), json!(provider.gluetun_id()));
+        env.insert("VPN_TYPE".into(), json!(provider.protocol().as_env()));
+        for key in provider.required_env() {
+            env.insert((*key).into(), json!(format!("{key}-value")));
+        }
+        for key in ["SERVER_COUNTRIES", "SERVER_REGIONS"] {
+            let location = if key == provider.location_key() {
+                provider.default_location().unwrap_or_default()
+            } else {
+                ""
+            };
+            env.insert(key.into(), json!(location));
+        }
+        Value::Object(env)
+    }
+
+    /// The credential/firewall environment for `provider` on an otherwise
+    /// valid layout.
+    fn safe_config(provider: VpnProvider) -> Value {
+        safe_config_with(provider, &[])
+    }
+
+    /// `safe_config`, with extra `(key, value)` pairs merged into Gluetun's
+    /// environment after the provider's own.
+    fn safe_config_with(provider: VpnProvider, extra: &[(&str, Value)]) -> Value {
+        let mut config = base_config();
+        let env = config["services"]["gluetun"]["environment"]
+            .as_object_mut()
+            .expect("environment is an object");
+        for (key, value) in provider_env(provider).as_object().expect("provider env") {
+            env.insert(key.clone(), value.clone());
+        }
+        for (key, value) in extra {
+            env.insert((*key).into(), value.clone());
+        }
+        config
+    }
+
+    fn base_config() -> Value {
         json!({
             "services": {
                 "gluetun": {
                     "environment": {
-                        "VPN_SERVICE_PROVIDER": "mullvad",
-                        "VPN_TYPE": "wireguard",
                         FIREWALL_ENABLED: "on",
                         "FIREWALL_OUTBOUND_SUBNETS": "192.168.1.10/32",
                         "DNS_SERVER": "on",
@@ -442,12 +560,128 @@ mod tests {
 
     #[test]
     fn accepts_the_isolated_layout() {
-        assert_eq!(verify_torrent_isolation(&safe_config()), Ok(()));
+        assert_eq!(
+            verify_torrent_isolation(&safe_config(VpnProvider::Mullvad)),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn accepts_every_provider() {
+        for provider in VpnProvider::ALL {
+            assert_eq!(
+                verify_torrent_isolation(&safe_config(provider)),
+                Ok(()),
+                "{} was rejected",
+                provider.label()
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_an_unknown_provider() {
+        let mut config = safe_config(VpnProvider::Mullvad);
+        config["services"]["gluetun"]["environment"]["VPN_SERVICE_PROVIDER"] = json!("foo");
+        let problems = verify_torrent_isolation(&config).unwrap_err();
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("not supported") && p.contains("mullvad")),
+            "{problems:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_a_missing_provider() {
+        let mut config = safe_config(VpnProvider::Mullvad);
+        config["services"]["gluetun"]["environment"]
+            .as_object_mut()
+            .unwrap()
+            .remove("VPN_SERVICE_PROVIDER");
+        let problems = verify_torrent_isolation(&config).unwrap_err();
+        assert!(
+            problems.iter().any(|p| p.contains("VPN_SERVICE_PROVIDER")),
+            "{problems:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_a_protocol_the_provider_does_not_support() {
+        let mut config = safe_config(VpnProvider::Mullvad);
+        config["services"]["gluetun"]["environment"]["VPN_TYPE"] = json!("openvpn");
+        let problems = verify_torrent_isolation(&config).unwrap_err();
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("VPN_TYPE=wireguard") && p.contains("Mullvad")),
+            "{problems:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_a_missing_or_blank_credential() {
+        let mut config = safe_config(VpnProvider::Mullvad);
+        config["services"]["gluetun"]["environment"]["WIREGUARD_PRIVATE_KEY"] = json!("");
+        config["services"]["gluetun"]["environment"]
+            .as_object_mut()
+            .unwrap()
+            .remove("WIREGUARD_ADDRESSES");
+        let problems = verify_torrent_isolation(&config).unwrap_err();
+        assert!(
+            problems.iter().any(|p| p.contains("WIREGUARD_PRIVATE_KEY")),
+            "blank key not rejected: {problems:?}"
+        );
+        assert!(
+            problems.iter().any(|p| p.contains("WIREGUARD_ADDRESSES")),
+            "missing address not rejected: {problems:?}"
+        );
+    }
+
+    #[test]
+    fn accepts_a_password_but_rejects_a_blank_one() {
+        let mut config = safe_config(VpnProvider::PrivateInternetAccess);
+        assert_eq!(verify_torrent_isolation(&config), Ok(()));
+        config["services"]["gluetun"]["environment"]["OPENVPN_PASSWORD"] = json!("  ");
+        let problems = verify_torrent_isolation(&config).unwrap_err();
+        assert!(
+            problems.iter().any(|p| p.contains("OPENVPN_PASSWORD")),
+            "{problems:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_the_other_providers_location_key() {
+        let mut config = safe_config(VpnProvider::PrivateInternetAccess);
+        config["services"]["gluetun"]["environment"]["SERVER_COUNTRIES"] = json!("Netherlands");
+        let problems = verify_torrent_isolation(&config).unwrap_err();
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("SERVER_REGIONS") && p.contains("SERVER_COUNTRIES")),
+            "{problems:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_a_location_the_provider_does_not_have() {
+        let mut config = safe_config(VpnProvider::Mullvad);
+        config["services"]["gluetun"]["environment"]["SERVER_COUNTRIES"] =
+            json!("Netherlands, Mars");
+        let problems = verify_torrent_isolation(&config).unwrap_err();
+        assert!(problems.iter().any(|p| p.contains("Mars")), "{problems:?}");
+    }
+
+    #[test]
+    fn accepts_several_comma_separated_locations() {
+        let mut config = safe_config(VpnProvider::Mullvad);
+        config["services"]["gluetun"]["environment"]["SERVER_COUNTRIES"] =
+            json!("Netherlands,Germany");
+        assert_eq!(verify_torrent_isolation(&config), Ok(()));
     }
 
     #[test]
     fn rejects_a_service_on_a_separate_network() {
-        let mut config = safe_config();
+        let mut config = safe_config(VpnProvider::Mullvad);
         config["services"]["qbittorrent"]["network_mode"] = json!("bridge");
         let problems = verify_torrent_isolation(&config).unwrap_err();
         assert!(problems.iter().any(|p| p.contains("qbittorrent")));
@@ -455,7 +689,7 @@ mod tests {
 
     #[test]
     fn rejects_a_sidecar_without_gluetun_resolv_conf() {
-        let mut config = safe_config();
+        let mut config = safe_config(VpnProvider::Mullvad);
         config["services"]["qbittorrent"]
             .as_object_mut()
             .unwrap()
@@ -466,7 +700,7 @@ mod tests {
 
     #[test]
     fn rejects_docker_dns_option_with_shared_network_mode() {
-        let mut config = safe_config();
+        let mut config = safe_config(VpnProvider::Mullvad);
         config["services"]["qbittorrent"]["dns"] = json!(["127.0.0.1"]);
         let problems = verify_torrent_isolation(&config).unwrap_err();
         assert!(problems.iter().any(|p| p.contains("cannot set dns")));
@@ -475,7 +709,7 @@ mod tests {
     #[test]
     fn rejects_internet_wide_firewall_exceptions() {
         for exception in ["0.0.0.0/0", "192.168.1.0/24", "1.1.1.1", "1.1.1.1/32"] {
-            let mut config = safe_config();
+            let mut config = safe_config(VpnProvider::Mullvad);
             config["services"]["gluetun"]["environment"]["FIREWALL_OUTBOUND_SUBNETS"] =
                 json!(exception);
             let problems = verify_torrent_isolation(&config).unwrap_err();
@@ -490,7 +724,7 @@ mod tests {
 
     #[test]
     fn rejects_disabled_firewall_or_dns_leaks() {
-        let mut config = safe_config();
+        let mut config = safe_config(VpnProvider::Mullvad);
         config["services"]["gluetun"]["environment"][FIREWALL_ENABLED] = json!("off");
         config["services"]["gluetun"]["environment"]["DNS_KEEP_NAMESERVER"] = json!("on");
         let problems = verify_torrent_isolation(&config).unwrap_err();
@@ -532,7 +766,7 @@ mod tests {
 
     #[test]
     fn rejects_a_missing_vpn_check_gate() {
-        let mut config = safe_config();
+        let mut config = safe_config(VpnProvider::Mullvad);
         config["services"]
             .as_object_mut()
             .unwrap()
@@ -543,7 +777,7 @@ mod tests {
 
     #[test]
     fn rejects_a_missing_vpn_status_agent() {
-        let mut config = safe_config();
+        let mut config = safe_config(VpnProvider::Mullvad);
         config["services"]
             .as_object_mut()
             .unwrap()
@@ -554,7 +788,7 @@ mod tests {
 
     #[test]
     fn rejects_a_vpn_status_agent_on_a_separate_network() {
-        let mut config = safe_config();
+        let mut config = safe_config(VpnProvider::Mullvad);
         config["services"]["vpn-status"]["network_mode"] = json!("bridge");
         let problems = verify_torrent_isolation(&config).unwrap_err();
         assert!(problems.iter().any(|p| p.contains("vpn-status")));
@@ -562,7 +796,7 @@ mod tests {
 
     #[test]
     fn rejects_a_vpn_status_port_exposed_on_the_lan() {
-        let mut config = safe_config();
+        let mut config = safe_config(VpnProvider::Mullvad);
         config["services"]["gluetun"]["ports"] = json!([
             {
                 "mode": "ingress",
@@ -578,7 +812,7 @@ mod tests {
 
     #[test]
     fn rejects_a_moved_status_port_published_on_the_host() {
-        let mut config = safe_config();
+        let mut config = safe_config(VpnProvider::Mullvad);
         config["services"]["vpn-status"]["environment"] = serde_json::json!({
             "VPN_STATUS_PORT": "18098"
         });
@@ -594,7 +828,7 @@ mod tests {
 
     #[test]
     fn accepts_a_moved_status_port_bound_to_loopback() {
-        let mut config = safe_config();
+        let mut config = safe_config(VpnProvider::Mullvad);
         config["services"]["vpn-status"]["environment"] = serde_json::json!({
             "VPN_STATUS_PORT": "18098"
         });
@@ -609,7 +843,7 @@ mod tests {
 
     #[test]
     fn rejects_enabled_ipv6() {
-        let mut config = safe_config();
+        let mut config = safe_config(VpnProvider::Mullvad);
         config["services"]["gluetun"]["sysctls"] = json!({ "net.ipv6.conf.all.disable_ipv6": 0 });
         let problems = verify_torrent_isolation(&config).unwrap_err();
         assert!(problems.iter().any(|p| p.contains("IPv6")));

@@ -1,5 +1,0 @@
-# A provider other than the one the rest of the stack is audited against.
-services:
-  gluetun:
-    environment:
-      VPN_SERVICE_PROVIDER: protonvpn

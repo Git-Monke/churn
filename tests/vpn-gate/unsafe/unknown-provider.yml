@@ -1,0 +1,5 @@
+# A provider Gluetun's churn-side allowlist does not know about.
+services:
+  gluetun:
+    environment:
+      VPN_SERVICE_PROVIDER: foo

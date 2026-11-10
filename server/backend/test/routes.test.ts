@@ -221,21 +221,21 @@ function vpnAgentPayload(overrides: Record<string, unknown> = {}): Record<string
     checkedAt: "2026-01-01T12:00:00.000Z",
     durationMs: 1840,
     secure: true,
+    provider: "mullvad",
+    protocol: "wireguard",
     checks: {
-      mullvadExit: true,
+      tunnelExit: true,
       killSwitch: true,
       dns: true,
       ipv6: true,
       firewallException: true,
     },
-    mullvad: {
+    exit: {
       ip: "185.65.134.10",
+      gluetunIp: "185.65.134.10",
+      matchesGluetun: true,
       country: "Netherlands",
-      city: "Amsterdam",
       organization: "Mullvad VPN",
-      mullvad_exit_ip: true,
-      mullvad_exit_ip_hostname: "nl-ams-wg-001",
-      mullvad_server_type: "wireguard",
     },
     dns: { nameservers: ["127.0.0.1"] },
     firewall: { directEgressBlocked: true, exception: "192.168.1.10/32" },
@@ -272,14 +272,13 @@ describe("vpn", () => {
     expect(response.statusCode).toBe(200);
     expect(body).toMatchObject({
       secure: true,
+      provider: "mullvad",
+      protocol: "wireguard",
       exit: {
         ip: "185.65.134.10",
         country: "Netherlands",
-        city: "Amsterdam",
-        hostname: "nl-ams-wg-001",
         organization: "Mullvad VPN",
-        serverType: "wireguard",
-        mullvadExit: true,
+        matchesGluetun: true,
       },
       dnsNameservers: ["127.0.0.1"],
       firewallException: "192.168.1.10/32",
@@ -300,7 +299,7 @@ describe("vpn", () => {
         vpnAgentPayload({
           secure: false,
           checks: {
-            mullvadExit: false,
+            tunnelExit: false,
             killSwitch: false,
             dns: true,
             ipv6: true,
@@ -321,7 +320,7 @@ describe("vpn", () => {
       expect.objectContaining({ id: "kill_switch", passed: false }),
     );
     expect(body.checks).toContainEqual(
-      expect.objectContaining({ id: "mullvad_exit", passed: false }),
+      expect.objectContaining({ id: "tunnel_exit", passed: false }),
     );
     await app.close();
   });
