@@ -54,6 +54,11 @@ const TORRENT_ASSETS: &[Asset] = &[
         mode: 0o755,
     },
     Asset {
+        path: "scripts/qbit-watch.sh",
+        body: include_str!("../torrent/scripts/qbit-watch.sh"),
+        mode: 0o755,
+    },
+    Asset {
         path: "scripts/vpn-check.sh",
         body: include_str!("../torrent/scripts/vpn-check.sh"),
         mode: 0o755,

@@ -12,6 +12,7 @@ traffic are not allowed to start.
 | `vpn-check` | One-shot startup verification of VPN exit, DNS, and kill switch | Shares gluetun |
 | `vpn-status` | On-demand leak test for the dashboard's VPN tab | Shares gluetun |
 | `qbittorrent` | Download client | Shares gluetun |
+| `qbit-watch` | Restarts qBittorrent when its tracker session falls behind the tunnel | Shares gluetun |
 | `prowlarr` | Indexer manager | Shares gluetun |
 | `flaresolverr` | Solves Cloudflare challenges for indexers | Shares gluetun |
 | `qbittorrent-init` | Seeds a stable qBittorrent API key | No network |
@@ -69,6 +70,34 @@ other machines, bind the published port to
 - `churn verify-vpn` applies the same rules to a `docker compose config`
   document. The installer runs it before starting the stack, and
   `scripts/vpn-gate.sh` runs it for the release gate.
+
+### When the VPN reconnects, qBittorrent is restarted
+
+Gluetun can restart its own tunnel without recreating the namespace. The
+sidecars keep the namespace, but qBittorrent keeps the libtorrent session it
+built on the old exit: DHT drops to zero nodes, the status shows `firewalled`,
+and every download sits at 0% with no data arriving. Nothing recovers until
+qBittorrent is restarted.
+
+`qbit-watch` runs in the same namespace and reads Gluetun's control API
+(`/v1/vpn/status`, `/v1/publicip/ip`). It restarts qBittorrent, through
+`POST /api/v2/app/shutdown`, when the tunnel comes back after being down, when
+the exit IP changes, when DHT has reported zero nodes for 30s, or when
+qBittorrent's own `last_external_address_v4` still disagrees with Gluetun's exit
+IP after 10 minutes. The linuxserver image supervises qbittorrent-nox with s6,
+so that shutdown restarts the process inside the same container: no Docker
+socket, no namespace recreation, and the kill switch is never lifted.
+
+Restarts are clamped by a 3-minute cooldown, and the DHT rule is suspended for
+2 minutes after each restart so a bootstrapping session is not restarted again.
+Tune it with `QBIT_WATCH_INTERVAL_SECONDS` and `QBIT_WATCH_DHT_STALL_SECONDS` in
+`torrent/.env`. `QBIT_WATCH_DRY_RUN=1` logs what it would restart without
+touching qBittorrent.
+
+This covers Gluetun restarting its tunnel in place. It does not cover
+`docker restart gluetun`, which recreates the namespace and takes `qbit-watch`
+down with the other sidecars; recreate the whole stack in that case (see the
+commands below).
 
 ### The release gate
 
@@ -135,6 +164,7 @@ docker compose up --force-recreate vpn-check # rerun the VPN check
 docker compose up -d --no-deps --force-recreate vpn-status  # restart the check agent
 curl -s http://127.0.0.1:8098/status                         # run the live check directly
 docker compose run --rm prowlarr-init                        # re-apply the wiring
+docker compose logs -f qbit-watch                            # watch the VPN restarts
 ```
 
 Do not recreate `gluetun` by itself: qBittorrent, Prowlarr, FlareSolverr and

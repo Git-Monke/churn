@@ -136,6 +136,40 @@ services:
       - ./resolv.conf:/etc/resolv.conf:ro    # Gluetun's local DNS
     restart: unless-stopped
 
+  # Gluetun can restart its tunnel in place. The sidecars then keep the same
+  # namespace, but qBittorrent keeps the libtorrent session it built on the old
+  # exit, so DHT drops to zero nodes and every download stalls at 0%. This
+  # watcher notices the reconnect (or a stuck DHT) and restarts qBittorrent
+  # through its own API; s6 brings qbittorrent-nox back inside the container,
+  # so no Docker socket is needed. See scripts/qbit-watch.sh.
+  qbit-watch:
+    image: curlimages/curl:8.23.0
+    network_mode: "service:gluetun"      # same namespace and API path as qBittorrent
+    # Same owner as qBittorrent's config tree, so the API key stays readable
+    # without widening the file modes.
+    user: "${PUID:-1000}:${PGID:-1000}"
+    depends_on:
+      gluetun:
+        condition: service_healthy
+      vpn-check:
+        condition: service_completed_successfully
+      qbittorrent-init:
+        condition: service_completed_successfully
+      qbittorrent:
+        condition: service_started
+    environment:
+      - TZ=${TZ:-UTC}
+      - QBITTORRENT_URL=http://127.0.0.1:8080
+      - GLUETUN_CONTROL_URL=http://127.0.0.1:8000
+      - QBIT_WATCH_INTERVAL_SECONDS=${QBIT_WATCH_INTERVAL_SECONDS:-5}
+      - QBIT_WATCH_DHT_STALL_SECONDS=${QBIT_WATCH_DHT_STALL_SECONDS:-30}
+    volumes:
+      - ./config/qbittorrent:/qbittorrent-config:ro    # API key only
+      - ./resolv.conf:/etc/resolv.conf:ro    # Gluetun's local DNS
+      - ./scripts/qbit-watch.sh:/scripts/qbit-watch.sh:ro
+    entrypoint: ["/bin/sh", "/scripts/qbit-watch.sh"]
+    restart: unless-stopped
+
   prowlarr:
     image: lscr.io/linuxserver/prowlarr:2.7.0.5723-ls166
     network_mode: "service:gluetun"      # indexer traffic also exits through the VPN

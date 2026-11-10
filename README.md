@@ -12,7 +12,7 @@ Two roles, one machine each (or both on the same box):
 | stack     | what it runs                                       | what it does |
 | --------- | -------------------------------------------------- | ------------ |
 | `server`  | Jellyfin + Sonarr + Radarr + dashboard | Manages your media, provides high-quality search results when looking for new movies and shows, and displays it all from one interface. |
-| `torrent` | qBittorrent + Prowlarr + FlareSolverr | Runs a full torrent and indexer stack inside a VPN-jailed container. VPN security is tested four times: during release, on download, before startup and during runtime. |
+| `torrent` | qBittorrent + Prowlarr + FlareSolverr | Runs a full torrent and indexer stack inside a VPN-jailed container. You bring your own VPN. VPN security is tested four times: during release, on download, before startup and during runtime. |
 
 ## Features
 
@@ -498,6 +498,17 @@ The torrent stack is designed to fail closed, not merely to prefer the VPN:
   VPN namespace, publish its own ports, use a non-Gluetun network, expose the
   status agent beyond localhost, or if the firewall/DNS/IPv6 settings are
   unsafe.
+
+Gluetun can restart its own tunnel without recreating the namespace. The
+sidecars keep the namespace, but qBittorrent keeps the libtorrent session it
+built on the old exit: DHT falls to zero nodes, the status shows
+`firewalled`, and every download sits at 0%. `qbit-watch` shares the namespace,
+watches Gluetun's control API for a reconnect or an exit-IP change (and
+qBittorrent's DHT for a stall), and restarts qBittorrent through
+`POST /api/v2/app/shutdown`. The linuxserver image runs qbittorrent-nox under
+s6, so the process comes back inside the same container — no Docker socket and
+no lift of the kill switch. Watch it with
+`cd torrent && docker compose logs -f qbit-watch`.
 
 Re-run the startup check at any time:
 
