@@ -51,6 +51,16 @@ isolation and default route checks pass. Use `churn update --check` to compare
 versions without changing anything, and `churn update --dry-run` to see what
 would be created or recreated.
 
+## Driving it without prompts
+
+Everything the wizard asks can be supplied up front, so the same install runs
+unattended: `sudo churn --stacks server,torrent --non-interactive --answers
+./churn-answers.env`. Ports and other incidental choices are made by churn
+itself, and an incomplete answer set stops with exit status 2 before anything is
+written. [Non-interactive installs](automation.md) covers the answer sources,
+the failure modes, and `churn llm-install`, which prints a prompt for an agent
+driving the install.
+
 ## This book
 
 These pages are a living description of the stack: what each service does, how

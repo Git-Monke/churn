@@ -133,7 +133,16 @@ pub fn write_merged_dropping(
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(path, out)
+    fs::write(path, out)?;
+    // Every stack `.env` holds a secret — the WireGuard private key or the
+    // Jellyfin admin password — so a freshly created file must not inherit the
+    // umask's 0644 and be readable by every local user.
+    restrict(path)
+}
+
+/// Make `path` owner-only (0600).
+pub fn restrict(path: &Path) -> io::Result<()> {
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600))
 }
 
 /// Set one key in place, preserving comments, ordering and every other key.

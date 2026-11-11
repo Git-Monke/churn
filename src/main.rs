@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Read};
 use std::net::{SocketAddr, TcpStream};
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
@@ -45,11 +46,12 @@ media and download directories.
 
 USAGE:
     churn [OPTIONS]
-    churn show [--stacks <LIST>]
+    churn show [--stacks <LIST>] [--json]
     churn update [OPTIONS]
     churn uninstall [--stacks <LIST>] [--dry-run] [-y]
     churn migrate [--to <PATH>] [OPTIONS]
     churn verify-vpn [--dir <PATH>] [--env-file <PATH>] [--config <PATH|->]
+    churn llm-install [--stacks <LIST>] [--format <md|json>] [--write <PATH>]
 
 COMMANDS:
     show              print the URLs for the installed services; does not need
@@ -69,6 +71,9 @@ COMMANDS:
     verify-vpn        validate the torrent stack's VPN isolation from
                       `docker compose config`; needs no root and starts nothing.
                       Exits non-zero when any service could leave the tunnel
+    llm-install       print a self-contained prompt that teaches an LLM to
+                      interview the user and then run a --non-interactive
+                      install on this machine; writes and changes nothing
 
 OPTIONS:
     --stacks <LIST>   comma separated: server,torrent (skips the menu; with
@@ -76,7 +81,32 @@ OPTIONS:
                       handled)
     --dry-run         show the plan; write, remove, copy and start nothing
     -y, --yes         skip the final confirmation
+    --json            print one JSON object instead of human text (install,
+                      show and llm-install)
     -h, --help        show this help
+
+NON-INTERACTIVE OPTIONS:
+    --non-interactive
+                      answer every question from flags, --answers, the
+                      environment or the existing .env; never prompts, so it
+                      works without a terminal. Requires --stacks, implies -y,
+                      and exits 2 naming the keys it still needs before writing
+                      anything. CHURN_NON_INTERACTIVE=1 has the same effect
+    --answers <PATH|->
+                      read answers in .env syntax from PATH, or '-' for stdin.
+                      The file holds secrets: it must not be readable by group
+                      or other (chmod 600)
+    --download-dir <PATH>
+                      DOWNLOAD_DIR answer (where in-progress downloads live)
+    --media-dir <PATH>
+                      MEDIA_DIR answer (the library Jellyfin indexes)
+    --vpn-provider <ID>
+                      VPN_SERVICE_PROVIDER answer; one of mullvad, ivpn,
+                      protonvpn, nordvpn, surfshark, private internet access
+    --vpn-location <NAME>
+                      VPN_LOCATION answer, in the provider's own spelling
+    --install-docker  install Docker when it is missing instead of failing;
+                      never happens implicitly in a non-interactive run
 
 MIGRATE OPTIONS:
     --to <PATH>       destination directory; prompted when omitted
@@ -112,7 +142,7 @@ UPDATE OPTIONS:
                       the re-exec after a binary update)
     --force           re-download/re-pull even when already up to date";
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct Args {
     show: bool,
     update: bool,
@@ -135,7 +165,38 @@ struct Args {
     allow_network_fs: bool,
     dry_run: bool,
     yes: bool,
+    non_interactive: bool,
+    answers: Option<String>,
+    install_docker: bool,
+    download_dir: Option<String>,
+    media_dir: Option<String>,
+    vpn_provider: Option<String>,
+    vpn_location: Option<String>,
+    json: bool,
+    format: Option<String>,
+    write: Option<String>,
+    llm_install: bool,
     help: bool,
+}
+
+impl Args {
+    /// Whether this run may never open a prompt.
+    ///
+    /// `CHURN_NON_INTERACTIVE=1` is honoured so a script can export it once
+    /// instead of repeating the flag, which is what an agent's shell wrapper
+    /// tends to do.
+    fn non_interactive(&self) -> bool {
+        self.non_interactive || env_flag("CHURN_NON_INTERACTIVE")
+    }
+}
+
+fn env_flag(name: &str) -> bool {
+    std::env::var(name)
+        .map(|value| {
+            let value = value.trim().to_ascii_lowercase();
+            matches!(value.as_str(), "1" | "true" | "yes" | "on")
+        })
+        .unwrap_or(false)
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -183,6 +244,38 @@ fn parse_args() -> Result<Args, String> {
             "--allow-network-fs" => args.allow_network_fs = true,
             "--dry-run" => args.dry_run = true,
             "-y" | "--yes" => args.yes = true,
+            "--non-interactive" => args.non_interactive = true,
+            "--install-docker" => args.install_docker = true,
+            "--json" => args.json = true,
+            "llm-install" => args.llm_install = true,
+            "--answers" => {
+                let value = raw.next().ok_or("--answers needs a path or '-'")?;
+                args.answers = Some(value);
+            }
+            "--download-dir" => {
+                let value = raw.next().ok_or("--download-dir needs a path")?;
+                args.download_dir = Some(value);
+            }
+            "--media-dir" => {
+                let value = raw.next().ok_or("--media-dir needs a path")?;
+                args.media_dir = Some(value);
+            }
+            "--vpn-provider" => {
+                let value = raw.next().ok_or("--vpn-provider needs an id")?;
+                args.vpn_provider = Some(value);
+            }
+            "--vpn-location" => {
+                let value = raw.next().ok_or("--vpn-location needs a name")?;
+                args.vpn_location = Some(value);
+            }
+            "--format" => {
+                let value = raw.next().ok_or("--format needs md or json")?;
+                args.format = Some(value);
+            }
+            "--write" => {
+                let value = raw.next().ok_or("--write needs a path")?;
+                args.write = Some(value);
+            }
             "-h" | "--help" => args.help = true,
             other if other.starts_with("--stacks=") => {
                 args.stacks = Some(parse_stack_list(&other["--stacks=".len()..])?);
@@ -201,6 +294,27 @@ fn parse_args() -> Result<Args, String> {
             }
             other if other.starts_with("--image=") => {
                 args.image = Some(other["--image=".len()..].to_string());
+            }
+            other if other.starts_with("--answers=") => {
+                args.answers = Some(other["--answers=".len()..].to_string());
+            }
+            other if other.starts_with("--download-dir=") => {
+                args.download_dir = Some(other["--download-dir=".len()..].to_string());
+            }
+            other if other.starts_with("--media-dir=") => {
+                args.media_dir = Some(other["--media-dir=".len()..].to_string());
+            }
+            other if other.starts_with("--vpn-provider=") => {
+                args.vpn_provider = Some(other["--vpn-provider=".len()..].to_string());
+            }
+            other if other.starts_with("--vpn-location=") => {
+                args.vpn_location = Some(other["--vpn-location=".len()..].to_string());
+            }
+            other if other.starts_with("--format=") => {
+                args.format = Some(other["--format=".len()..].to_string());
+            }
+            other if other.starts_with("--write=") => {
+                args.write = Some(other["--write=".len()..].to_string());
             }
             // Uninstall used to be a flag. Name the new form instead of letting
             // the generic "unknown option" message hide it.
@@ -221,15 +335,47 @@ fn validate_args(args: &Args) -> Result<(), String> {
         args.uninstall,
         args.migrate,
         args.verify_vpn,
+        args.llm_install,
     ]
     .into_iter()
     .filter(|chosen| *chosen)
     .count();
     if commands > 1 {
         return Err(
-            "'show', 'update', 'uninstall', 'migrate' and 'verify-vpn' cannot be combined"
+            "'show', 'update', 'uninstall', 'migrate', 'verify-vpn' and 'llm-install' cannot be combined"
                 .to_string(),
         );
+    }
+
+    let answers_option = args.answers.is_some()
+        || args.download_dir.is_some()
+        || args.media_dir.is_some()
+        || args.vpn_provider.is_some()
+        || args.vpn_location.is_some()
+        || args.install_docker;
+    let non_interactive = args.non_interactive();
+    if answers_option && !non_interactive {
+        return Err(
+            "--answers, --download-dir, --media-dir, --vpn-provider, --vpn-location and --install-docker require --non-interactive"
+                .to_string(),
+        );
+    }
+    if non_interactive && args.llm_install {
+        return Err("--non-interactive cannot be combined with 'llm-install'".to_string());
+    }
+    if non_interactive && args.stacks.is_none() && !args.uninstall && !args.update && !args.migrate
+    {
+        // A non-interactive install has no menu to fall back on; update and
+        // migrate discover what is installed instead of asking.
+        return Err("--non-interactive requires --stacks <LIST>".to_string());
+    }
+    if (args.format.is_some() || args.write.is_some()) && !args.llm_install {
+        return Err("--format and --write require the 'llm-install' command".to_string());
+    }
+    if let Some(format) = &args.format
+        && !matches!(format.as_str(), "md" | "json")
+    {
+        return Err(format!("unknown --format {format:?} — expected md or json"));
     }
     let verify_option = args.dir.is_some() || args.env_file.is_some() || args.config.is_some();
     if verify_option && !args.verify_vpn {
@@ -300,14 +446,12 @@ fn choose_stacks(args: &Args) -> io::Result<Vec<Stack>> {
     Ok(stack::start_order(chose))
 }
 
-fn ask_questions(
-    questions: &[Question],
-    assume_yes: bool,
-    existing_ports: &HashMap<Port, u16>,
-) -> std::io::Result<HashMap<Question, String>> {
-    // Values from *any* stack's existing .env: a torrent-only rerun should reuse
-    // the media path the server installer already chose on this machine.
-    let mut defaults: HashMap<Question, String> = HashMap::new();
+/// Answers a previous run wrote, plus the host ports this installation owns.
+///
+/// Values come from *any* stack's existing `.env`: a torrent-only rerun should
+/// reuse the media path the server installer already chose on this machine.
+fn stored_answers(existing_ports: &HashMap<Port, u16>) -> Answers {
+    let mut defaults: Answers = HashMap::new();
     for stack in Stack::ALL {
         for (question, value) in stack.stored_answers() {
             // Prefer the stack that owns a port; the other stack's copy can be
@@ -328,8 +472,138 @@ fn ask_questions(
             .entry(Question::Port(*port))
             .or_insert_with(|| number.to_string());
     }
-    let stored = |question: &Question| defaults.get(question).map(String::as_str);
+    defaults
+}
 
+/// `.env` keys a non-interactive run accepts from the environment.
+///
+/// The same keys the answers file uses, plus the Jellyfin admin pair, so an
+/// agent can export them instead of writing a file when that is safer.
+/// Every key a non-interactive caller may supply, in environment or `--answers`
+/// form. The port keys are accepted for callers that genuinely need a fixed
+/// port; churn picks them itself when they are absent.
+const ANSWER_ENV_KEYS: [&str; 17] = [
+    "DOWNLOAD_DIR",
+    "MEDIA_DIR",
+    "VPN_SERVICE_PROVIDER",
+    "VPN_LOCATION",
+    "WIREGUARD_PRIVATE_KEY",
+    "WIREGUARD_ADDRESSES",
+    "OPENVPN_USER",
+    "OPENVPN_PASSWORD",
+    "JELLYFIN_PORT",
+    "SONARR_PORT",
+    "RADARR_PORT",
+    "DASHBOARD_PORT",
+    "QBITTORRENT_PORT",
+    "PROWLARR_PORT",
+    "VPN_STATUS_PORT",
+    // Not stack questions, but they come from the same file and the scripted
+    // Jellyfin setup reads them. Keeping them here means one loader, one
+    // permission check, and no second parsing path for secrets.
+    "JELLYFIN_ADMIN_USER",
+    "JELLYFIN_ADMIN_PASSWORD",
+];
+
+/// Merge the three ways a script supplies answers: environment, `--answers`
+/// file, then flags. Later wins, so a flag always overrides the file.
+fn supplied_answers(args: &Args) -> io::Result<HashMap<String, String>> {
+    let mut supplied: HashMap<String, String> = HashMap::new();
+    for key in ANSWER_ENV_KEYS {
+        if let Ok(value) = std::env::var(key)
+            && !value.trim().is_empty()
+        {
+            supplied.insert(key.to_string(), value.trim().to_string());
+        }
+    }
+
+    if let Some(path) = &args.answers {
+        let contents = if path == "-" {
+            let mut body = String::new();
+            io::stdin().read_to_string(&mut body)?;
+            body
+        } else {
+            let path = std::path::absolute(path)?;
+            // The file holds VPN credentials: refuse one the whole machine can
+            // read, because that would defeat the point of keeping secrets out
+            // of argv.
+            let mode = fs::metadata(&path)?.permissions().mode();
+            if mode & 0o077 != 0 {
+                return Err(io::Error::other(format!(
+                    "--answers {} is readable by other users (mode {:04o}); run chmod 600 on it first",
+                    path.display(),
+                    mode & 0o7777
+                )));
+            }
+            fs::read_to_string(&path)?
+        };
+        for (key, value) in envfile::parse(&contents) {
+            supplied.insert(key, value);
+        }
+    }
+
+    let flags = [
+        ("DOWNLOAD_DIR", &args.download_dir),
+        ("MEDIA_DIR", &args.media_dir),
+        ("VPN_SERVICE_PROVIDER", &args.vpn_provider),
+        ("VPN_LOCATION", &args.vpn_location),
+    ];
+    for (key, value) in flags {
+        if let Some(value) = value {
+            supplied.insert(key.to_string(), value.clone());
+        }
+    }
+    Ok(supplied)
+}
+
+/// Resolve a scripted install's answers, or explain what is missing.
+/// The resolved answers, plus everything the caller supplied.
+///
+/// The supplied map is returned as well because the Jellyfin admin pair lives
+/// outside `Answers`: it is not a stack question, but a scripted install has to
+/// read it from the same file it read the stack answers from.
+/// Resolve every answer without prompting, from the stored installation and the
+/// values the caller supplied.
+fn resolve_answers(
+    existing_ports: &HashMap<Port, u16>,
+    supplied: &HashMap<String, String>,
+) -> Result<Answers, churn::answers::Unresolved> {
+    let stored = stored_answers(existing_ports);
+    churn::answers::resolve(&stored, supplied)
+}
+
+/// A Jellyfin admin value for a scripted install, in precedence order: the
+/// answers file or a flag, then the environment, then an existing `.env`.
+fn admin_answer(
+    supplied: &HashMap<String, String>,
+    env: &envfile::EnvMap,
+    key: &str,
+) -> Option<String> {
+    supplied
+        .get(key)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            std::env::var(key)
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+        })
+        .or_else(|| {
+            env.get(key)
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+        })
+}
+
+/// Ask the wizard, or — with `--non-interactive` — never open a prompt.
+fn ask_questions(
+    questions: &[Question],
+    assume_yes: bool,
+    existing_ports: &HashMap<Port, u16>,
+) -> std::io::Result<HashMap<Question, String>> {
+    let defaults = stored_answers(existing_ports);
+    let stored = |question: &Question| defaults.get(question).map(String::as_str);
     let mut answers = Answers::new();
     let mut assigned_ports = Vec::new();
     let mut current = None;
@@ -634,7 +908,7 @@ fn storage_hint(question: Question) {
 /// Only missing paths are created, one confirmation each, so the user knows
 /// exactly what churn is about to make. Ownership is never changed: an existing
 /// library belongs to whoever already wrote it.
-fn ensure_directories(answers: &Answers) -> io::Result<()> {
+fn ensure_directories(answers: &Answers, assume_yes: bool, dry_run: bool) -> io::Result<()> {
     let download = answers
         .get(&Question::DownloadDir)
         .map(|value| PathBuf::from(question::normalize_path(value)));
@@ -643,18 +917,18 @@ fn ensure_directories(answers: &Answers) -> io::Result<()> {
         .map(|value| PathBuf::from(question::normalize_path(value)));
 
     if let Some(path) = &download {
-        create_if_missing(path)?;
+        create_if_missing(path, assume_yes, dry_run)?;
     }
     if let Some(path) = &media {
         if Some(path) != download.as_ref() {
-            create_if_missing(path)?;
+            create_if_missing(path, assume_yes, dry_run)?;
         }
         for name in ["movies", "tv"] {
             let subdir = path.join(name);
             if subdir.is_dir() {
                 continue;
             }
-            create_if_missing(&subdir)?;
+            create_if_missing(&subdir, assume_yes, dry_run)?;
         }
         let answers_owner = stack::stack_owner(path, download.as_deref().unwrap_or(path));
         if let Some(warning) = stack::storage_warning(path, answers_owner) {
@@ -664,14 +938,24 @@ fn ensure_directories(answers: &Answers) -> io::Result<()> {
     Ok(())
 }
 
-fn create_if_missing(path: &Path) -> io::Result<()> {
+fn create_if_missing(path: &Path, assume_yes: bool, dry_run: bool) -> io::Result<()> {
     if path.is_dir() {
         return Ok(());
     }
     log::warning(format!("{} does not exist yet", path.display()))?;
-    if confirm(format!("Create {}?", path.display()))
-        .initial_value(true)
-        .interact()?
+    // A rehearsal must not leave anything behind: `--dry-run` promises
+    // "no files written", and the directories are just as much of a write as
+    // the `.env` files it already skips.
+    if dry_run {
+        log::info(format!("would create {}", path.display()))?;
+        return Ok(());
+    }
+    // `-y` and `--non-interactive` were already told which paths to create by
+    // the answers they supplied, so asking again would only block the run.
+    if assume_yes
+        || confirm(format!("Create {}?", path.display()))
+            .initial_value(true)
+            .interact()?
     {
         std::fs::create_dir_all(path)?;
         log::success(format!("created {}", path.display()))?;
@@ -801,17 +1085,31 @@ fn ensure_root() -> io::Result<bool> {
 
 /// Check for Docker before asking anything, and offer to install it when it is
 /// missing (or when the Compose plugin is missing).
-fn ensure_docker() -> io::Result<bool> {
+fn ensure_docker(non_interactive: bool, install_docker: bool) -> io::Result<bool> {
     if system::docker_ready() {
         log::success("docker and the compose plugin are available")?;
         return Ok(true);
     }
 
     log::warning("docker with the compose plugin was not found")?;
-    if !confirm("Install Docker now with this installer?")
-        .initial_value(true)
-        .interact()?
-    {
+    // A scripted run must never install a system package on its own: it either
+    // has `--install-docker` or it stops with an instruction.
+    let agreed = if non_interactive {
+        if !install_docker {
+            outro_note(
+                "Docker is required",
+                "Install Docker (including the compose plugin) and re-run, or pass\n\
+                 --install-docker with --non-interactive to install it here.",
+            )?;
+            return Ok(false);
+        }
+        true
+    } else {
+        confirm("Install Docker now with this installer?")
+            .initial_value(true)
+            .interact()?
+    };
+    if !agreed {
         outro_note(
             "Docker is required",
             "Install Docker (including the compose plugin), then re-run churn once it is available.",
@@ -857,7 +1155,11 @@ fn ensure_docker() -> io::Result<bool> {
 /// Jellyfin is configured over its HTTP API after the server stack starts.
 /// This creates the first admin account when needed, completes the startup
 /// wizard, mints an API key and writes it to `server/.env`.
-fn setup_jellyfin(dry_run: bool) -> io::Result<()> {
+fn setup_jellyfin(
+    dry_run: bool,
+    non_interactive: bool,
+    supplied: &HashMap<String, String>,
+) -> io::Result<()> {
     if dry_run {
         log::info("would complete Jellyfin setup and create an API key")?;
         return Ok(());
@@ -916,7 +1218,7 @@ fn setup_jellyfin(dry_run: bool) -> io::Result<()> {
     let api_key = match existing_key {
         Some(key) => key,
         None => {
-            let credentials = jellyfin_credentials(&env)?;
+            let credentials = jellyfin_credentials(&env, non_interactive, supplied)?;
             let progress = spinner();
             progress.start("setting up Jellyfin and creating an API key");
             match client.provision(&env_path, &credentials, &public) {
@@ -926,10 +1228,19 @@ fn setup_jellyfin(dry_run: bool) -> io::Result<()> {
                     } else {
                         progress.stop("Jellyfin API key saved to server/.env");
                     }
-                    log::info(format!(
-                        "Jellyfin admin user: {} (keep the password you entered)",
-                        credentials.username
-                    ))?;
+                    if non_interactive {
+                        // The generated password was written to server/.env: it
+                        // must not be echoed, or it lands in a transcript.
+                        log::info(format!(
+                            "Jellyfin admin user: {} (password saved to server/.env)",
+                            credentials.username
+                        ))?;
+                    } else {
+                        log::info(format!(
+                            "Jellyfin admin user: {} (keep the password you entered)",
+                            credentials.username
+                        ))?;
+                    }
                     result.api_key
                 }
                 Err(err) => {
@@ -1004,7 +1315,15 @@ fn restart_dashboard() -> io::Result<()> {
     }
 }
 
-fn jellyfin_credentials(env: &envfile::EnvMap) -> io::Result<Credentials> {
+fn jellyfin_credentials(
+    env: &envfile::EnvMap,
+    non_interactive: bool,
+    supplied: &HashMap<String, String>,
+) -> io::Result<Credentials> {
+    if non_interactive {
+        return scripted_jellyfin_credentials(env, supplied);
+    }
+
     let env_value = |key: &str| {
         std::env::var(key)
             .ok()
@@ -1050,6 +1369,41 @@ fn jellyfin_credentials(env: &envfile::EnvMap) -> io::Result<Credentials> {
     };
 
     log::info("the Jellyfin admin password is not stored by churn")?;
+    Ok(Credentials { username, password })
+}
+
+/// Jellyfin admin credentials for `--non-interactive`, without any prompt.
+///
+/// Username: `JELLYFIN_ADMIN_USER` or `admin`. Password: `JELLYFIN_ADMIN_PASSWORD`
+/// when supplied, otherwise 24 random characters. Either way the password is
+/// written to `server/.env` (mode 0600) and never printed, so a scripted install
+/// leaves the user with a working login instead of a credential nobody knows.
+fn scripted_jellyfin_credentials(
+    env: &envfile::EnvMap,
+    supplied: &HashMap<String, String>,
+) -> io::Result<Credentials> {
+    let username =
+        admin_answer(supplied, env, "JELLYFIN_ADMIN_USER").unwrap_or_else(|| "admin".to_string());
+    jellyfin::validate_username(&username).map_err(io::Error::other)?;
+
+    let password = admin_answer(supplied, env, "JELLYFIN_ADMIN_PASSWORD")
+        .unwrap_or_else(churn::answers::generate_password);
+    jellyfin::validate_password(&password).map_err(io::Error::other)?;
+
+    let env_path = Stack::Server.env_path();
+    envfile::upsert_many(
+        &env_path,
+        &[
+            ("JELLYFIN_ADMIN_USER", username.as_str()),
+            ("JELLYFIN_ADMIN_PASSWORD", password.as_str()),
+        ],
+    )?;
+    envfile::restrict(&env_path)?;
+    log::info(format!(
+        "Jellyfin admin credentials saved to {} (mode 600)",
+        env_path.display()
+    ))?;
+
     Ok(Credentials { username, password })
 }
 
@@ -1251,6 +1605,7 @@ fn uninstall(args: Args) -> io::Result<bool> {
     note("About to uninstall", lines.trim_end().to_string())?;
 
     if !args.yes
+        && !args.non_interactive()
         && !confirm(if args.dry_run {
             "Remove these containers and files?"
         } else {
@@ -1581,7 +1936,7 @@ fn migrate_storage(args: &Args) -> io::Result<bool> {
 
     show_migration_plan(&plan, args)?;
 
-    if !args.yes {
+    if !args.yes && !args.non_interactive() {
         let prompt = if args.dry_run {
             "Show this migration plan?"
         } else if args.move_old {
@@ -1704,7 +2059,7 @@ fn migrate_storage(args: &Args) -> io::Result<bool> {
     migrate::clear_marker(&plan.destination);
 
     if stacks.contains(&Stack::Server)
-        && let Err(err) = setup_jellyfin(false)
+        && let Err(err) = setup_jellyfin(false, false, &HashMap::new())
     {
         return Err(io::Error::other(format!(
             "the data is in {} and the stacks are running, but the Jellyfin health check failed: {err}\n\
@@ -2047,7 +2402,7 @@ fn update_host(args: &Args) -> io::Result<()> {
         (false, false, true) => "Reconcile the installed stacks with the compose files?",
         (false, false, false) => "Nothing to update",
     };
-    if !args.yes && !confirm(prompt).initial_value(true).interact()? {
+    if !args.yes && !args.non_interactive() && !confirm(prompt).initial_value(true).interact()? {
         if !child {
             outro_cancel("cancelled — nothing changed")?;
         }
@@ -2331,13 +2686,59 @@ fn wait_for_dashboard(port: u16, timeout: Duration) -> io::Result<()> {
 fn show_services(args: &Args) -> io::Result<()> {
     let root = envfile::root();
     let chosen = args.stacks.clone().unwrap_or_else(|| Stack::ALL.to_vec());
-    if churn::show::installed(&root, &chosen).is_empty() {
+    let installed = churn::show::installed(&root, &chosen);
+    if args.json {
+        let services: Vec<String> =
+            churn::show::services(&root, &chosen, &churn::show::host_ip(&root))
+                .into_iter()
+                .map(|service| {
+                    format!(
+                        "{{\"name\":{},\"url\":{}}}",
+                        json_string(service.name),
+                        json_string(&service.url)
+                    )
+                })
+                .collect();
+        let stacks: Vec<String> = installed
+            .iter()
+            .map(|stack| json_string(stack.key()))
+            .collect();
+        println!(
+            "{{\"root\":{},\"installed\":[{}],\"services\":[{}]}}",
+            json_string(&root.display().to_string()),
+            stacks.join(","),
+            services.join(",")
+        );
+        return Ok(());
+    }
+    if installed.is_empty() {
         println!("no churn services are installed under {}", root.display());
         return Ok(());
     }
     let host = churn::show::host_ip(&root);
     for service in churn::show::services(&root, &chosen, &host) {
         println!("{:<14} {}", service.name, service.url);
+    }
+    Ok(())
+}
+
+/// `churn llm-install`: print the prompt an LLM follows to install for a user.
+///
+/// Read-only and root-free: it prints text and touches nothing, so it is safe on
+/// a host that has not been set up yet (which is exactly when it is useful).
+fn llm_install(args: &Args) -> io::Result<()> {
+    let stacks = args.stacks.clone().unwrap_or_else(|| Stack::ALL.to_vec());
+    let prompt = churn::llm::markdown(&stacks, env!("CARGO_PKG_VERSION"), HELP);
+    let body = match args.format.as_deref() {
+        Some("json") => churn::llm::json(&prompt),
+        _ => prompt,
+    };
+    match &args.write {
+        Some(path) if path != "-" => {
+            fs::write(path, &body)?;
+            eprintln!("churn: wrote the llm-install prompt to {path}");
+        }
+        _ => println!("{body}"),
     }
     Ok(())
 }
@@ -2405,20 +2806,68 @@ fn run(args: Args) -> io::Result<bool> {
         return uninstall(args);
     }
 
-    intro("churn · torrent stack installer")?;
+    let non_interactive = args.non_interactive();
+    // A scripted run keeps stdout for its result: human narration and prompts
+    // would corrupt a `--json` document a caller is parsing.
+    let quiet = non_interactive && args.json;
+    if !quiet {
+        intro("churn · torrent stack installer")?;
+    }
 
-    if !ensure_root()? || !ensure_docker()? {
+    // Read the answers up front, once: `--answers -` consumes stdin, which
+    // cannot be rewound, and a malformed or loose file is a usage error anyway.
+    // An incomplete answer set is also a usage error rather than a host problem,
+    // so a scripted caller learns about it before the root and Docker checks:
+    // fixing the answers is the first thing it can actually do.
+    let supplied = if non_interactive {
+        match supplied_answers(&args) {
+            Ok(supplied) => supplied,
+            Err(err) => {
+                eprintln!("churn: {err}");
+                std::process::exit(2);
+            }
+        }
+    } else {
+        HashMap::new()
+    };
+    if non_interactive && let Err(err) = resolve_answers(&HashMap::new(), &supplied) {
+        eprintln!("churn: {err}");
+        std::process::exit(2);
+    }
+
+    if !ensure_root()? || !ensure_docker(non_interactive, args.install_docker)? {
         return Ok(false);
     }
 
     let chosen = choose_stacks(&args)?;
     let existing_ports = preflight(&chosen)?;
     let questions = stack::collect_questions(&chosen);
-    let answers = ask_questions(&questions, args.yes, &existing_ports)?;
-    ensure_directories(&answers)?;
-    show_plan(&chosen, &questions, &answers)?;
+    // No prompt is ever constructed on the non-interactive path; see
+    // src/answers.rs. `supplied` stays in scope because the Jellyfin admin pair is
+    // not a stack question but still comes from the same answers file.
+    let answers = if non_interactive {
+        match resolve_answers(&existing_ports, &supplied) {
+            Ok(answers) => answers,
+            Err(err) => {
+                eprintln!("churn: {err}");
+                std::process::exit(2);
+            }
+        }
+    } else {
+        ask_questions(&questions, args.yes, &existing_ports)?
+    };
 
+    // A scripted run was told which paths to use, so it creates them and says
+    // so rather than stopping to ask about each one.
+    ensure_directories(&answers, args.yes || non_interactive, args.dry_run)?;
+    if !quiet {
+        show_plan(&chosen, &questions, &answers)?;
+    }
+
+    // Non-interactive implies yes: the caller (usually an agent that already
+    // confirmed the plan with the user) is the confirmation.
     if !args.yes
+        && !non_interactive
         && !confirm(if args.dry_run {
             "Write these files?"
         } else {
@@ -2434,7 +2883,7 @@ fn run(args: Args) -> io::Result<bool> {
     write_stacks(&chosen, &answers, args.dry_run)?;
     start_stacks(&chosen, args.dry_run)?;
     if chosen.contains(&Stack::Server) {
-        setup_jellyfin(args.dry_run)?;
+        setup_jellyfin(args.dry_run, non_interactive, &supplied)?;
     }
 
     let mut steps = String::new();
@@ -2444,6 +2893,10 @@ fn run(args: Args) -> io::Result<bool> {
             steps.push_str(&format!("  {step}\n"));
         }
     }
+    if args.json {
+        println!("{}", install_result_json(&args, &chosen, &answers)?);
+        return Ok(true);
+    }
     outro_note("Next steps", steps.trim_end().to_string())?;
     if args.dry_run {
         outro("dry run complete — no files written, services not started")?;
@@ -2451,6 +2904,103 @@ fn run(args: Args) -> io::Result<bool> {
         outro("done")?;
     }
     Ok(true)
+}
+
+/// One JSON object describing what was installed, for a script or an agent.
+///
+/// Secret answers (the WireGuard key, the OpenVPN password) are never included:
+/// they are already in the stack `.env`, which is where a caller should read
+/// them from if it genuinely needs them.
+fn install_result_json(args: &Args, chosen: &[Stack], answers: &Answers) -> io::Result<String> {
+    let root = envfile::root();
+    let host = churn::show::host_ip(&root);
+    let services: Vec<String> = churn::show::services(&root, chosen, &host)
+        .into_iter()
+        .map(|service| {
+            format!(
+                "{{\"name\":{},\"url\":{}}}",
+                json_string(service.name),
+                json_string(&service.url)
+            )
+        })
+        .collect();
+    let stacks: Vec<String> = chosen
+        .iter()
+        .map(|stack| json_string(stack.key()))
+        .collect();
+    let mut fields = vec![format!(
+        "\"root\":{}",
+        json_string(&root.display().to_string())
+    )];
+    fields.push(format!("\"dry_run\":{}", args.dry_run));
+    fields.push(format!("\"stacks\":[{}]", stacks.join(",")));
+    fields.push(format!(
+        "\"download_dir\":{}",
+        json_string(&answer_or_empty(answers, Question::DownloadDir))
+    ));
+    fields.push(format!(
+        "\"media_dir\":{}",
+        json_string(&answer_or_empty(answers, Question::MediaDir))
+    ));
+    if let Some(provider) = answered_provider(answers) {
+        let provider = Question::provider_from(Some(provider));
+        fields.push(format!(
+            "\"vpn_provider\":{}",
+            json_string(provider.gluetun_id())
+        ));
+        fields.push(format!(
+            "\"vpn_protocol\":{}",
+            json_string(provider.protocol().label())
+        ));
+    }
+    if let Some(location) = answers.get(&Question::VpnLocation) {
+        fields.push(format!("\"vpn_location\":{}", json_string(location)));
+    }
+    let ports: Vec<String> = Port::ALL
+        .into_iter()
+        .filter(|port| chosen.contains(&port.stack()))
+        .map(|port| {
+            let number = answers
+                .get(&Question::Port(port))
+                .cloned()
+                .unwrap_or_else(|| port.default_port().to_string());
+            format!("{}:{}", json_string(port.env_key()), number)
+        })
+        .collect();
+    fields.push(format!("\"ports\":{{{}}}", ports.join(",")));
+    fields.push(format!("\"services\":[{}]", services.join(",")));
+    // The Jellyfin admin password is generated only during setup, so report
+    // whether it was written rather than inventing a value.
+    let jellyfin_env = Stack::Server.env_path();
+    let has_admin = envfile::read(&jellyfin_env).contains_key("JELLYFIN_ADMIN_PASSWORD");
+    fields.push(format!("\"jellyfin_admin_password_saved\":{has_admin}"));
+    Ok(format!("{{{}}}", fields.join(",")))
+}
+
+fn answer_or_empty(answers: &Answers, question: Question) -> String {
+    answers.get(&question).cloned().unwrap_or_default()
+}
+
+/// Minimal JSON string escaping; no dependency needed for six fields (the crate
+/// deliberately keeps serde out of the installer).
+fn json_string(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('"');
+    for character in value.chars() {
+        match character {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            control if (control as u32) < 0x20 => {
+                out.push_str(&format!("\\u{:04x}", control as u32));
+            }
+            other => out.push(other),
+        }
+    }
+    out.push('"');
+    out
 }
 
 fn main() -> ExitCode {
@@ -2464,6 +3014,15 @@ fn main() -> ExitCode {
     if args.help {
         println!("{HELP}");
         return ExitCode::SUCCESS;
+    }
+    if args.llm_install {
+        return match llm_install(&args) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(err) => {
+                eprintln!("churn: {err}");
+                ExitCode::FAILURE
+            }
+        };
     }
     if args.show {
         return match show_services(&args) {
@@ -2555,6 +3114,38 @@ mod tests {
                 "verify-vpn" => args.verify_vpn = true,
                 "--dry-run" => args.dry_run = true,
                 "-y" | "--yes" => args.yes = true,
+                "--non-interactive" => args.non_interactive = true,
+                "--json" => args.json = true,
+                "--install-docker" => args.install_docker = true,
+                "llm-install" => args.llm_install = true,
+                "--answers" => {
+                    let value = raw.next().ok_or("--answers needs a value")?;
+                    args.answers = Some(value);
+                }
+                "--download-dir" => {
+                    let value = raw.next().ok_or("--download-dir needs a value")?;
+                    args.download_dir = Some(value);
+                }
+                "--media-dir" => {
+                    let value = raw.next().ok_or("--media-dir needs a value")?;
+                    args.media_dir = Some(value);
+                }
+                "--vpn-provider" => {
+                    let value = raw.next().ok_or("--vpn-provider needs a value")?;
+                    args.vpn_provider = Some(value);
+                }
+                "--vpn-location" => {
+                    let value = raw.next().ok_or("--vpn-location needs a value")?;
+                    args.vpn_location = Some(value);
+                }
+                "--format" => {
+                    let value = raw.next().ok_or("--format needs a value")?;
+                    args.format = Some(value);
+                }
+                "--write" => {
+                    let value = raw.next().ok_or("--write needs a value")?;
+                    args.write = Some(value);
+                }
                 "--uninstall" => {
                     return Err("uninstall is a command: run 'churn uninstall'".to_string());
                 }
@@ -2563,6 +3154,115 @@ mod tests {
         }
         validate_args(&args)?;
         Ok(args)
+    }
+
+    #[test]
+    fn the_answers_file_wins_over_an_existing_env_for_the_jellyfin_admin() {
+        // The file is the caller's explicit statement of intent, so it must beat
+        // a value left over from a previous install.
+        let mut supplied = HashMap::new();
+        supplied.insert("JELLYFIN_ADMIN_USER".to_string(), "owner".to_string());
+        supplied.insert(
+            "JELLYFIN_ADMIN_PASSWORD".to_string(),
+            "file-password".to_string(),
+        );
+        let mut env = envfile::EnvMap::new();
+        env.insert("JELLYFIN_ADMIN_USER".to_string(), "admin".to_string());
+        env.insert(
+            "JELLYFIN_ADMIN_PASSWORD".to_string(),
+            "env-password".to_string(),
+        );
+
+        assert_eq!(
+            admin_answer(&supplied, &env, "JELLYFIN_ADMIN_USER").as_deref(),
+            Some("owner")
+        );
+        assert_eq!(
+            admin_answer(&supplied, &env, "JELLYFIN_ADMIN_PASSWORD").as_deref(),
+            Some("file-password")
+        );
+        // Nothing supplied: fall back to the existing install, then to nothing.
+        assert_eq!(
+            admin_answer(&HashMap::new(), &env, "JELLYFIN_ADMIN_USER").as_deref(),
+            Some("admin")
+        );
+        assert_eq!(
+            admin_answer(
+                &HashMap::new(),
+                &envfile::EnvMap::new(),
+                "JELLYFIN_ADMIN_PASSWORD"
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn non_interactive_requires_stacks() {
+        let err = parse(&["--non-interactive"]).expect_err("no menu to fall back on");
+        assert!(err.contains("--stacks"), "{err}");
+
+        let args = parse(&["--non-interactive", "--stacks", "torrent"]).expect("explicit stacks");
+        assert!(args.non_interactive);
+        // An install that cannot ask is an install that has already been
+        // confirmed by its caller.
+        assert!(!args.yes, "the flag itself does not set --yes");
+    }
+
+    #[test]
+    fn update_and_migrate_do_not_need_stacks_non_interactively() {
+        // They discover what is installed instead of offering a menu.
+        parse(&["update", "--non-interactive"]).expect("update");
+        parse(&["migrate", "--non-interactive"]).expect("migrate");
+        parse(&["uninstall", "--non-interactive"]).expect("uninstall");
+    }
+
+    #[test]
+    fn the_answers_options_belong_to_non_interactive_installs() {
+        let err = parse(&["--stacks", "server", "--answers", "answers.env"])
+            .expect_err("a file without the mode is a silent no-op");
+        assert!(err.contains("--non-interactive"), "{err}");
+
+        let err = parse(&["--stacks", "server", "--download-dir", "/data"])
+            .expect_err("a flag without the mode is a silent no-op");
+        assert!(err.contains("--non-interactive"), "{err}");
+
+        let args = parse(&[
+            "--stacks",
+            "server",
+            "--non-interactive",
+            "--answers",
+            "answers.env",
+            "--download-dir",
+            "/data",
+            "--media-dir",
+            "/mnt/media",
+            "--vpn-provider",
+            "mullvad",
+            "--vpn-location",
+            "Sweden",
+        ])
+        .expect("all answers supplied");
+        assert_eq!(args.answers.as_deref(), Some("answers.env"));
+        assert_eq!(args.vpn_provider.as_deref(), Some("mullvad"));
+    }
+
+    #[test]
+    fn llm_install_is_its_own_command() {
+        let err = parse(&["llm-install", "show"]).expect_err("two commands");
+        assert!(err.contains("cannot be combined"), "{err}");
+
+        let err = parse(&["--non-interactive", "llm-install", "--stacks", "torrent"])
+            .expect_err("one prints a prompt, the other installs");
+        assert!(err.contains("llm-install"), "{err}");
+
+        // It prints a prompt, so it cannot itself be scripted through the
+        // install flags.
+        let err = parse(&["llm-install", "--format", "yaml"]).expect_err("unknown format");
+        assert!(err.contains("md"), "{err}");
+
+        let args = parse(&["llm-install", "--format", "json", "--stacks", "torrent"])
+            .expect("json prompt");
+        assert_eq!(args.format.as_deref(), Some("json"));
     }
 
     #[test]

@@ -1,5 +1,9 @@
 target/
 .env
+# Answers files written by an agent following `churn llm-install`; they hold
+# VPN credentials and the Jellyfin admin password.
+churn-answers.env
+.churn-answers.env
 config/
 cache/
 /docs/book/

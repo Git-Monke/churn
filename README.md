@@ -45,6 +45,18 @@ sudo churn
 Docker if it is missing, writes the stack files, pulls the prebuilt dashboard
 image, and configures the services.
 
+Or hand the whole thing to an agent. `churn llm-install` prints a prompt that
+walks an LLM through the install — discover the machine, gather the answers,
+adopt an existing library, confirm the plan, then run the non-interactive
+install and verify the VPN — so "install churn for me" is a complete
+instruction:
+
+```bash
+churn llm-install          # markdown prompt to paste into your agent
+```
+
+See [`churn llm-install`](#churn-llm-install) for the details.
+
 ## Update
 
 Update the churn CLI, the server dashboard and the installed stacks to the
@@ -156,6 +168,86 @@ If its containers are still running or stopped, churn reuses their published
 host ports instead of treating its own Jellyfin on 8096 as a conflict and moving
 the service to a new port. Older `.env` files that predate configurable ports
 are filled in from the containers themselves.
+
+## Non-interactive installs
+
+`--non-interactive` runs the same install without opening a single prompt. It
+never asks for ports, storage paths or credentials: every answer comes from a
+flag, an environment variable, an answers file, or the `.env` file of an
+existing installation.
+
+```bash
+sudo churn --stacks server,torrent --non-interactive \
+  --download-dir /data --media-dir /data/media \
+  --vpn-provider mullvad --answers ./churn-answers.env
+```
+
+`--answers` takes a file in `.env` syntax:
+
+```bash
+DOWNLOAD_DIR=/data
+MEDIA_DIR=/data/media
+VPN_SERVICE_PROVIDER=mullvad
+WIREGUARD_PRIVATE_KEY=...
+WIREGUARD_ADDRESSES=10.64.0.2/32
+```
+
+Secrets belong in that file, never on the command line, so it must not be
+readable by other users — churn refuses a file with looser permissions than
+`0600` and asks you to `chmod 600` it first. A redirect creates the file `0644`,
+so run `umask 077` first or start from `install -m 600 /dev/null ./churn-answers.env`.
+Pass `--answers -` to read the same syntax from stdin. Keep the file out of the
+repository: `churn-answers.env` is in `.gitignore`, but an untracked file is one
+`git add -A` away.
+
+The stack `.env` files churn writes are `0600` too, because `torrent/.env` holds
+the WireGuard private key and `server/.env` the Jellyfin admin password.
+
+Ports are not a question: churn keeps the port a previous run chose, uses the
+conventional one when it is free, and otherwise picks the nearest free port. The
+same applies to exit locations (the provider's default is used when none is
+given) and to the Jellyfin admin account (a 24-character password is generated
+and written to `server/.env` with mode 600 unless you supply
+`JELLYFIN_ADMIN_PASSWORD`).
+
+`--non-interactive` implies `-y`: the caller is the confirmation. If anything is
+missing churn writes nothing and exits with status 2, naming the keys it still
+needs:
+
+```
+churn: non-interactive install is still missing: DOWNLOAD_DIR, MEDIA_DIR
+Supply them with a flag, --answers <file>, the environment, or an existing .env.
+```
+
+Add `--json` for one machine-readable object instead of human narration, and
+`--install-docker` to allow churn to install Docker without asking. Set
+`CHURN_NON_INTERACTIVE=1` to make the mode the default for every invocation.
+
+### `churn llm-install`
+
+For an LLM or another agent driving the install, `churn llm-install` prints a
+prompt that explains the whole contract:
+
+```bash
+churn llm-install --stacks server,torrent            # markdown to stdout
+churn llm-install --format json                       # one JSON object
+churn llm-install --write /tmp/churn-prompt.md         # save it
+```
+
+It is read-only and needs neither root nor Docker. The prompt is generated from
+the same tables the installer enforces — the provider list, which credentials
+each provider needs, and the real answer keys — so it cannot drift out of date.
+It tells the agent to discover the machine first (`df -hT`, `churn show --json`,
+an existing Jellyfin library), to gather every answer before running anything,
+to choose a storage layout and confirm it, to present the full plan and get an
+explicit yes, to keep secrets in a mode-600 answers file, to leave ports to
+churn, and to verify the VPN afterwards with `churn verify-vpn`.
+
+`churn show --json` reports the installed services as JSON for the same callers:
+
+```bash
+churn show --json
+```
 
 ## Service URLs
 
