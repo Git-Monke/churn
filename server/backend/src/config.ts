@@ -289,7 +289,15 @@ function readDotEnv(serverDir: string): NodeJS.ProcessEnv {
   }
   try {
     return dotenv.parse(readFileSync(envPath));
-  } catch {
+  } catch (error) {
+    // A container that runs as an unprivileged uid cannot read a root-only
+    // file. Starting "unconfigured" silently made that permission bug look
+    // like a missing API key, so say exactly what failed.
+    const code = (error as NodeJS.ErrnoException).code ?? "unknown";
+    console.warn(
+      `churn: cannot read ${envPath} (${code}); starting without its settings. ` +
+        `The file must be readable by the uid/gid the dashboard runs as (root:PGID 0640).`,
+    );
     return {};
   }
 }

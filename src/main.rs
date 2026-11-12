@@ -1166,6 +1166,10 @@ fn setup_jellyfin(
     }
 
     let env_path = Stack::Server.env_path();
+    // A rerun can find a valid key and write nothing, so enforce the dashboard's
+    // group before any later step can fail: an install created while the file
+    // was owner-only heals here instead of needing a manual chmod.
+    Stack::Server.share_env()?;
     let env = envfile::read(&env_path);
     let jellyfin_port = env
         .get("JELLYFIN_PORT")
@@ -1398,9 +1402,9 @@ fn scripted_jellyfin_credentials(
             ("JELLYFIN_ADMIN_PASSWORD", password.as_str()),
         ],
     )?;
-    envfile::restrict(&env_path)?;
+    Stack::Server.share_env()?;
     log::info(format!(
-        "Jellyfin admin credentials saved to {} (mode 600)",
+        "Jellyfin admin credentials saved to {} (mode 640)",
         env_path.display()
     ))?;
 
@@ -2407,6 +2411,12 @@ fn update_host(args: &Args) -> io::Result<()> {
             outro_cancel("cancelled — nothing changed")?;
         }
         return Ok(());
+    }
+
+    // Heal installs created before the dashboard could read `.env`, before any
+    // container is recreated with the repaired permissions.
+    if installed {
+        Stack::Server.share_env()?;
     }
 
     if binary_needs {

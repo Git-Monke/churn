@@ -42,7 +42,9 @@ npm start          # http://127.0.0.1:4000
 
 `server/.env` is read after the process environment, so real environment
 variables win. Churn preserves keys it does not manage, so hand-added settings
-survive a rerun.
+survive a rerun. Churn writes the file as `root:PGID` with mode `0640`, so the
+dashboard container (which runs as `PUID:PGID`) can read it while only root can
+change the values compose interpolates; a rerun repairs the permissions.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |

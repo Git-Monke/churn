@@ -200,14 +200,17 @@ Pass `--answers -` to read the same syntax from stdin. Keep the file out of the
 repository: `churn-answers.env` is in `.gitignore`, but an untracked file is one
 `git add -A` away.
 
-The stack `.env` files churn writes are `0600` too, because `torrent/.env` holds
-the WireGuard private key and `server/.env` the Jellyfin admin password.
+The stack `.env` files churn writes are root-owned. `torrent/.env` is `0600`
+because it holds the WireGuard private key. `server/.env` is `root:PGID` with
+mode `0640`, because the dashboard container runs as `PUID:PGID` and has to read
+the Jellyfin API key; keeping root as the owner means only root can change the
+values compose interpolates.
 
 Ports are not a question: churn keeps the port a previous run chose, uses the
 conventional one when it is free, and otherwise picks the nearest free port. The
 same applies to exit locations (the provider's default is used when none is
 given) and to the Jellyfin admin account (a 24-character password is generated
-and written to `server/.env` with mode 600 unless you supply
+and written to `server/.env` with mode 640 unless you supply
 `JELLYFIN_ADMIN_PASSWORD`).
 
 `--non-interactive` implies `-y`: the caller is the confirmation. If anything is

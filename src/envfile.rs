@@ -1,9 +1,10 @@
 //! Reading and writing the stack `.env` files, plus host defaults.
 
 use std::collections::BTreeMap;
-use std::ffi::OsString;
+use std::ffi::{CString, OsString};
 use std::fs;
 use std::io;
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
@@ -143,6 +144,30 @@ pub fn write_merged_dropping(
 /// Make `path` owner-only (0600).
 pub fn restrict(path: &Path) -> io::Result<()> {
     fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+}
+
+/// Make `path` readable by group `gid`, keeping its owner.
+///
+/// `server/.env` is bind-mounted into the dashboard, which runs as
+/// `PUID:PGID`, but the file must stay owned by root: compose interpolates its
+/// values when churn runs as root, so an unprivileged owner could inject a
+/// container image or a bind mount. Group read is the narrowest grant that lets
+/// the container read the Jellyfin API key.
+pub fn share(path: &Path, gid: u32) -> io::Result<()> {
+    let c_path = CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "path contains a NUL byte"))?;
+    // `(uid_t) -1` keeps the current owner.
+    if unsafe { libc::chown(c_path.as_ptr(), !0 as libc::uid_t, gid) } != 0 {
+        let err = io::Error::last_os_error();
+        return Err(io::Error::new(
+            err.kind(),
+            format!(
+                "could not give group {gid} access to {}: {err}",
+                path.display()
+            ),
+        ));
+    }
+    fs::set_permissions(path, fs::Permissions::from_mode(0o640))
 }
 
 /// Set one key in place, preserving comments, ordering and every other key.
@@ -353,5 +378,20 @@ mod tests {
         let cwd = temp_dir("installed");
         assert_eq!(root_for(None, Some(&cwd)), PathBuf::from(DEFAULT_ROOT));
         fs::remove_dir_all(cwd).unwrap();
+    }
+
+    #[test]
+    fn sharing_keeps_the_owner_and_grants_the_group_read_access() {
+        let dir = temp_dir("share");
+        let path = dir.join(".env");
+        fs::write(&path, "PGID=1000\n").unwrap();
+        let before = fs::metadata(&path).unwrap();
+
+        share(&path, before.gid()).unwrap();
+
+        let after = fs::metadata(&path).unwrap();
+        assert_eq!(after.mode() & 0o777, 0o640);
+        assert_eq!((after.uid(), after.gid()), (before.uid(), before.gid()));
+        fs::remove_dir_all(dir).unwrap();
     }
 }

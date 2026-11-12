@@ -48,7 +48,7 @@
     },
     {
       "id": "claim_ffc59e2aacd94cda8b202d3a6f0090ac",
-      "statement": "The dashboard container runs on the host network as uid 1000 with a read-only root filesystem, all capabilities dropped and no-new-privileges, and mounts server/.env plus cache and state volumes.",
+      "statement": "The dashboard container runs on the host network as PUID:PGID (the group that can read the root-owned server/.env) with a read-only root filesystem, all capabilities dropped and no-new-privileges, and mounts server/.env plus cache and state volumes.",
       "evidence": [
         {
           "resource": "repo://server/docker-compose.yml#L64-L101",

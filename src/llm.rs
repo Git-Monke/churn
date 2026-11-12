@@ -194,8 +194,8 @@ pub fn markdown(stacks: &[Stack], version: &str, help: &str) -> String {
          - Put `JELLYFIN_ADMIN_USER` and `JELLYFIN_ADMIN_PASSWORD` in the answers file.\n\
            The password must be at least 8 characters.\n\
          - Leave them out. churn generates a 24-character password, uses it for the admin\n\
-           account, and writes both values to `server/.env` with mode 600. The password is\n\
-           never echoed to stdout.\n\n\
+           account, and writes both values to `server/.env` as `root:PGID` mode 640. The\n\
+           password is never echoed to stdout.\n\n\
          Either way, tell the user afterwards where the password lives: `JELLYFIN_ADMIN_*`\n\
          in `/var/lib/churn/server/.env`. Never print the value.\n\n\
          ## Step 6 — Confirm the plan\n\n\

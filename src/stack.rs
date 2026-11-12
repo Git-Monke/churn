@@ -91,6 +91,24 @@ impl Stack {
         self.dir().join(".env")
     }
 
+    /// Grant the containers' group read access to this stack's `.env`.
+    ///
+    /// Only the server file is mounted into a container (the dashboard runs as
+    /// `PUID:PGID`), but it stays owned by root so compose interpolation cannot
+    /// be steered by an unprivileged user. The torrent file holds the WireGuard
+    /// private key and stays owner-only.
+    pub fn share_env(self) -> io::Result<()> {
+        if self != Stack::Server {
+            return Ok(());
+        }
+        let path = self.env_path();
+        let gid = envfile::read(&path)
+            .get("PGID")
+            .and_then(|value| value.trim().parse().ok())
+            .unwrap_or(1000);
+        envfile::share(&path, gid)
+    }
+
     /// The compose file this stack is started and removed with.
     pub fn compose_path(self) -> PathBuf {
         self.dir().join("docker-compose.yml")
@@ -333,6 +351,7 @@ impl Stack {
             &self.managed_env(answers),
             &self.dropped_env(answers),
         )?;
+        self.share_env()?;
         Ok(path)
     }
 }

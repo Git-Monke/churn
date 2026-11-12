@@ -75,7 +75,7 @@ The dashboard is the only service with a bespoke security posture:
 image: ${CHURN_DASHBOARD_IMAGE:-ghcr.io/git-monke/churn-dashboard:latest}
 network_mode: host
 init: true
-user: "1000:1000"
+user: "${PUID:-1000}:${PGID:-1000}"
 read_only: true
 cap_drop: [ALL]
 security_opt:
@@ -91,6 +91,7 @@ Reasons for each choice:
 - **read-only root** with a `/tmp` tmpfs — nothing in the image needs to be written; the two writable paths are named volumes.
 - **`cap_drop: ALL` + `no-new-privileges`** — the process is a Node server, not an init system.
 - **`init: true`** — reaps orphaned children from process spawns.
+- **`user: ${PUID:-1000}:${PGID:-1000}`** — the dashboard reads `server/.env` for the Jellyfin API key. Churn writes that file as `root:PGID` with mode `0640`: the container runs as the group that can read it, and root keeps ownership so only root can change the values Compose interpolates.
 - **`pull_policy: missing`** — a pinned image that already exists locally is not re-pulled on every restart.
 
 Environment is entirely loopback URLs built from the port variables:

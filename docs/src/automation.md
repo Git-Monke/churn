@@ -28,8 +28,8 @@ asking:
   under `MEDIA_DIR`, rather than prompting for each. `--dry-run` reports
   `would create` and creates nothing — a rehearsal leaves the disk untouched.
 - **Jellyfin admin.** A 24-character password is generated and written with
-  `JELLYFIN_ADMIN_USER`/`JELLYFIN_ADMIN_PASSWORD` to `server/.env` (mode 600)
-  unless the answers supply the password. It is never echoed.
+  `JELLYFIN_ADMIN_USER`/`JELLYFIN_ADMIN_PASSWORD` to `server/.env` (`root:PGID`,
+  mode 640) unless the answers supply the password. It is never echoed.
 
 ## Failure mode
 
@@ -54,9 +54,11 @@ it; use `--answers -` if the file should never touch the disk. A redirect or
 repository as well: `churn-answers.env` is in `.gitignore`, but an untracked
 file is one `git add -A` away.
 
-The stack `.env` files written by an install are `0600` for the same reason:
-`torrent/.env` holds the WireGuard private key and `server/.env` the Jellyfin
-admin password.
+The stack `.env` files written by an install are root-owned. `torrent/.env` is
+`0600` for the same reason: it holds the WireGuard private key. `server/.env`
+holds the Jellyfin password and API key, so it is `root:PGID` mode `0640`: the
+dashboard container runs as `PUID:PGID` and reads it, but only root can change
+the values compose interpolates.
 
 ## Secrets
 
