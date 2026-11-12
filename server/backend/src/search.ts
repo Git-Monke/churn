@@ -76,6 +76,7 @@ export function mapSeriesResource(
     year: resource.year,
     overview: resource.overview,
     rating: finiteNumber(resource.ratings?.value),
+    votes: finiteNumber(resource.ratings?.votes),
     certification: resource.certification,
     runtimeMinutes: finiteNumber(resource.runtime),
     genres: resource.genres,
@@ -106,6 +107,7 @@ export function mapMovieResource(
     year: resource.year,
     overview: resource.overview,
     rating: finiteNumber(resource.ratings?.imdb?.value ?? resource.ratings?.tmdb?.value),
+    votes: finiteNumber(resource.ratings?.imdb?.votes ?? resource.ratings?.tmdb?.votes),
     certification: resource.certification,
     runtimeMinutes: finiteNumber(resource.runtime),
     genres: resource.genres,
@@ -213,19 +215,106 @@ export function monitorSeasons(
   }));
 }
 
-/** Interleave app results by upstream relevance rank. */
-export function interleaveResults(groups: SearchResult[][]): SearchResult[] {
-  const longest = groups.reduce((max, group) => Math.max(max, group.length), 0);
-  const merged: SearchResult[] = [];
-  for (let index = 0; index < longest; index += 1) {
-    for (const group of groups) {
-      const result = group[index];
-      if (result) {
-        merged.push(result);
-      }
+/**
+ * Rank arr lookup output by how well the title matches the query and how many
+ * votes it carries. The arrs order their own results; that order puts regional
+ * renames of a show ahead of the original (Sonarr returns The Office (US) at
+ * position 9 for `the office`) and zero-vote filler ahead of real titles.
+ */
+export function rankSearchResults(results: SearchResult[], query: string): SearchResult[] {
+  return results
+    .map((result, index) => ({ result, index, score: searchScore(query, result) }))
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .map((entry) => entry.result);
+}
+
+/** Title-match confidence in [0, 1] multiplied by a popularity factor in [0.55, 1]. */
+export function searchScore(query: string, result: SearchResult): number {
+  const match = titleMatchScore(query, result.title);
+  if (match === 0) {
+    return 0;
+  }
+  return match * match * (0.55 + 0.45 * popularityScore(result.votes));
+}
+
+export function titleMatchScore(query: string, title: string): number {
+  const needle = normalizeTitle(query);
+  const haystack = normalizeTitle(title);
+  if (!needle || !haystack) {
+    return 0;
+  }
+  if (needle === haystack) {
+    return 1;
+  }
+  if (needle.replace(/ /g, "") === haystack.replace(/ /g, "")) {
+    return 0.98;
+  }
+  if (haystack.startsWith(needle)) {
+    return 0.97;
+  }
+  if (needle.startsWith(haystack)) {
+    return 0.9;
+  }
+  const titleWords = haystack.split(" ");
+  if (needle.split(" ").every((word) => titleWords.some((candidate) => candidate.startsWith(word)))) {
+    return 0.88;
+  }
+  if (haystack.includes(needle)) {
+    return 0.75;
+  }
+  const similarity = trigramSimilarity(needle, haystack);
+  return similarity >= 0.5 ? 0.5 * similarity : 0;
+}
+
+/**
+ * Vote count as a 0-1 popularity prior: ~100 votes is 0.34, ~1M votes is 1.
+ * IMDb's rating is already vote-weighted, so raw votes are the better signal
+ * for "which of these titles do people actually watch".
+ */
+export function popularityScore(votes: number | undefined): number {
+  if (!votes || votes <= 0) {
+    return 0;
+  }
+  return Math.min(1, Math.log10(votes + 10) / 6);
+}
+
+/**
+ * Fold a title for matching: drop `(US)`-style disambiguators and years, strip
+ * diacritics, lowercase, reduce punctuation to spaces, and drop a leading
+ * article so `the office` and `The Office (US)` compare equal.
+ */
+export function normalizeTitle(value: string): string {
+  return value
+    .replace(/\([^)]*\)/g, " ")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/^(?:the|a|an) /, "")
+    .replace(/\s+/g, " ");
+}
+
+/** Dice coefficient over padded character trigrams; tolerates typos and spacing. */
+export function trigramSimilarity(left: string, right: string): number {
+  const leftGrams = trigrams(left);
+  const rightGrams = trigrams(right);
+  let shared = 0;
+  for (const gram of leftGrams) {
+    if (rightGrams.has(gram)) {
+      shared += 1;
     }
   }
-  return merged;
+  return (2 * shared) / (leftGrams.size + rightGrams.size);
+}
+
+function trigrams(value: string): Set<string> {
+  const padded = ` ${value} `;
+  const grams = new Set<string>();
+  for (let index = 0; index + 3 <= padded.length; index += 1) {
+    grams.add(padded.slice(index, index + 3));
+  }
+  return grams;
 }
 
 function normalizeProfileName(name: string): string {

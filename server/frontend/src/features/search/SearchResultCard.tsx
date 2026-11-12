@@ -65,6 +65,9 @@ export function SearchResultCard({
         </CardTitle>
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           {result.rating !== undefined ? <span>{result.rating.toFixed(1)} / 10</span> : null}
+          {result.votes !== undefined ? (
+            <span>{voteFormat.format(result.votes)} votes</span>
+          ) : null}
           {result.certification ? <span>{result.certification}</span> : null}
           {result.runtimeMinutes !== undefined ? (
             <span>{formatRuntime(result.runtimeMinutes)}</span>
@@ -114,6 +117,11 @@ export function SearchResultCard({
     </Card>
   );
 }
+
+const voteFormat = new Intl.NumberFormat("en", {
+  notation: "compact",
+  maximumFractionDigits: 1,
+});
 
 function formatRuntime(minutes: number): string {
   if (minutes < 60) {

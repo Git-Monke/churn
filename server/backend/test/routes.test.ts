@@ -1816,7 +1816,7 @@ const seriesLookup = {
   tvdbId: 371980,
   tmdbId: 95396,
   network: "Apple TV",
-  ratings: { value: 8.6 },
+  ratings: { value: 8.6, votes: 400_000 },
   seasons: [
     { seasonNumber: 0, monitored: false },
     { seasonNumber: 1, monitored: true },
@@ -1830,7 +1830,7 @@ const movieLookup = {
   path: "/data/media/movies/Dune (2021)",
   tmdbId: 438631,
   imdbId: "tt1160419",
-  ratings: { imdb: { value: 8 } },
+  ratings: { imdb: { value: 8, votes: 1_101_251 } },
   images: [{ coverType: "poster", url: "/MediaCoverProxy/def/poster.jpg", remoteUrl: "https://image.tmdb.org/t/p/original/def-poster.jpg" }],
 };
 
@@ -1936,16 +1936,18 @@ describe("search", () => {
     expect(response.statusCode).toBe(200);
     expect(body.query).toBe("dune");
     expect(body.results).toHaveLength(2);
+    // Ranked by title match: `dune` is an exact title for the movie and no
+    // match at all for Severance, regardless of upstream ordering.
     expect(body.results[0]).toMatchObject({
-      key: "series:371980",
-      inLibrary: true,
-      available: false,
-    });
-    expect(body.results[1]).toMatchObject({
       key: "movie:438631",
       inLibrary: false,
       available: false,
       imageUrl: "/api/search/images/radarr?url=https%3A%2F%2Fimage.tmdb.org%2Ft%2Fp%2Foriginal%2Fdef-poster.jpg",
+    });
+    expect(body.results[1]).toMatchObject({
+      key: "series:371980",
+      inLibrary: true,
+      available: false,
     });
     expect(body.services).toEqual([
       { id: "sonarr", state: "ok", count: 1, detail: undefined },
@@ -2012,12 +2014,12 @@ describe("search", () => {
     const body = response.json();
 
     expect(body.results[0]).toMatchObject({
-      key: "series:371980",
+      key: "movie:438631",
       inLibrary: true,
       available: true,
     });
     expect(body.results[1]).toMatchObject({
-      key: "movie:438631",
+      key: "series:371980",
       inLibrary: true,
       available: true,
     });

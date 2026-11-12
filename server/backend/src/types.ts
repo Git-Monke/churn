@@ -233,6 +233,8 @@ export interface SearchResult {
   year?: number;
   overview?: string;
   rating?: number;
+  /** IMDb/TVDB vote count, used to rank results. */
+  votes?: number;
   certification?: string;
   runtimeMinutes?: number;
   genres?: string[];

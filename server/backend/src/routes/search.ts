@@ -4,10 +4,10 @@ import type { AppConfig, ServiceConfig } from "../config.js";
 import { requireAuth, type AuthContext } from "../auth.js";
 import { ApiError, UpstreamError } from "../errors.js";
 import {
-  interleaveResults,
   isAllowedArtworkUrl,
   mapMovieResource,
   mapSeriesResource,
+  rankSearchResults,
 } from "../search.js";
 import type { SearchResponse, SearchResult, SearchServiceState } from "../types.js";
 import { createJellyfinClient, mapJellyfinItem } from "../upstream/jellyfin.js";
@@ -34,7 +34,7 @@ export function registerSearchRoutes(app: FastifyInstance, config: AppConfig): v
     const response: SearchResponse = {
       query,
       searchedAt: new Date().toISOString(),
-      results: interleaveResults([sonarr.results, radarr.results]),
+      results: rankSearchResults([...sonarr.results, ...radarr.results], query),
       services: [sonarr.status, radarr.status],
     };
     return response;

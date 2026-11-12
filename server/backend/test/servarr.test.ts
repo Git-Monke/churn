@@ -3,7 +3,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createArrClient } from "../src/upstream/servarr.js";
 import {
   arrMonitorName,
-  interleaveResults,
   isAllowedArtworkUrl,
   mapMovieResource,
   mapSeriesResource,
@@ -11,6 +10,8 @@ import {
   monitorSeasons,
   pickDefaultQualityProfile,
   pickDefaultRootFolder,
+  rankSearchResults,
+  titleMatchScore,
 } from "../src/search.js";
 import type { SearchResult } from "../src/types.js";
 
@@ -181,26 +182,72 @@ describe("request defaults", () => {
   });
 });
 
-describe("interleaveResults", () => {
-  it("merges result groups by upstream rank", () => {
-    const movie = (key: string): SearchResult => ({
-      key,
-      kind: "movie",
-      service: "radarr",
-      title: key,
-      inLibrary: false,
-    });
-    const series = (key: string): SearchResult => ({
-      key,
-      kind: "series",
-      service: "sonarr",
-      title: key,
-      inLibrary: false,
-    });
+describe("search ranking", () => {
+  const found = (
+    title: string,
+    votes?: number,
+    kind: SearchResult["kind"] = "movie",
+  ): SearchResult => ({
+    key: `${kind}:${title}`,
+    kind,
+    service: kind === "movie" ? "radarr" : "sonarr",
+    title,
+    votes,
+    inLibrary: false,
+  });
+  const titles = (items: SearchResult[]): string[] => items.map((item) => item.title);
 
-    expect(
-      interleaveResults([[series("s1"), series("s2")], [movie("m1")]]).map((item) => item.key),
-    ).toEqual(["s1", "m1", "s2"]);
+  it("puts the original ahead of regional renames and zero-vote filler", () => {
+    // Live Sonarr order for `the office`: UK, AU, SA, ..., US at position 9,
+    // with Radarr contributing 1996/2020 movies that have no votes at all.
+    const ranked = rankSearchResults(
+      [
+        found("The Office", 129_000, "series"),
+        found("The Office (AU)", 4_000, "series"),
+        found("The Office (US)", 859_030, "series"),
+        found("The Office", 0),
+      ],
+      "the office",
+    );
+
+    expect(titles(ranked)).toEqual([
+      "The Office (US)",
+      "The Office",
+      "The Office (AU)",
+      "The Office",
+    ]);
+    expect(ranked[0]?.key).toBe("series:The Office (US)");
+    expect(ranked[3]?.key).toBe("movie:The Office");
+  });
+
+  it("keeps an exact title ahead of a more popular continuation", () => {
+    const ranked = rankSearchResults(
+      [found("Dune: Part Two", 805_128), found("Dune", 1_101_251)],
+      "dune",
+    );
+
+    expect(titles(ranked)).toEqual(["Dune", "Dune: Part Two"]);
+  });
+
+  it("never lets a weak match outrank a strong one on votes alone", () => {
+    const ranked = rankSearchResults(
+      [found("Box Office", 900_000), found("The Office", 129_000, "series")],
+      "the office",
+    );
+
+    expect(titles(ranked)[0]).toBe("The Office");
+  });
+
+  it("matches through punctuation, articles and typos", () => {
+    expect(titleMatchScore("spiderman", "Spider-Man")).toBeGreaterThan(0.5);
+    expect(titleMatchScore("kantoor", "Die Kantoor")).toBeGreaterThan(0.5);
+    expect(titleMatchScore("dune", "Severance")).toBe(0);
+  });
+
+  it("keeps upstream order when nothing matches", () => {
+    const ranked = rankSearchResults([found("Zed"), found("Yak")], "qqq");
+
+    expect(titles(ranked)).toEqual(["Zed", "Yak"]);
   });
 });
 

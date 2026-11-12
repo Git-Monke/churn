@@ -58,8 +58,10 @@ For each service the route:
 1. Calls the upstream lookup.
 2. Lists the local library in parallel, so results can be marked `inLibrary`.
 3. Marks `available` using the signed-in user's Jellyfin library when available (TVDB ids for series, TMDB ids for movies).
-4. Maps results with provider ids, ratings, genres, seasons and a backend-owned artwork URL.
-5. Interleaves the two service result lists by upstream relevance rank.
+4. Maps results with provider ids, ratings, vote counts, genres, seasons and a backend-owned artwork URL.
+5. Merges the two lists and ranks them locally by title match and vote count.
+
+The arrs order their own lookups by upstream relevance, which puts regional renames of a show ahead of the original and zero-vote filler ahead of real titles. `rankSearchResults` in `server/backend/src/search.ts` instead scores each result as `titleMatch^2 * (0.55 + 0.45 * log10(votes + 10) / 6)`: title match dominates, and votes act as a bounded popularity prior. Titles are folded first (parentheticals stripped, diacritics dropped, lowercased, leading article removed) and matched in tiers — exact, title extends the query, query extends the title, every query word prefixes a title word, substring, then trigram similarity — so `the office` and `The Office (US)` compare equal. Results that match nothing sort last in upstream order. The search page hides results with fewer than 20 votes behind an off-by-default "Show niche results" toggle, so the top of the list stays recognisable.
 
 Artwork is never hot-linked directly. `mediaCoverUrl` only accepts `https` poster URLs on an allowlist (`artworks.thetvdb.com`, `banners.thetvdb.com`, `www.thetvdb.com`, `image.tmdb.org`, `assets.fanart.tv`) with image extensions, and `/api/search/images/:service?url=` proxies the bytes. This prevents the proxy from becoming an SSRF vector.
 

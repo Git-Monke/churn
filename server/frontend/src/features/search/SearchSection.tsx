@@ -27,6 +27,8 @@ import {
   InputGroupAddon,
   InputGroupInput,
 } from "@/components/ui/input-group";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { RequestOptionsPopover } from "@/features/search/RequestOptionsPopover";
 import {
   SearchResultGrid,
@@ -40,8 +42,12 @@ interface RequestMutationVariables {
   result: SearchResult;
 }
 
+/** Titles below this vote count are treated as noise until asked for. */
+const MIN_VISIBLE_VOTES = 20;
+
 export function SearchSection() {
   const [query, setQuery] = useState("");
+  const [showNiche, setShowNiche] = useState(false);
   const debounced = useDebouncedValue(query, 350);
   const term = debounced.trim();
   const searchEnabled = term.length >= 2;
@@ -165,6 +171,11 @@ export function SearchSection() {
   }
 
   const searchData = searchQuery.data;
+  const allResults = searchData?.results ?? [];
+  const visibleResults = showNiche
+    ? allResults
+    : allResults.filter((result) => (result.votes ?? 0) >= MIN_VISIBLE_VOTES);
+  const hiddenCount = allResults.length - visibleResults.length;
   const serviceNotices = searchData?.services.filter(
     (service) => service.state !== "ok" || service.detail,
   );
@@ -206,6 +217,21 @@ export function SearchSection() {
         </div>
       </div>
 
+      {searchData ? (
+        <div className="flex items-center justify-end gap-2">
+          <Switch
+            id="show-niche-results"
+            size="sm"
+            checked={showNiche}
+            onCheckedChange={setShowNiche}
+          />
+          <Label htmlFor="show-niche-results" className="text-xs font-normal text-muted-foreground">
+            Show niche results
+            {hiddenCount > 0 ? ` (${hiddenCount} hidden)` : ""}
+          </Label>
+        </div>
+      ) : null}
+
       {serviceNotices?.map((service) => (
         <SearchServiceNotice key={service.id} service={service} />
       ))}
@@ -221,13 +247,31 @@ export function SearchSection() {
       {!searchEnabled && !searchData ? <SearchPrompt /> : null}
       {searchEnabled && searchQuery.isLoading ? <SearchResultGridSkeleton /> : null}
 
-      {searchEnabled && searchData && searchData.results.length > 0 ? (
+      {searchEnabled && searchData && visibleResults.length > 0 ? (
         <SearchResultGrid
-          results={searchData.results}
+          results={visibleResults}
           onRequest={handleRequest}
           requestingKey={requestingKey}
           requestDisabled={optionsQuery.isLoading || requestMutation.isPending}
         />
+      ) : null}
+
+      {searchEnabled && searchData && visibleResults.length === 0 && hiddenCount > 0 ? (
+        <Empty className="border">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <SearchIcon />
+            </EmptyMedia>
+            <EmptyTitle>
+              Only niche results for “{searchData.query}”
+            </EmptyTitle>
+            <EmptyDescription>
+              {hiddenCount} {hiddenCount === 1 ? "result has" : "results have"} fewer
+              than {MIN_VISIBLE_VOTES} votes. Turn on “Show niche results” to see
+              {hiddenCount === 1 ? " it" : " them"}.
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       ) : null}
 
       {searchEnabled &&
