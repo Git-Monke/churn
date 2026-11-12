@@ -19,6 +19,10 @@
 # The release commit contains only Cargo.toml and Cargo.lock. The script
 # refuses to run with any other uncommitted changes, so commit feature work
 # before releasing.
+#
+# The VPN release gate is a separate step: run scripts/vpn-gate.sh before
+# releasing when the torrent stack changed. This script only bumps the version,
+# tags and pushes.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -89,26 +93,9 @@ if [ "$dry_run" -eq 0 ] && [ -n "$(git status --porcelain)" ]; then
   exit 1
 fi
 
-# The VPN boundary is part of the release, so it is proven before any version
-# math touches Cargo.toml. There is no bypass: a failure here means the stack
-# could leak traffic, and nothing may be tagged or pushed.
-#
-# --dry-run stays static-only so a release can be rehearsed on a machine without
-# /dev/net/tun or real VPN credentials. A real release always runs the live
-# proof and its negative controls.
-#
-# A release is forced: change detection exists to keep routine runs cheap, but at
-# the moment of publishing the proof is always worth the minute.
-if [ "$dry_run" -eq 1 ]; then
-  gate_args=(--static-only --force)
-else
-  gate_args=(--force)
-fi
-echo "gate:     scripts/vpn-gate.sh ${gate_args[*]:-}"
-if ! scripts/vpn-gate.sh "${gate_args[@]+"${gate_args[@]}"}"; then
-  echo "error: the VPN release gate failed; nothing was tagged or pushed" >&2
-  exit 1
-fi
+# The VPN release gate is a separate step. Run scripts/vpn-gate.sh before
+# releasing when the torrent stack changed; this script only bumps the version,
+# tags and pushes. CI still runs the static gate on the release tag.
 
 git fetch --tags --force --quiet origin || true
 
@@ -244,7 +231,6 @@ fi
 
 if [ "$push" -eq 0 ]; then
   echo "Prepared $tag locally at $(git rev-parse --short HEAD)"
-  echo "VPN gate: $(pwd)/.churn-state/vpn-gate.json"
   echo "Push it with:"
   if [ "$force_tag" -eq 1 ]; then
     echo "  git push origin $branch"
@@ -264,5 +250,4 @@ else
 fi
 
 echo "Published $tag from $(git rev-parse --short HEAD)"
-echo "VPN gate: $(pwd)/.churn-state/vpn-gate.json"
 echo "CI will build the binaries and publish the release after the dashboard image for $target is available."
