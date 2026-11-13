@@ -465,7 +465,9 @@ prompt instead of advancing automatically. Autoplay, **Play now** and the
 end-of-file advance always open the next episode at 0:00 by adding
 `restart=1` to the player hash, so a rewatch never resumes the next episode
 partway through; opening an episode from the library or Continue watching still
-resumes at its saved position. If a file cannot offer that tier,
+resumes at its saved position. The flag is one-shot: the player strips it as
+soon as it opens, so returning to that history entry later (or reloading it) no
+longer restarts the episode. If a file cannot offer that tier,
 playback falls back to `max` for that file without changing the stored
 preference.
 

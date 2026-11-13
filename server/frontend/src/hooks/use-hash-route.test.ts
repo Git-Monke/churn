@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseHash, playHash, showHash } from "./use-hash-route";
+import { parseHash, playHash, showHash, stripRestartParam } from "./use-hash-route";
 
 describe("hash routing", () => {
   it("parses the basic pages", () => {
@@ -68,6 +68,22 @@ describe("hash routing", () => {
     // Ordinary links resume, so the route has no restart key at all.
     expect(parseHash(playHash("ep2", from))).toEqual({ page: "play", id: "ep2", from });
     expect(parseHash("#/play/ep2?restart=0")).toEqual({ page: "play", id: "ep2" });
+  });
+
+  it("consumes the restart intent without losing the return context", () => {
+    const from = { source: "jellyfin" as const, id: "series-1", season: 2 };
+    const consumed = stripRestartParam(playHash("ep2", from, true));
+
+    expect(parseHash(consumed)).toEqual({ page: "play", id: "ep2", from });
+    // A second visit to the player must not restart it again.
+    expect(stripRestartParam(consumed)).toBe(consumed);
+    // A restart with no other parameters drops the query entirely.
+    expect(stripRestartParam("#/play/ep2?restart=1")).toBe("#/play/ep2");
+    // Hashes without the intent are left untouched.
+    expect(stripRestartParam("#/play/ep2")).toBe("#/play/ep2");
+    expect(stripRestartParam("#/library/show/jellyfin/abc")).toBe(
+      "#/library/show/jellyfin/abc",
+    );
   });
 
   it("decodes encoded ids", () => {

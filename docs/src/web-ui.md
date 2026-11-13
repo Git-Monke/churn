@@ -455,7 +455,10 @@ static **Play next** prompt instead of jumping to the next episode. Any advance
 the player makes — the countdown, **Play now**, or the natural end of the file —
 opens the next episode at 0:00 (`#/play/<id>?restart=1`) rather than resuming a
 partly watched one, while opening an episode from a show or Continue watching
-still resumes at its Jellyfin position.
+still resumes at its Jellyfin position. The `restart` flag is consumed when the
+player opens: the hash keeps only the return context, so coming back to the
+episode later (back navigation, or a reload after the tab went stale) resumes
+where the viewer stopped instead of starting over.
 
 Playback is codec-aware. Browser-compatible sources use a same-origin
 `/api/playback/items/:itemId/stream` URL; the backend validates the session and

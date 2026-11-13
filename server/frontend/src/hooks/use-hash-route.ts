@@ -74,6 +74,27 @@ export function playHash(
   return query ? `${base}?${query}` : base;
 }
 
+/**
+ * The same hash with the one-shot `restart` parameter removed, keeping every
+ * other parameter. Autoplay asks the next episode to start at 0:00 once; if the
+ * instruction stayed in the URL the browser would keep re-running it, so
+ * returning to the player later restarted an episode the viewer had already
+ * started watching.
+ */
+export function stripRestartParam(hash: string): string {
+  const [path = "", search] = hash.split("?");
+  if (search === undefined) {
+    return hash;
+  }
+  const params = new URLSearchParams(search);
+  if (!params.has("restart")) {
+    return hash;
+  }
+  params.delete("restart");
+  const query = params.toString();
+  return query ? `${path}?${query}` : path;
+}
+
 export function parseHash(hash: string): AppRoute {
   const [path, search = ""] = hash.replace(/^#\/?/, "").split("?");
   const parts = (path ?? "").split("/").filter(Boolean);

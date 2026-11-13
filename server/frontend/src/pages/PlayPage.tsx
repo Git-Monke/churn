@@ -37,6 +37,7 @@ import {
   playHash,
   replaceHash,
   showHash,
+  stripRestartParam,
   type ShowReturnContext,
 } from "@/hooks/use-hash-route";
 import {
@@ -82,7 +83,8 @@ export function PlayPage({
 }: {
   id: string;
   from?: ShowReturnContext;
-  /** Start at 0:00 instead of the saved position; autoplay sets this. */
+  /** Start at 0:00 instead of the saved position; autoplay sets this. It is
+   * consumed on mount, so it never sticks in the URL. */
   restart?: boolean;
 }) {
   const queryClient = useQueryClient();
@@ -135,6 +137,10 @@ export function PlayPage({
   const promptShownRef = useRef(false);
   const promptDismissedRef = useRef(false);
   const advancingRef = useRef(false);
+  // `restart` is a one-shot instruction from autoplay. The effect below drops it
+  // from the hash as soon as the player mounts, so the load handler reads the
+  // intent here instead of from the prop.
+  const startAtBeginningRef = useRef(restart);
   const autoArmedRef = useRef(false);
   const lastTimeRef = useRef(0);
   const seekingRef = useRef(false);
@@ -144,6 +150,19 @@ export function PlayPage({
 
   itemRef.current = item;
   advanceNextRef.current = () => advanceToNext(true);
+
+  // Autoplay, **Play now** and the end-of-file advance open the next episode
+  // with `restart=1`. That is a one-shot instruction: leaving it in the hash
+  // means the history entry replays it, so coming back to the player later (back
+  // navigation, a stale tab) restarted an episode that was already partway
+  // through. Consume it here, keeping the return context in the URL.
+  useEffect(() => {
+    if (!restart) {
+      return;
+    }
+    startAtBeginningRef.current = true;
+    replaceHash(stripRestartParam(window.location.hash));
+  }, [restart]);
 
   // Finish a quality switch once the backend answers with the new stream: the
   // previous Jellyfin play session is stopped and the new one starts at the
@@ -635,7 +654,7 @@ export function PlayPage({
     }
     resumeAppliedRef.current = true;
     const resumeSeconds = resumeStartSeconds(item, {
-      restart,
+      restart: startAtBeginningRef.current,
       durationSec: video.duration,
     });
     if (resumeSeconds > 0) {
