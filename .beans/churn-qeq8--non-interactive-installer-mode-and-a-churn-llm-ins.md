@@ -1,7 +1,7 @@
 ---
 # churn-qeq8
 title: Non-interactive installer mode and a churn llm-install prompt
-status: in-progress
+status: completed
 type: feature
 priority: high
 tags:
@@ -9,7 +9,7 @@ tags:
     - llm
     - automation
 created_at: 2026-11-10T23:32:56Z
-updated_at: 2026-11-11T00:05:24Z
+updated_at: 2026-11-13T01:55:45Z
 ---
 
 ## Goal

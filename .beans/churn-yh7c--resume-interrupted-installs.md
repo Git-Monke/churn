@@ -1,11 +1,11 @@
 ---
 # churn-yh7c
 title: Resume interrupted installs
-status: todo
+status: completed
 type: feature
 priority: normal
 created_at: 2026-11-05T05:17:26Z
-updated_at: 2026-11-05T05:18:14Z
+updated_at: 2026-11-13T01:55:54Z
 ---
 
 When the installer runs, persist a session (chosen stacks, answers, completed steps). On a later run, detect the unfinished session, ask whether to resume, and continue from the first unfinished step instead of re-asking everything.
