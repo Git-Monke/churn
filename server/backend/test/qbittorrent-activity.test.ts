@@ -5,6 +5,7 @@ import {
   isActiveTorrent,
   matchMovieTorrents,
   movieTitleMatches,
+  movieTorrentActivity,
 } from "../src/qbittorrent-activity.js";
 import type { QbittorrentTorrent } from "../src/upstream/qbittorrent.js";
 
@@ -238,6 +239,65 @@ describe("qBittorrent activity", () => {
         2022,
       ),
     ).toHaveLength(1);
+  });
+
+  it("surfaces a completed torrent as importing while the movie is not indexed", () => {
+    const movie = { id: 7, title: "Example Movie", year: 2022, tmdbId: 5678 };
+    const item = movieTorrentActivity(
+      [torrent({ name: "Example.Movie.2022.1080p.WEB-DL", progress: 1, state: "stalledUP" })],
+      movie,
+      { indexed: false },
+    );
+    expect(item).toMatchObject({
+      key: "movie:5678",
+      service: "radarr",
+      movieId: 7,
+      title: "Example Movie",
+      status: "importing",
+      progress: 100,
+    });
+    expect(item?.statusMessages).toEqual([
+      "Download finished in qBittorrent. Radarr has not imported it yet.",
+    ]);
+
+    const direct = movieTorrentActivity(
+      [
+        torrent({
+          name: "Example.Movie.2022.1080p.WEB-DL",
+          progress: 1,
+          state: "stalledUP",
+          tags: "churn-direct",
+        }),
+      ],
+      movie,
+      { indexed: false },
+    );
+    expect(direct?.statusMessages).toEqual([
+      "Download finished in qBittorrent. Jellyfin has not indexed it yet.",
+    ]);
+  });
+
+  it("keeps completed torrents hidden once the movie is indexed", () => {
+    const movie = { id: 7, title: "Example Movie", year: 2022, tmdbId: 5678 };
+    const completed = torrent({
+      name: "Example.Movie.2022.1080p.WEB-DL",
+      progress: 1,
+      state: "stalledUP",
+    });
+    expect(movieTorrentActivity([completed], movie)).toBeUndefined();
+    expect(movieTorrentActivity([completed], movie, { indexed: true })).toBeUndefined();
+  });
+
+  it("prefers an active torrent over a completed one", () => {
+    const item = movieTorrentActivity(
+      [
+        torrent({ name: "Example.Movie.2022.1080p.WEB-DL", progress: 1, state: "stalledUP" }),
+        torrent({ name: "Example.Movie.2022.2160p.WEB-DL", progress: 0.5, state: "downloading" }),
+      ],
+      { id: 7, title: "Example Movie", year: 2022, tmdbId: 5678 },
+      { indexed: false },
+    );
+    expect(item).toMatchObject({ status: "downloading", progress: 40 });
   });
 
 });

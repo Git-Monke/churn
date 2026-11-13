@@ -13,6 +13,7 @@ import { useTitleAttribution } from "@/features/title/use-title-attribution";
 import {
   resumeDetail,
   useTitlePlayback,
+  type TitlePlayback,
 } from "@/features/title/use-title-playback";
 import { DeleteTitleDialog } from "@/features/title/DeleteTitleDialog";
 import { TitleHeader } from "@/features/title/TitleHeader";
@@ -67,6 +68,9 @@ export function MoviePage({
   const movie = movieQuery.data?.movie;
   const jellyfinId = movieQuery.data?.jellyfinId;
   const radarrId = movieQuery.data?.radarrId;
+  // Radarr imported the file but Jellyfin does not list it yet: neither pick
+  // another version (the file is already chosen) nor claim it is missing.
+  const imported = movieQuery.data?.imported === true;
   const playable = jellyfinId !== undefined && download === undefined;
   const downloading = download !== undefined || awaitingDownload;
 
@@ -109,6 +113,7 @@ export function MoviePage({
     downloading,
     download,
     awaitingDownload,
+    imported,
   });
 
   const menuItems: TitleMenuItem[] = [];
@@ -148,9 +153,11 @@ export function MoviePage({
   }
 
   // Where the picker belongs: always for a request with nothing playable, on
-  // demand for a title that already plays.
+  // demand for a title that already plays. Never while the downloaded file
+  // waits for Jellyfin to index it — a version was already chosen.
   const showPicker =
     !downloading &&
+    !imported &&
     radarrId !== undefined &&
     ((playable && pickerOpen) || (!playable && jellyfinId === undefined));
 
@@ -272,12 +279,14 @@ function movieAction({
   downloading,
   download,
   awaitingDownload,
+  imported,
 }: {
   movieId: string | undefined;
-  playback: ReturnType<typeof useTitlePlayback>;
+  playback: TitlePlayback;
   downloading: boolean;
   download: ActivityItem | undefined;
   awaitingDownload: boolean;
+  imported: boolean;
 }): TitleAction {
   if (downloading) {
     const eta =
@@ -285,13 +294,15 @@ function movieAction({
       formatCompletionAbout(download?.estimatedCompletionTime);
     return {
       kind: "downloading",
+      ...(download?.status === "importing" ? { label: "Importing" } : {}),
       ...(eta === undefined ? {} : { eta }),
       progress: download?.progress ?? 0,
       ...(download === undefined ? {} : { download }),
     };
   }
   if (movieId === undefined) {
-    return { kind: "not-downloaded" };
+    // Radarr has the file; Jellyfin just has not indexed it yet.
+    return imported ? { kind: "importing" } : { kind: "not-downloaded" };
   }
   const href = playHash(movieId);
   if (!playback.resumable) {

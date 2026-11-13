@@ -3670,6 +3670,94 @@ describe("movie detail", () => {
     await app.close();
   });
 
+  it("keeps a finished radarr download importing until Jellyfin lists the movie", async () => {
+    const config = makeConfig();
+    config.qbittorrent.apiKey = "qbittorrent-key";
+    config.services.jellyfin.apiKey = "jellyfin-key";
+    installFetch((url) => {
+      if (url.includes("radarr.test") && url.endsWith("/api/v3/movie/7")) {
+        return jsonResponse({ ...movieLookup, id: 7, hasFile: false });
+      }
+      if (url === "http://qbittorrent.test:8080/api/v2/torrents/info") {
+        return jsonResponse([
+          {
+            hash: "dune-hash",
+            name: "Dune.2021.1080p.BluRay.x264",
+            category: "movies",
+            tags: "churn-direct, churn-movie-7",
+            progress: 1,
+            size: 2_000_000_000,
+            amount_left: 0,
+            dlspeed: 0,
+            eta: 8_640_000,
+            state: "pausedUP",
+          },
+        ]);
+      }
+      if (url.includes("jellyfin.test") && url.includes("/Items?")) {
+        return jsonResponse({ Items: [] });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildAuthedServer(config);
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/library/movies/radarr/7",
+    });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(body.jellyfinId).toBeUndefined();
+    expect(body.download).toMatchObject({ kind: "movie", status: "importing", progress: 100 });
+    await app.close();
+  });
+
+  it("drops the finished radarr download once Jellyfin indexes the movie", async () => {
+    const config = makeConfig();
+    config.qbittorrent.apiKey = "qbittorrent-key";
+    config.services.jellyfin.apiKey = "jellyfin-key";
+    installFetch((url) => {
+      if (url.includes("radarr.test") && url.endsWith("/api/v3/movie/7")) {
+        return jsonResponse({ ...movieLookup, id: 7, hasFile: false });
+      }
+      if (url === "http://qbittorrent.test:8080/api/v2/torrents/info") {
+        return jsonResponse([
+          {
+            hash: "dune-hash",
+            name: "Dune.2021.1080p.BluRay.x264",
+            category: "movies",
+            tags: "churn-direct, churn-movie-7",
+            progress: 1,
+            size: 2_000_000_000,
+            amount_left: 0,
+            dlspeed: 0,
+            eta: 8_640_000,
+            state: "pausedUP",
+          },
+        ]);
+      }
+      if (url.includes("jellyfin.test") && url.includes("/Items?")) {
+        return jsonResponse({
+          Items: [{ Id: "jf-movie", Name: "Dune", Type: "Movie", ProviderIds: { Tmdb: "438631" } }],
+        });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildAuthedServer(config);
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/library/movies/radarr/7",
+    });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(body.jellyfinId).toBe("jf-movie");
+    expect(body.download).toBeUndefined();
+    await app.close();
+  });
+
   it("serves and cancels a tagged hash-named movie download", async () => {
     const config = makeConfig();
     config.qbittorrent.apiKey = "qbittorrent-key";

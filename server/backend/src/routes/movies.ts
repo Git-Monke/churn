@@ -56,6 +56,10 @@ export function registerMovieRoutes(
           title: detail.movie.title,
           ...(detail.movie.year !== undefined ? { year: detail.movie.year } : {}),
           ...(detail.radarrId !== undefined ? { radarrId: detail.radarrId } : {}),
+          // A jellyfin-sourced page always has its item; a radarr-sourced page
+          // has one once the lookup above found it. While indexed is false a
+          // finished torrent stays visible as "importing" instead of hiding.
+          indexed: detail.jellyfinId !== undefined,
         });
       }
       return detail;
@@ -157,12 +161,32 @@ async function loadRadarrMovie(
   const client = createArrClient("radarr", service, config.requestTimeoutMs);
   try {
     const movie = await client.getMovie(movieId);
-    const download = await loadMovieDownload(config, movie);
+    // Completed torrents are reported as "importing" until Jellyfin lists the
+    // movie, so ask for them here and let the Jellyfin lookup decide.
+    let download = await loadMovieDownload(config, movie, false);
+    // Radarr sets hasFile only after it moves the file into the library, while
+    // a finished torrent already exists. Either signal means Jellyfin may not
+    // have indexed the movie yet.
+    let jellyfinId: string | undefined;
+    let imported: boolean | undefined;
+    if (movie.hasFile === true || download !== undefined) {
+      const item = await findJellyfinMovieByTmdb(config, movie.tmdbId);
+      if (item?.Id) {
+        jellyfinId = item.Id;
+        if (download?.status === "importing") {
+          download = undefined;
+        }
+      } else if (movie.hasFile === true && config.services.jellyfin.apiKey) {
+        imported = true;
+      }
+    }
     return {
       source: "radarr",
       state: "ok",
       movie: movieDetailFromResource(movie),
       radarrId: movieId,
+      ...(jellyfinId ? { jellyfinId } : {}),
+      ...(imported ? { imported } : {}),
       ...(download ? { download } : {}),
     };
   } catch (error) {
@@ -298,10 +322,42 @@ function movieDetailFromResource(movie: ServarrMovieResource) {
   };
 }
 
+/**
+ * Find the Jellyfin movie item matching a Radarr movie by tmdb id. Jellyfin's
+ * `AnyProviderIdEquals` filter is unreliable, so churn matches provider ids
+ * itself — the same approach the library page and isDirectDownloadIndexed use.
+ * Jellyfin being unreachable reads as "not indexed"; the next detail poll
+ * corrects the picture.
+ */
+async function findJellyfinMovieByTmdb(
+  config: AppConfig,
+  tmdbId: number | undefined,
+): Promise<JellyfinItem | undefined> {
+  if (tmdbId === undefined || !config.services.jellyfin.apiKey) {
+    return undefined;
+  }
+  try {
+    const client = createJellyfinClient(config.services.jellyfin, config.requestTimeoutMs);
+    const items = await client.listItemsByType("Movie");
+    return items.find((item) => parseProviderId(item.ProviderIds?.Tmdb) === tmdbId);
+  } catch {
+    return undefined;
+  }
+}
+
+function parseProviderId(value: string | undefined): number | undefined {
+  if (!value || !/^\d{1,12}$/.test(value)) {
+    return undefined;
+  }
+  const parsed = Number.parseInt(value, 10);
+  return Number.isSafeInteger(parsed) ? parsed : undefined;
+}
+
 /** Best-effort live download state; a qBittorrent outage must not hide the movie. */
 async function loadMovieDownload(
   config: AppConfig,
   movie: ServarrMovieResource,
+  indexed?: boolean,
 ) {
   if (!config.qbittorrent.apiKey) {
     return undefined;
@@ -314,6 +370,7 @@ async function loadMovieDownload(
     title,
     ...(movie.year !== undefined ? { year: movie.year } : {}),
     ...(movie.id !== undefined ? { radarrId: movie.id } : {}),
+    ...(indexed !== undefined ? { indexed } : {}),
   };
   try {
     return await movieLiveDownload(config, identity);

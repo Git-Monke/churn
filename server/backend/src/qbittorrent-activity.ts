@@ -1,5 +1,9 @@
 import { movieMetadata, queueRecordSeasons, seriesMetadata } from "./activity.js";
-import { parseMediaDownloadTag } from "./direct-grab.js";
+import { isCompletedTorrent } from "./download-import.js";
+import {
+  isDirectDownloadTorrent,
+  parseMediaDownloadTag,
+} from "./direct-grab.js";
 import {
   isAwaitingMetadata,
   metadataStatusMessage,
@@ -31,6 +35,13 @@ export interface ActivityCatalog {
 
 export interface QbittorrentActivityOptions {
   now?: () => number;
+  /**
+   * Set to false only by the movie detail endpoints: no Jellyfin item is known
+   * yet, so a finished torrent stays visible as "importing" while Radarr has
+   * not imported it or Jellyfin has not indexed it. Undefined (activity feed
+   * and every other caller) keeps completed torrents hidden, as before.
+   */
+  indexed?: boolean;
 }
 
 interface SeriesMatch {
@@ -269,7 +280,9 @@ export function matchMovieTorrents(
 
 /**
  * Live qBittorrent state for one movie, using the same aggregation as the
- * library cards. Completed torrents are excluded.
+ * library cards. Completed torrents stay hidden once the title is indexed;
+ * before that they surface as "importing", because the file has finished
+ * downloading but Radarr has not imported it or Jellyfin has not indexed it.
  */
 export function movieTorrentActivity(
   torrents: QbittorrentTorrent[],
@@ -280,13 +293,38 @@ export function movieTorrentActivity(
   if (!title) {
     return undefined;
   }
-  const active = matchMovieTorrents(torrents, title, movie.year, movie.id).filter(
-    isActiveTorrent,
-  );
-  if (active.length === 0) {
+  const matched = matchMovieTorrents(torrents, title, movie.year, movie.id);
+  const active = matched.filter(isActiveTorrent);
+  if (active.length > 0) {
+    return buildQbittorrentActivity(active, { series: [], movies: [movie] }, options)[0];
+  }
+  if (options.indexed !== false) {
     return undefined;
   }
-  return buildQbittorrentActivity(active, { series: [], movies: [movie] }, options)[0];
+  const completed = matched.filter(isCompletedTorrent);
+  if (completed.length === 0) {
+    return undefined;
+  }
+  const item = buildActivityItem(
+    {
+      key: movieKey(movie),
+      kind: "movie",
+      service: "radarr",
+      title,
+      metadata: movieMetadata(movie),
+      arrId: movie.id,
+      torrents: completed,
+    },
+    options.now?.() ?? Date.now(),
+  );
+  item.status = "importing";
+  item.progress = 100;
+  item.statusMessages = [
+    completed.some(isDirectDownloadTorrent)
+      ? "Download finished in qBittorrent. Jellyfin has not indexed it yet."
+      : "Download finished in qBittorrent. Radarr has not imported it yet.",
+  ];
+  return item;
 }
 
 /** Match a movie only when its full title is followed by a year or release tag. */

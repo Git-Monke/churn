@@ -584,6 +584,11 @@ export interface MovieDetailResponse {
   };
   jellyfinId?: string;
   radarrId?: number;
+  /**
+   * Radarr imported the file but Jellyfin does not list the movie yet: the
+   * in-between state between a finished download and a playable title.
+   */
+  imported?: boolean;
   /** Active qBittorrent download for this movie, if any. */
   download?: ActivityItem;
 }

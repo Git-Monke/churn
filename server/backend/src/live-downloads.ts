@@ -9,6 +9,12 @@ export interface MovieDownloadIdentity {
   year?: number;
   /** Radarr id when the movie is tracked, used to follow tagged magnets. */
   radarrId?: number;
+  /**
+   * Set by the detail routes: true when a Jellyfin item for this movie is
+   * already known. False keeps a finished torrent visible as "importing"
+   * (see QbittorrentActivityOptions.indexed); undefined keeps it hidden.
+   */
+  indexed?: boolean;
 }
 
 export interface ShowEpisodeIdentity {
@@ -108,11 +114,15 @@ export async function movieLiveDownload(
   identity: MovieDownloadIdentity,
 ): Promise<ActivityItem | undefined> {
   const torrents = await loadQbittorrentTorrents(config);
-  return movieTorrentActivity(torrents, {
-    title: identity.title,
-    ...(identity.year !== undefined ? { year: identity.year } : {}),
-    ...(identity.radarrId !== undefined ? { id: identity.radarrId } : {}),
-  });
+  return movieTorrentActivity(
+    torrents,
+    {
+      title: identity.title,
+      ...(identity.year !== undefined ? { year: identity.year } : {}),
+      ...(identity.radarrId !== undefined ? { id: identity.radarrId } : {}),
+    },
+    identity.indexed === undefined ? {} : { indexed: identity.indexed },
+  );
 }
 
 export async function showLiveDownloads(

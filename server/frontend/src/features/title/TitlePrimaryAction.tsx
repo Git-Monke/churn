@@ -16,9 +16,13 @@ export type TitleAction =
   | { kind: "play"; href: string; label: string; detail?: string }
   /** Nothing playable and nothing downloading. */
   | { kind: "not-downloaded" }
+  /** Downloaded and on disk, but Jellyfin has not indexed it yet. */
+  | { kind: "importing" }
   /** A download is in flight or has just been grabbed. */
   | {
       kind: "downloading";
+      /** Defaults to "Downloading"; pass "Importing" for a finished torrent. */
+      label?: string;
       eta?: string;
       progress: number;
       /** Live qBittorrent figures; absent for the first seconds after a grab. */
@@ -44,7 +48,9 @@ export function TitlePrimaryAction({ action }: { action: TitleAction }) {
     return (
       <div className="flex w-full max-w-md min-w-44 flex-col gap-2 border border-border px-4 py-2.5">
         <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
-          <span className="text-sm font-medium text-foreground">Downloading</span>
+          <span className="text-sm font-medium text-foreground">
+            {action.label ?? "Downloading"}
+          </span>
           {action.eta ? (
             <span className="text-xs text-muted-foreground tabular-nums">
               {action.eta}
@@ -65,6 +71,18 @@ export function TitlePrimaryAction({ action }: { action: TitleAction }) {
           />
         ) : null}
       </div>
+    );
+  }
+
+  if (action.kind === "importing") {
+    return (
+      <span className="inline-flex min-h-12 items-center gap-2.5 border border-primary/45 px-4 text-sm font-medium text-foreground">
+        <span
+          aria-hidden="true"
+          className="size-2 animate-pulse rounded-full bg-primary"
+        />
+        Waiting for Jellyfin
+      </span>
     );
   }
 
