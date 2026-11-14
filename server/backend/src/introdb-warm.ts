@@ -9,12 +9,17 @@ export interface IntroDbService {
    * Warm one episode or every episode of one season. Start it after a grab
    * succeeds and do not await it: the download must not wait for metadata.
    */
-  warmFromGrab(
+  warm(
     seriesId: number,
     seasonNumber: number,
     episodeNumber?: number,
   ): Promise<void>;
-  /** Read-only lookup used by the playback route; never calls IntroDB. */
+  /**
+   * Playback lookup. A cache miss warms that one episode on demand, so a
+   * season imported before the grab warm-up existed — or one whose cache was
+   * lost — still gets segments. The wait is bounded: the fetch continues in
+   * the background and a later play reads what it stored.
+   */
   segmentsFor(
     imdbId: string,
     seasonNumber: number,
@@ -27,6 +32,8 @@ export interface IntroDbServiceOptions {
   cache: IntroDbCache;
   mediaCache: MediaCache;
   onWarning?: (message: string) => void;
+  /** How long `segmentsFor` waits for an on-demand fetch. */
+  onDemandWaitMs?: number;
 }
 
 interface EpisodeNumber {
@@ -34,18 +41,70 @@ interface EpisodeNumber {
   episodeNumber: number;
 }
 
+const DEFAULT_ON_DEMAND_WAIT_MS = 2_000;
+
 export function createIntroDbService(
   options: IntroDbServiceOptions,
 ): IntroDbService {
   const { config, cache, mediaCache } = options;
   const warn = options.onWarning ?? (() => undefined);
+  const onDemandWaitMs = options.onDemandWaitMs ?? DEFAULT_ON_DEMAND_WAIT_MS;
+  /**
+   * One warm per episode or season at a time. Playback retries and the grab
+   * warm-up can ask for the same data together; IntroDB reads are rate limited.
+   */
+  const inFlight = new Map<string, Promise<void>>();
 
-  return {
-    segmentsFor(imdbId, seasonNumber, episodeNumber) {
-      return cache.get(imdbId, seasonNumber, episodeNumber);
-    },
+  function once(key: string, run: () => Promise<void>): Promise<void> {
+    const pending = inFlight.get(key);
+    if (pending) {
+      return pending;
+    }
+    const promise = run().finally(() => {
+      inFlight.delete(key);
+    });
+    inFlight.set(key, promise);
+    return promise;
+  }
 
-    async warmFromGrab(seriesId, seasonNumber, episodeNumber) {
+  async function fetchEpisodes(
+    imdbId: string,
+    episodes: EpisodeNumber[],
+  ): Promise<void> {
+    // Sequential on purpose: a season is a handful of small requests and this
+    // runs in the background while the download is still going.
+    for (const episode of episodes) {
+      try {
+        const segments = await fetchIntroDbSegments(
+          config.introdb,
+          imdbId,
+          episode.seasonNumber,
+          episode.episodeNumber,
+        );
+        // No segments: IntroDB has no data for this episode yet. Not worth a
+        // log line per episode, and it is retried the next time it plays.
+        if (segments) {
+          await cache.put(
+            imdbId,
+            episode.seasonNumber,
+            episode.episodeNumber,
+            segments,
+          );
+        }
+      } catch (error) {
+        warn(
+          `IntroDB lookup failed for ${imdbId} S${episode.seasonNumber}E${episode.episodeNumber}: ${messageOf(error)}`,
+        );
+      }
+    }
+  }
+
+  function warm(
+    seriesId: number,
+    seasonNumber: number,
+    episodeNumber?: number,
+  ): Promise<void> {
+    return once(`series:${seriesId}:${seasonNumber}:${episodeNumber ?? "*"}`, async () => {
       try {
         const imdbId = await resolveImdbId(config, mediaCache, seriesId);
         if (!imdbId) {
@@ -57,34 +116,50 @@ export function createIntroDbService(
           episodeNumber === undefined
             ? await loadSeasonEpisodes(config, seriesId, seasonNumber)
             : [{ seasonNumber, episodeNumber }];
-
-        // Sequential on purpose: a season is a handful of small requests and
-        // this runs in the background while the download is still going.
-        for (const episode of episodes) {
-          try {
-            const segments = await fetchIntroDbSegments(
-              config.introdb,
-              imdbId,
-              episode.seasonNumber,
-              episode.episodeNumber,
-            );
-            if (segments) {
-              await cache.put(
-                imdbId,
-                episode.seasonNumber,
-                episode.episodeNumber,
-                segments,
-              );
-            }
-          } catch (error) {
-            warn(
-              `IntroDB lookup failed for ${imdbId} S${episode.seasonNumber}E${episode.episodeNumber}: ${messageOf(error)}`,
-            );
-          }
-        }
+        await fetchEpisodes(imdbId, episodes);
       } catch (error) {
-        warn(`IntroDB warm-up failed for series ${seriesId}: ${messageOf(error)}`);
+        warn(
+          `IntroDB warm-up failed for series ${seriesId}: ${messageOf(error)}`,
+        );
       }
+    });
+  }
+
+  function backfill(
+    imdbId: string,
+    seasonNumber: number,
+    episodeNumber: number,
+  ): Promise<void> {
+    return once(
+      `episode:${imdbId}:${seasonNumber}:${episodeNumber}`,
+      () =>
+        fetchEpisodes(imdbId, [{ seasonNumber, episodeNumber }]).catch(
+          (error: unknown) => {
+            warn(
+              `IntroDB backfill failed for ${imdbId} S${seasonNumber}E${episodeNumber}: ${messageOf(error)}`,
+            );
+          },
+        ),
+    );
+  }
+
+  return {
+    warm,
+
+    async segmentsFor(imdbId, seasonNumber, episodeNumber) {
+      const cached = await cache.get(imdbId, seasonNumber, episodeNumber);
+      if (cached) {
+        return cached;
+      }
+
+      const wait = new Promise<void>((resolve) => {
+        setTimeout(resolve, onDemandWaitMs).unref();
+      });
+      await Promise.race([
+        backfill(imdbId, seasonNumber, episodeNumber),
+        wait,
+      ]);
+      return cache.get(imdbId, seasonNumber, episodeNumber);
     },
   };
 }

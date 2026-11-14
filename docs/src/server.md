@@ -182,6 +182,16 @@ creates an API key named `churn`, and writes it to `server/.env` as
 needed; the password is not stored. Sonarr and Radarr API keys are read from
 `server/config/*/config.xml` unless overridden.
 
+The dashboard container runs as `PUID:PGID` — the owner of the media directory —
+with a read-only root filesystem, no added capabilities and `/tmp` as tmpfs.
+Two named volumes back it: `churn-cache` (`/app/.churn-cache`) holds cached
+release searches, series metadata and IntroDB segments, and `churn-state`
+(`/app/state`) holds sessions and media attribution. A fresh volume inherits the
+image's directory ownership (uid 1000), so a one-shot `cache-init` service hands
+both volumes to `PUID:PGID` before the dashboard starts. If neither is writable
+the backend caches in `/tmp` instead and logs a warning, because that cache is
+lost on every restart.
+
 The dashboard requires a Jellyfin login, either through a household profile or
 an administrator account. Each profile is backed by its own Jellyfin user, so
 watch progress is per person; an admin creates profiles and their one-time PINs

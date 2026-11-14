@@ -446,7 +446,9 @@ these downloads so churn does not ask Sonarr to re-import them.
 
 Release-search snapshots persist in `server/cache/releases/prowlarr` (or
 `server/.churn-cache/releases/prowlarr` when the container-owned `cache/`
-directory is not writable). Later opens show the snapshot until **Search again**
+directory is not writable); in the container that is the `churn-cache` volume,
+which a one-shot `cache-init` service hands to the dashboard's `PUID:PGID` so it
+survives restarts. Later opens show the snapshot until **Search again**
 starts a fresh search. When the best option in a tier has fewer than 50 seeders,
 the chooser shows a “may be stale” warning and a refresh button instead of
 hiding the options.

@@ -430,10 +430,14 @@ apps see the same position and watched state.
 
 Episode metadata also carries intro, recap and credits ranges from
 [IntroDB](https://introdb.app). They are fetched in the background when a season
-or episode release is grabbed — not when the player opens — and cached per
-series in `server/cache/releases/introdb/<imdbId>.json`. `GET /api/playback/items/:itemId`
+or episode release is grabbed, and again on demand if the player opens an
+episode the cache does not know yet (a season imported before this feature, or
+one whose cache was lost). Results are cached per series in
+`server/cache/releases/introdb/<imdbId>.json`, inside the persistent
+`churn-cache` volume in the container. `GET /api/playback/items/:itemId`
 exposes them as `segments` (`intro`, `recap`, `outro`, `postCredits`, in
-seconds) when the cache has data. IntroDB receives only the IMDb id and
+seconds) when the cache has data; the on-demand fetch waits two seconds at most,
+so a slow IntroDB never stalls playback. IntroDB receives only the IMDb id and
 season/episode number; no session, account or viewing progress is sent. While
 playback is inside the intro range, the player shows a **Skip intro** button
 that jumps to the end of the intro.

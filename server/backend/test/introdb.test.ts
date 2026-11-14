@@ -188,7 +188,7 @@ describe("IntroDB warm-up", () => {
       mediaCache: mediaCacheWith("tt0903747"),
     });
 
-    await service.warmFromGrab(42, 1, 2);
+    await service.warm(42, 1, 2);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     await expect(service.segmentsFor("tt0903747", 1, 2)).resolves.toEqual({
@@ -232,7 +232,7 @@ describe("IntroDB warm-up", () => {
       mediaCache: mediaCacheWith("tt0903747"),
     });
 
-    await service.warmFromGrab(42, 1);
+    await service.warm(42, 1);
 
     const introRequests = paths.filter((url) =>
       url.startsWith("https://introdb.test/segments?"),
@@ -255,8 +255,51 @@ describe("IntroDB warm-up", () => {
       mediaCache: mediaCacheWith(),
     });
 
-    await service.warmFromGrab(42, 1, 1);
+    await service.warm(42, 1, 1);
 
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("backfills a cold cache while playback waits", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      expect(url.pathname).toBe("/segments");
+      expect(url.searchParams.get("episode")).toBe("1");
+      return jsonResponse({
+        intro: { start_ms: 93_000, end_ms: 113_000 },
+        outro: { start_ms: 1_265_000, end_ms: 1_280_000 },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const cache = createIntroDbCache({ cacheDir: tempCacheDir() });
+    const service = createIntroDbService({
+      config: appConfig(),
+      cache,
+      mediaCache: mediaCacheWith("tt1266020"),
+    });
+    // Nothing warmed this season at import time: the first play has to fetch.
+    await expect(service.segmentsFor("tt1266020", 4, 1)).resolves.toEqual({
+      intro: { startSec: 93, endSec: 113 },
+      outro: { startSec: 1265, endSec: 1280 },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // What the backfill fetched is cached, so the next play asks nobody.
+    await service.segmentsFor("tt1266020", 4, 1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops waiting for a slow backfill instead of stalling playback", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
+
+    const service = createIntroDbService({
+      config: appConfig(),
+      cache: createIntroDbCache({ cacheDir: tempCacheDir() }),
+      mediaCache: mediaCacheWith("tt0903747"),
+      onDemandWaitMs: 5,
+    });
+
+    await expect(service.segmentsFor("tt0903747", 1, 1)).resolves.toBeUndefined();
   });
 });

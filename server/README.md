@@ -435,18 +435,20 @@ if Churn is exposed beyond the LAN.
 ### Skip-intro metadata
 
 Episode segments come from [IntroDB](https://introdb.app), a crowdsourced
-public API. Reads need no key and are rate limited, so Churn only calls it while
+public API. Reads need no key and are rate limited, so Churn fetches them while
 a download is being set up: when a season or episode release is grabbed, the
 backend resolves the series' IMDb id from Sonarr (or the cached series
 metadata), then fetches segments for every episode of that season, or just the
 single episode, sequentially in the background. Results are stored in
 `server/cache/releases/introdb/<imdbId>.json`.
 
-Playback never calls IntroDB. `GET /api/playback/items/:itemId` reads the cached
-JSON for the episode and exposes `segments` (`intro`, `recap`, `outro`,
-`postCredits`, in seconds) when data exists. A missing file, no IMDb id, a 404 or
-a failed lookup simply means no segments are returned; playback and the grab
-response are unaffected. IntroDB only receives the series IMDb id and
+Playback fills the gaps. `GET /api/playback/items/:itemId` reads the cached JSON
+for the episode and exposes `segments` (`intro`, `recap`, `outro`,
+`postCredits`, in seconds) when data exists. On a miss it fetches that one
+episode on demand and waits at most two seconds, which is what covers seasons
+imported before this cache existed and caches emptied by a restart. A no IMDb
+id, a 404 or a failed lookup simply means no segments are returned; playback and
+the grab response are unaffected. IntroDB only receives the series IMDb id and
 season/episode numbers, never the Jellyfin session or a user identity.
 
 ### Next episode and quality preference

@@ -400,7 +400,7 @@ async function grabShowRelease(
     });
     // Warm IntroDB while the torrent downloads. A season grab fetches every
     // episode of that season; an episode grab fetches only that episode.
-    void introDb.warmFromGrab(
+    void introDb.warm(
       seriesId,
       input.seasonNumber,
       input.episodeNumber,

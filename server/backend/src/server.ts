@@ -53,7 +53,9 @@ export async function buildServer(
   });
   const loginThrottle = createLoginThrottle();
   const releaseEvents = createReleaseEventStore();
-  const cacheDir = resolveReleaseCacheDir(config.serverDir);
+  const cacheDir = resolveReleaseCacheDir(config.serverDir, (message) =>
+    app.log.warn(message),
+  );
   const mediaCache = createMediaCache({ cacheDir: path.join(cacheDir, "media") });
   const introDb = createIntroDbService({
     config,
@@ -212,16 +214,18 @@ export async function buildServer(
 
 /**
  * `server/cache` belongs to the Jellyfin container and can be root-owned on an
- * installed stack. Prefer it, but fall back to a directory the backend user can
- * actually write so cached release searches survive restarts.
+ * installed stack. Prefer it, then the `.churn-cache` volume, and only then a
+ * temporary directory — which loses the cache on every restart, so say so.
  */
-function resolveReleaseCacheDir(serverDir: string): string {
-  const candidates = [
+function resolveReleaseCacheDir(
+  serverDir: string,
+  warn: (message: string) => void,
+): string {
+  const persistent = [
     path.join(serverDir, "cache", "releases"),
     path.join(serverDir, ".churn-cache", "releases"),
-    path.join(tmpdir(), "churn-releases"),
   ];
-  for (const directory of candidates) {
+  for (const directory of persistent) {
     try {
       mkdirSync(directory, { recursive: true });
       accessSync(directory, constants.W_OK);
@@ -230,7 +234,17 @@ function resolveReleaseCacheDir(serverDir: string): string {
       // Try the next writable location.
     }
   }
-  return path.join(tmpdir(), "churn-releases");
+
+  const fallback = path.join(tmpdir(), "churn-releases");
+  try {
+    mkdirSync(fallback, { recursive: true });
+  } catch {
+    // Reported by the callers that fail to write into it.
+  }
+  warn(
+    `release cache: none of ${persistent.join(", ")} is writable; using ${fallback}, which does not survive a restart (cached IntroDB segments, series metadata and release searches are lost)`,
+  );
+  return fallback;
 }
 
 function isCrossOriginRequest(request: {
