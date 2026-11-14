@@ -139,6 +139,26 @@ impl Stack {
         }
     }
 
+    /// Host directories the stack's bind mounts write into, relative to the
+    /// stack root.
+    ///
+    /// These are the app config/cache trees each container owns, not the media
+    /// tree: they hold only generated service state, so churn may create them
+    /// and hand them to `PUID:PGID`. Kept in sync with the `./config`/`./cache`
+    /// bind mounts in the compose files, and covered by a test that renders
+    /// both files so a new mount cannot be added without a directory here.
+    pub fn config_dirs(self) -> &'static [&'static str] {
+        match self {
+            Stack::Server => &[
+                "config/jellyfin",
+                "config/sonarr",
+                "config/radarr",
+                "cache/jellyfin",
+            ],
+            Stack::Torrent => &["config/qbittorrent", "config/prowlarr"],
+        }
+    }
+
     pub fn next_steps(self, answers: &Answers) -> Vec<String> {
         match self {
             Stack::Server => vec![
@@ -383,6 +403,76 @@ pub fn media_dir(answers: &Answers) -> String {
         .get(&Question::MediaDir)
         .map(|value| crate::question::normalize_path(value))
         .unwrap_or_else(|| format!("{}/{MEDIA_SUBDIR}", download_dir(answers)))
+}
+
+/// The `PUID:PGID` a stack's containers run as, read back from its `.env`.
+///
+/// Used by `churn update`, which heals an existing install without the
+/// interactive storage answers that produced the file. Falls back to 1000 (the
+/// compose default) when a key is missing or malformed.
+pub fn env_owner(stack: Stack) -> (u32, u32) {
+    let env = envfile::read(&stack.env_path());
+    let id = |key: &str| {
+        env.get(key)
+            .and_then(|value| value.trim().parse().ok())
+            .unwrap_or(1000)
+    };
+    (id("PUID"), id("PGID"))
+}
+
+/// Create the app config/cache directories a stack's containers write into, and
+/// hand each one to the stack's `PUID:PGID`.
+///
+/// Docker creates a missing bind-mount source as `root:root 0755`, so a
+/// container running as `PUID:PGID` cannot populate it — Jellyfin dies trying
+/// to `mkdir /config/log`, and so would Sonarr/Radarr. Running before
+/// `compose up` avoids that: the directory already exists and is owned by the
+/// identity the container runs as.
+///
+/// A directory churn creates here, or one that already exists but is owned by
+/// root (what Docker's bind-mount auto-create leaves behind, including after a
+/// first start that failed for this very reason), is chowned to `owner`. A
+/// directory already owned by a non-root identity is left untouched, so an
+/// adopted config keeps its owner — the same rule the media tree follows.
+/// Returns the directories that were handed over.
+pub fn prepare_config_dirs(
+    base: &Path,
+    stack: Stack,
+    owner: (u32, u32),
+) -> io::Result<Vec<PathBuf>> {
+    let mut prepared = Vec::new();
+    for relative in stack.config_dirs() {
+        let path = base.join(stack.key()).join(relative);
+        let created = !path.exists();
+        if created {
+            std::fs::create_dir_all(&path)?;
+        }
+        // Docker creates a missing source as root:root; adopt exactly those,
+        // and anything churn just created (which is root-owned too, as churn
+        // runs as root).
+        if !created && envfile::owner(&path).0 != 0 {
+            continue;
+        }
+        match envfile::chown(&path, owner.0, owner.1) {
+            Ok(()) => prepared.push(path),
+            Err(err) if created => {
+                return Err(io::Error::new(
+                    err.kind(),
+                    format!(
+                        "could not give {} to {}:{}: {err}",
+                        path.display(),
+                        owner.0,
+                        owner.1
+                    ),
+                ));
+            }
+            // A pre-existing root-owned directory we could not adopt stays in
+            // place; the container may still write it (for example it is
+            // already group-writable), so this is not fatal.
+            Err(_) => {}
+        }
+    }
+    Ok(prepared)
 }
 
 /// Owning uid/gid for the containers.
@@ -656,6 +746,88 @@ mod tests {
         // leftover from whichever provider needed one before.
         assert!(!env.contains_key("WIREGUARD_ADDRESSES"));
         assert_eq!(env["SERVER_COUNTRIES"], "Netherlands");
+    }
+
+    fn temp_root(label: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "churn-{label}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    #[test]
+    fn prepare_config_dirs_creates_and_owns_each_bind_mount_source() {
+        let root = temp_root("config-dirs");
+        let owner = envfile::owner(&root);
+
+        let prepared = prepare_config_dirs(&root, Stack::Server, owner).unwrap();
+        for relative in Stack::Server.config_dirs() {
+            let path = root.join("server").join(relative);
+            assert!(path.is_dir(), "{} should exist", path.display());
+            assert_eq!(
+                envfile::owner(&path),
+                owner,
+                "{} should be owned",
+                path.display()
+            );
+        }
+        assert_eq!(prepared.len(), Stack::Server.config_dirs().len());
+
+        // Torrent's own set must land under torrent/ and never touch server/.
+        prepare_config_dirs(&root, Stack::Torrent, owner).unwrap();
+        for relative in Stack::Torrent.config_dirs() {
+            assert!(root.join("torrent").join(relative).is_dir());
+        }
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn prepare_config_dirs_leaves_an_adopted_config_untouched() {
+        let root = temp_root("config-adopted");
+        let adopted = root.join("server/config/jellyfin");
+        std::fs::create_dir_all(&adopted).unwrap();
+
+        // The rule keys on a non-root owner. Running as non-root the fresh
+        // directory already qualifies; as root it must be handed to some
+        // non-root id first (churn running as root is the real install case).
+        let here = envfile::owner(&root);
+        let other = if here.0 == 0 { (1234, 1234) } else { here };
+        if here.0 == 0 {
+            envfile::chown(&adopted, other.0, other.1).unwrap();
+        }
+
+        let prepared = prepare_config_dirs(&root, Stack::Server, other).unwrap();
+        assert!(
+            !prepared.contains(&adopted),
+            "a directory owned by a non-root identity must be left alone"
+        );
+        assert_eq!(envfile::owner(&adopted), other);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn env_owner_reads_puid_and_pgid_and_defaults_to_1000() {
+        let root = temp_root("env-owner");
+        std::fs::create_dir_all(root.join("server")).unwrap();
+        std::fs::write(root.join("server/.env"), "PUID=1234\nPGID=5678\n").unwrap();
+        std::fs::create_dir_all(root.join("torrent")).unwrap();
+        std::fs::write(root.join("torrent/.env"), "DOWNLOAD_DIR=/data\n").unwrap();
+
+        // The functions read from `envfile::root()`, so drive them through a
+        // temporary CHURN_ROOT just like the installer does.
+        // SAFETY: single-threaded test; the variable is restored below.
+        unsafe { std::env::set_var("CHURN_ROOT", &root) };
+        assert_eq!(env_owner(Stack::Server), (1234, 5678));
+        assert_eq!(env_owner(Stack::Torrent), (1000, 1000));
+        unsafe { std::env::remove_var("CHURN_ROOT") };
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

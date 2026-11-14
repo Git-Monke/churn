@@ -938,6 +938,15 @@ fn ensure_directories(answers: &Answers, assume_yes: bool, dry_run: bool) -> io:
     Ok(())
 }
 
+/// The `PUID:PGID` the containers will run as, from the same storage answers
+/// `managed_env` writes into `.env`, so the config directories are owned by the
+/// identity that will write them.
+fn stack_owner_for(answers: &Answers) -> (u32, u32) {
+    let download = stack::download_dir(answers);
+    let media = stack::media_dir(answers);
+    stack::stack_owner(Path::new(&media), Path::new(&download))
+}
+
 fn create_if_missing(path: &Path, assume_yes: bool, dry_run: bool) -> io::Result<()> {
     if path.is_dir() {
         return Ok(());
@@ -1429,7 +1438,18 @@ fn write_stacks(chosen: &[Stack], answers: &Answers, dry_run: bool) -> io::Resul
             ));
             continue;
         }
-        match assets::materialize(&root, *stack).and_then(|()| stack.apply(answers)) {
+        // The containers run as PUID:PGID, but Docker would create their config
+        // bind mounts as root:root, so create and own the directories before
+        // compose up. Without this a fresh install starts Jellyfin against a
+        // root-owned /config and it dies on `mkdir /config/log`.
+        let owner = stack_owner_for(answers);
+        let result = assets::materialize(&root, *stack)
+            .and_then(|()| stack.apply(answers))
+            .and_then(|path| {
+                stack::prepare_config_dirs(&root, *stack, owner)?;
+                Ok(path)
+            });
+        match result {
             Ok(path) => {
                 progress.stop(format!("wrote stack files and {}", path.display()));
             }
@@ -1552,6 +1572,12 @@ fn reconcile_stacks(chosen: &[Stack], dry_run: bool) -> io::Result<()> {
         }
 
         assets::materialize(&envfile::root(), *stack)?;
+        // Heal installs that predate churn creating these directories: a
+        // root-owned config tree left by Docker's bind-mount auto-create stops
+        // the container from starting. Reading the owner from the stack's
+        // `.env` keeps this working without the interactive answers.
+        let owner = stack::env_owner(*stack);
+        stack::prepare_config_dirs(&envfile::root(), *stack, owner)?;
 
         if *stack == Stack::Torrent {
             // Never reconcile the torrent stack without proving it still

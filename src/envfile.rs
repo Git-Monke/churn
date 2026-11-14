@@ -154,20 +154,32 @@ pub fn restrict(path: &Path) -> io::Result<()> {
 /// container image or a bind mount. Group read is the narrowest grant that lets
 /// the container read the Jellyfin API key.
 pub fn share(path: &Path, gid: u32) -> io::Result<()> {
-    let c_path = CString::new(path.as_os_str().as_bytes())
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "path contains a NUL byte"))?;
     // `(uid_t) -1` keeps the current owner.
-    if unsafe { libc::chown(c_path.as_ptr(), !0 as libc::uid_t, gid) } != 0 {
-        let err = io::Error::last_os_error();
-        return Err(io::Error::new(
+    chown(path, !0 as libc::uid_t, gid).map_err(|err| {
+        io::Error::new(
             err.kind(),
             format!(
                 "could not give group {gid} access to {}: {err}",
                 path.display()
             ),
-        ));
-    }
+        )
+    })?;
     fs::set_permissions(path, fs::Permissions::from_mode(0o640))
+}
+
+/// Change the owner of `path` to `uid:gid`, leaving its mode untouched.
+///
+/// Pass `(uid_t) -1` for `uid` or `gid` to leave that half unchanged. Fails
+/// with the operating system's error when churn is not privileged enough to
+/// hand the path over.
+pub fn chown(path: &Path, uid: libc::uid_t, gid: libc::gid_t) -> io::Result<()> {
+    let c_path = CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "path contains a NUL byte"))?;
+    if unsafe { libc::chown(c_path.as_ptr(), uid, gid) } == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
 }
 
 /// Set one key in place, preserving comments, ordering and every other key.

@@ -878,13 +878,7 @@ pub fn storage_owner(root: &Path, stacks: &[Stack], destination: &Path) -> (u32,
 /// Give the destination root the owner the containers expect, so they can
 /// create new media folders there.
 pub fn set_owner(path: &Path, uid: u32, gid: u32) -> io::Result<()> {
-    let path = CString::new(path.as_os_str().as_bytes())
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "path contains a NUL byte"))?;
-    if unsafe { libc::chown(path.as_ptr(), uid, gid) } == 0 {
-        Ok(())
-    } else {
-        Err(io::Error::last_os_error())
-    }
+    envfile::chown(path, uid, gid)
 }
 
 /// Write the moved storage key and `PUID`/`PGID` into every stack's `.env`.
