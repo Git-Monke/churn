@@ -253,13 +253,20 @@ pub fn write_atomic(path: &Path, contents: &str) -> io::Result<()> {
         .ok_or_else(|| io::Error::other(format!("{} has no file name", path.display())))?;
     let temporary = parent.join(format!(".{name}.{}.tmp", std::process::id()));
 
-    let mode = fs::metadata(path)
-        .ok()
-        .map(|meta| meta.permissions().mode());
+    let meta = fs::metadata(path).ok();
+    let mode = meta.as_ref().map(|meta| meta.permissions().mode());
+    let owner = meta.as_ref().map(|meta| (meta.uid(), meta.gid()));
     let result = (|| {
         fs::write(&temporary, contents)?;
         if let Some(mode) = mode {
             fs::set_permissions(&temporary, fs::Permissions::from_mode(mode & 0o7777))?;
+        }
+        // `rename` swaps in a new inode, so the file would otherwise revert to
+        // the writer's group. That silently undoes `share`: server/.env stays
+        // root-owned after a later `upsert`, and the dashboard — which runs as
+        // PUID:PGID — cannot read the Jellyfin API key again.
+        if let Some((uid, gid)) = owner {
+            chown(&temporary, uid, gid)?;
         }
         fs::rename(&temporary, path)
     })();
@@ -405,5 +412,42 @@ mod tests {
         assert_eq!(after.mode() & 0o777, 0o640);
         assert_eq!((after.uid(), after.gid()), (before.uid(), before.gid()));
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn upserting_keeps_the_ownership_and_mode_of_the_file() {
+        let dir = temp_dir("upsert-owner");
+        let path = dir.join(".env");
+        fs::write(&path, "PGID=1000\n").unwrap();
+        let before = fs::metadata(&path).unwrap();
+        // Use a group that is not the writer's primary one, otherwise the new
+        // inode would carry the right gid even when the rewrite drops it.
+        let Some(gid) = supplementary_group(before.gid()) else {
+            fs::remove_dir_all(dir).unwrap();
+            return;
+        };
+        share(&path, gid).unwrap();
+
+        upsert(&path, "JELLYFIN_API_KEY", "secret").unwrap();
+
+        let after = fs::metadata(&path).unwrap();
+        assert_eq!(after.mode() & 0o777, 0o640);
+        assert_eq!((after.uid(), after.gid()), (before.uid(), gid));
+        assert!(
+            fs::read_to_string(&path)
+                .unwrap()
+                .contains("JELLYFIN_API_KEY=secret")
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A gid this process may hand a file to other than `current`.
+    fn supplementary_group(current: u32) -> Option<u32> {
+        let status = fs::read_to_string("/proc/self/status").ok()?;
+        let line = status.lines().find(|line| line.starts_with("Groups:"))?;
+        line.trim_start_matches("Groups:")
+            .split_whitespace()
+            .filter_map(|id| id.parse::<u32>().ok())
+            .find(|gid| *gid != current)
     }
 }
