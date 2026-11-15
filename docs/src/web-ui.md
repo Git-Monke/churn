@@ -105,6 +105,15 @@ then chooses their own password. Each person has a distinct Jellyfin user, so
 watch progress stays separate. Deleting a person deletes their Jellyfin user
 and history.
 
+Jellyfin is the source of truth for accounts. On every backend start Churn
+reads Jellyfin's user list and adopts the non-administrator users it does not
+know about, so a person created outside Churn — or a profile orphaned by a lost
+state file — shows up in the picker and the People page instead of failing with
+an upstream error. Adopted profiles are already password-protected: the person
+signs in with their Jellyfin password, and an admin can reset it from People.
+Adding a person whose name already exists in Jellyfin is rejected by name
+before Churn calls Jellyfin's user endpoint.
+
 Sessions are a TTL map keyed by a SHA-256 hash of the cookie value, persisted
 atomically to `CHURN_STATE_DIR/auth-state.json` (mode 0600) with the profiles.
 Requests made through Churn also record who added each title in

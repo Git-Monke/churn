@@ -12,6 +12,10 @@ declare module "fastify" {
   interface FastifyRequest {
     auth: AuthContext | null;
   }
+  interface FastifyInstance {
+    /** The profile/session store, exposed so startup can reconcile with Jellyfin. */
+    sessionStore: SessionStore;
+  }
 }
 
 export const SESSION_COOKIE_NAME = "churn_session";
@@ -93,7 +97,8 @@ export interface SessionStore {
   createProfile(input: {
     name: string;
     jellyfinUserId: string;
-    initialPin: string;
+    /** `null` when the account already had a password in Jellyfin. */
+    initialPin: string | null;
   }): ProfileRecord;
   setProfilePin(id: string, pin: string): ProfileRecord | undefined;
   markPasswordSet(id: string): ProfileRecord | undefined;

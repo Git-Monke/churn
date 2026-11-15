@@ -51,6 +51,7 @@ export async function buildServer(
     stateDir: config.stateDir,
     onWarning: (message) => app.log.warn(message),
   });
+  app.decorate("sessionStore", sessionStore);
   const loginThrottle = createLoginThrottle();
   const releaseEvents = createReleaseEventStore();
   const cacheDir = resolveReleaseCacheDir(config.serverDir, (message) =>

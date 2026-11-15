@@ -48,8 +48,21 @@ export function registerProfileRoutes(
       throw new ApiError(503, "jellyfin_unconfigured", "Set JELLYFIN_API_KEY in server/.env");
     }
 
-    const pin = generatePin();
     const client = createJellyfinClient(service, config.requestTimeoutMs);
+    // Jellyfin answers a duplicate name with a bare 400 that hides the reason,
+    // so ask it first and report the same conflict the local check reports.
+    // A failed listing is not fatal: creating the user reports its own error.
+    const nameTakenUpstream = await client
+      .listUsers()
+      .then((users) =>
+        users.some((user) => user.Name?.trim().toLowerCase() === name.trim().toLowerCase()),
+      )
+      .catch(() => false);
+    if (nameTakenUpstream) {
+      throw new ApiError(409, "profile_exists", "A Jellyfin user with that name already exists");
+    }
+
+    const pin = generatePin();
     let jellyfinUserId: string | undefined;
     try {
       const created = await client.createUser(name, pin);

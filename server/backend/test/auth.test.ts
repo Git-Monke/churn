@@ -600,6 +600,9 @@ describe("household profiles", () => {
         }
         return jsonResponse({}, 401);
       }
+      if (url.endsWith("/Users") && method === "GET") {
+        return jsonResponse([]);
+      }
       if (url.endsWith("/Users/New") && method === "POST") {
         const body = JSON.parse(String(init?.body)) as {
           Name: string;
@@ -684,6 +687,34 @@ describe("household profiles", () => {
     expect(publicList.json()).toEqual([
       { id: created.profile.id, name: "Jacob", passwordSet: false },
     ]);
+    await app.close();
+  });
+
+  it("reports a name Jellyfin already uses as a conflict, not an upstream failure", async () => {
+    installFetch((url, init) => {
+      const method = init?.method ?? "GET";
+      if (url.endsWith("/Users/AuthenticateByName") && method === "POST") {
+        return jsonResponse(testAuthResult);
+      }
+      if (url.endsWith("/Users") && method === "GET") {
+        return jsonResponse([{ Id: "jf-existing", Name: "Jacob", Policy: {} }]);
+      }
+      throw new Error(`unexpected request ${method} ${url}`);
+    });
+    const app = await buildServer(makeConfig());
+    const { cookie } = await login(app);
+
+    const response = await invoker(app, cookie as string, {
+      method: "POST",
+      url: "/api/profiles",
+      payload: { name: "Jacob" },
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error).toMatchObject({
+      code: "profile_exists",
+      message: "A Jellyfin user with that name already exists",
+    });
     await app.close();
   });
 

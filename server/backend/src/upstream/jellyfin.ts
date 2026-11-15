@@ -15,11 +15,14 @@ export interface JellyfinSystemInfo extends JellyfinPublicInfo {
 
 export interface JellyfinUserPolicy {
   IsAdministrator?: boolean;
+  IsDisabled?: boolean;
 }
 
 export interface JellyfinUser {
   Id?: string;
   Name?: string;
+  /** A user without a secret cannot sign in through churn. */
+  HasPassword?: boolean;
   Policy?: JellyfinUserPolicy;
 }
 
@@ -225,6 +228,17 @@ export function createJellyfinClient(
         },
         timeoutMs,
       );
+    },
+
+    /** Every Jellyfin user, with policy flags. Requires an admin API key or token. */
+    async listUsers(): Promise<JellyfinUser[]> {
+      if (!token) {
+        throw new UpstreamError("jellyfin", "unauthorized", "Jellyfin API key is not configured");
+      }
+      return fetchJson<JellyfinUser[]>("jellyfin", `${config.url}/Users`, {
+        headers: authHeaders(),
+        timeoutMs,
+      });
     },
 
     /** Create a Jellyfin user. Requires an admin API key or token. */

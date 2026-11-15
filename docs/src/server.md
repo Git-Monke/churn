@@ -204,6 +204,14 @@ installer's API key stays server-side for status checks and user management.
 All logged-in Jellyfin users get the full dashboard, including Sonarr/Radarr
 requests.
 
+Jellyfin's user list is the source of truth for accounts, so the backend
+reconciles at startup: it reads `GET /Users` with the installer's API key and
+adopts the non-administrator users it does not know about as profiles that are
+already password-protected, retrying for about a minute while Jellyfin finishes
+booting. Without that step a missing or unreadable `churn-state` volume would
+orphan real Jellyfin accounts: they would vanish from People and every attempt
+to add the same name would fail with Jellyfin's masked `HTTP 400`.
+
 The planned order is: library/status dashboard, search and media requests
 (done), active downloads in Library (done), Jellyfin login and per-user sessions
 (done), Jellyfin playback (done), then download history and queue actions. See
