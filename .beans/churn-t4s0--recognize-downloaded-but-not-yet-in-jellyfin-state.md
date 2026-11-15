@@ -1,10 +1,11 @@
 ---
 # churn-t4s0
 title: Recognize downloaded-but-not-yet-in-Jellyfin state before showing Pick a Version
-status: in-progress
+status: completed
 type: bug
+priority: normal
 created_at: 2026-11-13T10:12:44Z
-updated_at: 2026-11-13T10:12:44Z
+updated_at: 2026-11-15T18:49:58Z
 ---
 
 When a movie or TV season finishes downloading but Jellyfin is still indexing it, the UI shows the Pick a Version screen. We need to recognize the in-between state (download complete, Jellyfin import/scan pending) and not show the version picker then.
@@ -51,4 +52,3 @@ Frontend:
 - `server/frontend/src/api/types.ts` — mirrored `imported?: boolean`.
 
 Tests: `server/backend/test/qbittorrent-activity.test.ts` +3 cases (completed→importing with both message variants; completed stays hidden when indexed; active torrent preferred over completed). `server/backend/test/routes.test.ts` +2 regression cases on the Radarr detail route: a finished download with Jellyfin not listing the movie stays `importing` (no `jellyfinId`); once Jellyfin lists it (Tmdb 438631) the download is dropped and `jellyfinId` is set. Full suites green: backend 405 tests / 31 files, frontend 48 tests / 7 files, `tsc --noEmit` clean on both, `vite build` succeeds (a root-owned stale `node_modules/.vite-temp` from the running service blocked the first build attempt; removed the empty temp dir). Live UI verification of The Matrix page still pending: the running backend auto-reloads via `tsx watch`, but `/api/*` needs a session so it cannot be curled from here, and the Jellyfin apiKey is unreadable to the probe user (server/.env is root-only), so the live Jellyfin path is covered only by the mocked route tests.
-
