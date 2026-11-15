@@ -1,11 +1,10 @@
-import { useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowLeftIcon,
   CircleAlertIcon,
   LogInIcon,
   ShieldIcon,
-  UserRoundIcon,
 } from "lucide-react";
 
 import { ApiClientError, fetchProfiles } from "@/api/client";
@@ -26,6 +25,36 @@ import { useAuth } from "@/features/auth/AuthProvider";
 
 type ProfileStep = "password" | "newPassword";
 
+/**
+ * First letter of every person's name, widened to two letters for anyone whose
+ * first letter another person already uses.
+ */
+function profileInitials(profiles: ProfileSummary[]) {
+  const counts = new Map<string, number>();
+  const firsts = profiles.map((profile) => {
+    const first = profile.name.trim().charAt(0).toUpperCase() || "?";
+    counts.set(first, (counts.get(first) ?? 0) + 1);
+    return first;
+  });
+
+  const initials = new Map<string, string>();
+  profiles.forEach((profile, index) => {
+    const first = firsts[index] ?? "?";
+    if ((counts.get(first) ?? 0) < 2) {
+      initials.set(profile.id, first);
+      return;
+    }
+    const second = profile.name
+      .trim()
+      .slice(1)
+      .replace(/\s+/g, "")
+      .charAt(0)
+      .toUpperCase();
+    initials.set(profile.id, second ? `${first}${second}` : first);
+  });
+  return initials;
+}
+
 export function LoginPage() {
   const { login, profileLogin, isPending } = useAuth();
   const [showAdmin, setShowAdmin] = useState(false);
@@ -41,6 +70,8 @@ export function LoginPage() {
     queryFn: fetchProfiles,
     retry: false,
   });
+  const people = useMemo(() => profilesQuery.data ?? [], [profilesQuery.data]);
+  const initialsById = useMemo(() => profileInitials(people), [people]);
 
   function resetProfileFlow() {
     setSelected(null);
@@ -226,71 +257,82 @@ export function LoginPage() {
             </CardContent>
           </Card>
         ) : (
-          <Card>
-            <CardHeader>
-              <CardTitle>People</CardTitle>
-              <CardDescription>
-                Pick your profile to sign in. Each person gets their own watch
-                progress.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-3">
-              {profilesQuery.isLoading ? (
-                <div className="grid gap-2 sm:grid-cols-3">
-                  <Skeleton className="h-20 rounded-xl" />
-                  <Skeleton className="h-20 rounded-xl" />
-                  <Skeleton className="h-20 rounded-xl" />
-                </div>
-              ) : profilesQuery.isError ? (
-                <SignInError message="Could not load the people list." />
-              ) : profilesQuery.data && profilesQuery.data.length > 0 ? (
-                <div className="grid gap-2 sm:grid-cols-3">
-                  {profilesQuery.data.map((profile) => (
-                    <Button
-                      key={profile.id}
-                      type="button"
-                      variant="outline"
-                      className="h-auto flex-col gap-2 py-5"
-                      onClick={() => void selectProfile(profile)}
-                    >
-                      <UserRoundIcon className="size-6" />
-                      <span className="font-medium">{profile.name}</span>
-                      {!profile.passwordSet ? (
-                        <span className="text-xs text-muted-foreground">
-                          PIN not set up yet
+          <div className="flex w-full flex-col items-center gap-6">
+            {profilesQuery.isLoading ? (
+              <div className="flex gap-5" aria-hidden="true">
+                {[0, 1, 2].map((index) => (
+                  <div key={index} className="flex flex-col items-center gap-3">
+                    <Skeleton className="size-26" />
+                    <Skeleton className="h-2.5 w-14" />
+                  </div>
+                ))}
+              </div>
+            ) : profilesQuery.isError ? (
+              <SignInError message="Could not load the people list." />
+            ) : (
+              <>
+                {error ? <SignInError message={error} /> : null}
+
+                <ul className="flex flex-wrap items-start justify-center gap-4 sm:gap-5">
+                  {people.map((profile) => {
+                    const initials = initialsById.get(profile.id) ?? "?";
+                    return (
+                      <li
+                        key={profile.id}
+                        className="group flex flex-col items-center gap-3"
+                      >
+                        <button
+                          type="button"
+                          aria-label={`Sign in as ${profile.name}`}
+                          onClick={() => void selectProfile(profile)}
+                          className="flex size-24 items-center justify-center border border-border bg-muted font-heading font-semibold tracking-tight text-foreground transition-colors hover:border-primary hover:bg-primary/10 focus-visible:outline-2 focus-visible:outline-offset-3 focus-visible:outline-primary sm:size-26"
+                        >
+                          <span
+                            className={
+                              initials.length > 1
+                                ? "text-2xl tracking-normal"
+                                : "text-4xl"
+                            }
+                          >
+                            {initials}
+                          </span>
+                        </button>
+                        <span
+                          title={profile.name}
+                          className="max-w-24 truncate text-xs uppercase tracking-[0.07em] text-muted-foreground transition-colors group-hover:text-foreground sm:max-w-26"
+                        >
+                          {profile.name}
                         </span>
-                      ) : null}
-                    </Button>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  No people have been added yet. An admin can create them from the
-                  People page.
-                </p>
-              )}
+                        {profile.passwordSet ? null : (
+                          <span className="-mt-2 text-[10px] uppercase tracking-[0.07em] text-muted-foreground/80">
+                            PIN not set
+                          </span>
+                        )}
+                      </li>
+                    );
+                  })}
 
-              {error ? <SignInError message={error} /> : null}
-
-              <Button
-                type="button"
-                variant="ghost"
-                className="self-start"
-                onClick={() => {
-                  setShowAdmin(true);
-                  setError(null);
-                }}
-              >
-                <ShieldIcon data-icon="inline-start" />
-                Admin sign in
-              </Button>
-            </CardContent>
-          </Card>
+                  <li className="group flex flex-col items-center gap-3">
+                    <button
+                      type="button"
+                      aria-label="Admin sign in"
+                      onClick={() => {
+                        setShowAdmin(true);
+                        setError(null);
+                      }}
+                      className="flex size-24 items-center justify-center border border-input text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-3 focus-visible:outline-primary sm:size-26"
+                    >
+                      <ShieldIcon className="size-8" strokeWidth={1.5} />
+                    </button>
+                    <span className="text-xs uppercase tracking-[0.07em] text-muted-foreground transition-colors group-hover:text-foreground">
+                      Admin
+                    </span>
+                  </li>
+                </ul>
+              </>
+            )}
+          </div>
         )}
-
-        <p className="text-center text-xs text-muted-foreground">
-          Sessions last 12 hours of inactivity and survive dashboard restarts.
-        </p>
       </div>
     </main>
   );
