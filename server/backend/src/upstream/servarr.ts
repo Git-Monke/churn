@@ -1,5 +1,5 @@
 import type { ServiceConfig } from "../config.js";
-import { UpstreamError } from "../errors.js";
+import { UpstreamError, isUnreachable } from "../errors.js";
 import { deleteRequest, fetchJson, fetchWithTimeout, postJson } from "../http.js";
 
 export interface ServarrSystemStatus {
@@ -279,6 +279,15 @@ export interface ServarrHistoryRecord {
 /** Posters and fanart are a few hundred KB; anything huge is not artwork. */
 const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
 
+/**
+ * Lookups are answered by SkyHook, the metadata proxy both arrs share. It stalls
+ * for tens of seconds often enough to be felt in search, so a lookup gets a short
+ * timeout and one retry: a healthy attempt answers in ~200ms, while waiting out a
+ * stalled one would block the search for the arr's 100s ceiling.
+ */
+const LOOKUP_TIMEOUT_MS = 5_000;
+const LOOKUP_ATTEMPTS = 2;
+
 export function createArrClient(service: ArrServiceId, config: ServiceConfig, timeoutMs: number) {
   const authHeaders = (): Record<string, string> => {
     if (!config.apiKey) {
@@ -287,8 +296,21 @@ export function createArrClient(service: ArrServiceId, config: ServiceConfig, ti
     return { "X-Api-Key": config.apiKey };
   };
 
-  const get = <T>(path: string): Promise<T> =>
-    fetchJson<T>(service, `${config.url}${path}`, { timeoutMs, headers: authHeaders() });
+  const get = <T>(path: string, ms = timeoutMs): Promise<T> =>
+    fetchJson<T>(service, `${config.url}${path}`, { timeoutMs: ms, headers: authHeaders() });
+
+  /** Retries a lookup once when the attempt timed out or never connected. */
+  const getLookup = async <T>(path: string): Promise<T> => {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await get<T>(path, LOOKUP_TIMEOUT_MS);
+      } catch (error) {
+        if (attempt >= LOOKUP_ATTEMPTS || !isUnreachable(error)) {
+          throw error;
+        }
+      }
+    }
+  };
 
   return {
     async getSystemStatus(): Promise<ServarrSystemStatus> {
@@ -297,12 +319,12 @@ export function createArrClient(service: ArrServiceId, config: ServiceConfig, ti
 
     async lookupSeries(term: string): Promise<ServarrSeriesResource[]> {
       const query = new URLSearchParams({ term });
-      return get<ServarrSeriesResource[]>(`/api/v3/series/lookup?${query.toString()}`);
+      return getLookup<ServarrSeriesResource[]>(`/api/v3/series/lookup?${query.toString()}`);
     },
 
     async lookupMovie(term: string): Promise<ServarrMovieResource[]> {
       const query = new URLSearchParams({ term });
-      return get<ServarrMovieResource[]>(`/api/v3/movie/lookup?${query.toString()}`);
+      return getLookup<ServarrMovieResource[]>(`/api/v3/movie/lookup?${query.toString()}`);
     },
 
     /** Parse a release title with the arr's own release-name parser. */

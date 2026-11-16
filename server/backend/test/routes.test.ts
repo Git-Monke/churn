@@ -128,6 +128,13 @@ function installFetch(
   return mock;
 }
 
+/** What `AbortSignal.timeout` rejects with, as `fetchWithTimeout` sees it. */
+function timeoutError(): Error {
+  return Object.assign(new Error("The operation was aborted due to timeout"), {
+    name: "TimeoutError",
+  });
+}
+
 async function login(app: Awaited<ReturnType<typeof buildServer>>): Promise<string> {
   const response = await app.inject({
     method: "POST",
@@ -2086,6 +2093,55 @@ describe("search", () => {
     expect(response.statusCode).toBe(200);
     expect(body.services[0]).toMatchObject({ id: "sonarr", state: "ok", count: 1 });
     expect(body.results).toHaveLength(1);
+    await app.close();
+  });
+
+  it("retries a stalled SkyHook lookup once", async () => {
+    let lookups = 0;
+    installFetch((url) => {
+      if (url.includes("sonarr.test")) {
+        if (url.includes("/series/lookup")) {
+          lookups += 1;
+          if (lookups === 1) throw timeoutError();
+          return jsonResponse([seriesLookup]);
+        }
+        return jsonResponse([]);
+      }
+      return jsonResponse([]);
+    });
+
+    const app = await buildAuthedServer(makeConfig());
+    const response = await app.inject({ method: "GET", url: "/api/search?q=severance" });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(body.services[0]).toMatchObject({ id: "sonarr", state: "ok", count: 1 });
+    expect(body.results).toHaveLength(1);
+    expect(lookups).toBe(2);
+    await app.close();
+  });
+
+  it("stops retrying after the second stall", async () => {
+    let lookups = 0;
+    installFetch((url) => {
+      if (url.includes("sonarr.test")) {
+        if (url.includes("/series/lookup")) {
+          lookups += 1;
+          throw timeoutError();
+        }
+        return jsonResponse([]);
+      }
+      return jsonResponse([]);
+    });
+
+    const app = await buildAuthedServer(makeConfig());
+    const response = await app.inject({ method: "GET", url: "/api/search?q=severance" });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(body.services[0].state).toBe("unreachable");
+    expect(body.results).toHaveLength(0);
+    expect(lookups).toBe(2);
     await app.close();
   });
 
