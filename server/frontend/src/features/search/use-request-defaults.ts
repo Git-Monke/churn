@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { ArrRequestOptions, RequestOptionsResponse } from "@/api/types";
 
@@ -30,21 +30,7 @@ export function useRequestDefaults(options?: RequestOptionsResponse) {
     setDefaults((current) => resolveDefaults(current, options));
   }, [options]);
 
-  const update = useCallback(
-    (service: "sonarr" | "radarr", patch: Partial<ServiceRequestDefaults>) => {
-      setDefaults((current) => {
-        const next: RequestDefaults = {
-          ...current,
-          [service]: { ...current[service], ...patch },
-        };
-        writeStoredDefaults(next);
-        return next;
-      });
-    },
-    [],
-  );
-
-  return { defaults, update };
+  return defaults;
 }
 
 function resolveDefaults(
@@ -86,14 +72,6 @@ function readStoredDefaults(): Partial<RequestDefaults> {
     return isRecord(value) ? (value as Partial<RequestDefaults>) : {};
   } catch {
     return {};
-  }
-}
-
-function writeStoredDefaults(defaults: RequestDefaults): void {
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(defaults));
-  } catch {
-    // Private browsing or a full quota should not break requesting.
   }
 }
 

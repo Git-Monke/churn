@@ -9,41 +9,83 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
+import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SearchResultCard } from "@/features/search/SearchResultCard";
 
+/** Titles below this vote count are treated as noise until asked for. */
+const MIN_VISIBLE_VOTES = 20;
+
 type Filter = "all" | "movie" | "series";
 
-interface SearchResultGridProps {
+interface SearchResultsProps {
+  query: string;
   results: SearchResult[];
+  showNiche: boolean;
+  onShowNicheChange: (showNiche: boolean) => void;
   onRequest: (result: SearchResult) => void;
   requestingKey: string | null;
   requestDisabled: boolean;
 }
 
-export function SearchResultGrid({
+export function SearchResults({
+  query,
   results,
+  showNiche,
+  onShowNicheChange,
   onRequest,
   requestingKey,
   requestDisabled,
-}: SearchResultGridProps) {
+}: SearchResultsProps) {
   const [filter, setFilter] = useState<Filter>("all");
+  const visible = useMemo(
+    () =>
+      showNiche
+        ? results
+        : results.filter((result) => (result.votes ?? 0) >= MIN_VISIBLE_VOTES),
+    [results, showNiche],
+  );
+  const hiddenCount = results.length - visible.length;
   const filtered = useMemo(
-    () => (filter === "all" ? results : results.filter((result) => result.kind === filter)),
-    [filter, results],
+    () => (filter === "all" ? visible : visible.filter((result) => result.kind === filter)),
+    [filter, visible],
   );
 
   return (
-    <Tabs value={filter} onValueChange={(value) => setFilter(value as Filter)}>
-      <TabsList>
-        <TabsTrigger value="all">All ({results.length})</TabsTrigger>
-        <TabsTrigger value="movie">{`Movies (${countKind(results, "movie")})`}</TabsTrigger>
-        <TabsTrigger value="series">{`Series (${countKind(results, "series")})`}</TabsTrigger>
-      </TabsList>
+    <Tabs
+      className="gap-6"
+      value={filter}
+      onValueChange={(value) => setFilter(value as Filter)}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+        <TabsList>
+          <TabsTrigger value="all">All ({visible.length})</TabsTrigger>
+          <TabsTrigger value="movie">{`Movies (${countKind(visible, "movie")})`}</TabsTrigger>
+          <TabsTrigger value="series">{`Series (${countKind(visible, "series")})`}</TabsTrigger>
+        </TabsList>
+        {hiddenCount > 0 || showNiche ? (
+          <div className="flex items-center gap-2">
+            <Switch
+              id="show-niche-results"
+              size="sm"
+              checked={showNiche}
+              onCheckedChange={onShowNicheChange}
+            />
+            <Label
+              htmlFor="show-niche-results"
+              className="text-sm font-normal text-muted-foreground"
+            >
+              Show niche results
+              {hiddenCount > 0 ? ` (${hiddenCount} hidden)` : ""}
+            </Label>
+          </div>
+        ) : null}
+      </div>
       <TabsContent value={filter}>
         {filtered.length > 0 ? (
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6">
+          <div className="grid grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6">
             {filtered.map((result) => (
               <SearchResultCard
                 key={result.key}
@@ -54,6 +96,20 @@ export function SearchResultGrid({
               />
             ))}
           </div>
+        ) : visible.length === 0 && hiddenCount > 0 ? (
+          <Empty className="border">
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <SearchIcon />
+              </EmptyMedia>
+              <EmptyTitle>Only niche results for “{query}”</EmptyTitle>
+              <EmptyDescription>
+                {hiddenCount} {hiddenCount === 1 ? "result has" : "results have"} fewer than{" "}
+                {MIN_VISIBLE_VOTES} votes. Turn on “Show niche results” to see
+                {hiddenCount === 1 ? " it" : " them"}.
+              </EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         ) : (
           <Empty className="border">
             <EmptyHeader>
@@ -72,9 +128,9 @@ export function SearchResultGrid({
   );
 }
 
-export function SearchResultGridSkeleton() {
+export function SearchResultsSkeleton() {
   return (
-    <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6">
+    <div className="grid grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6">
       {Array.from({ length: 12 }).map((_, index) => (
         <div key={index} className="flex flex-col gap-2">
           <Skeleton className="aspect-[2/3] w-full rounded-xl" />

@@ -1,15 +1,16 @@
-import { CheckIcon, FilmIcon, Loader2Icon, PlusIcon, TvIcon } from "lucide-react";
+import {
+  CheckIcon,
+  ClockIcon,
+  FilmIcon,
+  Loader2Icon,
+  PlusIcon,
+  TvIcon,
+} from "lucide-react";
+import type { ReactNode } from "react";
 
 import type { SearchResult } from "@/api/types";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardTitle } from "@/components/ui/card";
 
 interface SearchResultCardProps {
   result: SearchResult;
@@ -26,6 +27,12 @@ export function SearchResultCard({
 }: SearchResultCardProps) {
   const available = result.available === true;
   const requested = !available && result.inLibrary === true;
+
+  const facts = [
+    result.kind === "movie" ? "Movie" : "Series",
+    result.year ? String(result.year) : null,
+    result.rating === undefined ? null : `${result.rating.toFixed(1)}/10`,
+  ].filter((fact): fact is string => fact !== null);
 
   return (
     <Card className="gap-0 py-0">
@@ -48,86 +55,56 @@ export function SearchResultCard({
         )}
       </div>
 
-      <CardHeader className="gap-1.5 pt-3">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <Badge variant="secondary">
-            {result.kind === "movie" ? "Movie" : "Series"}
-          </Badge>
-          {result.year ? (
-            <span className="text-xs text-muted-foreground">{result.year}</span>
-          ) : null}
-          {result.inLibrary === null ? (
-            <Badge variant="outline">Status unknown</Badge>
-          ) : null}
+      <div className="flex flex-1 flex-col gap-3 p-3">
+        <div className="flex flex-col gap-1">
+          <CardTitle className="truncate text-base" title={result.title}>
+            {result.title}
+          </CardTitle>
+          <p className="truncate text-xs text-muted-foreground tabular-nums">
+            {facts.join(" · ")}
+          </p>
         </div>
-        <CardTitle className="truncate text-base" title={result.title}>
-          {result.title}
-        </CardTitle>
-        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-          {result.rating !== undefined ? <span>{result.rating.toFixed(1)} / 10</span> : null}
-          {result.votes !== undefined ? (
-            <span>{voteFormat.format(result.votes)} votes</span>
-          ) : null}
-          {result.certification ? <span>{result.certification}</span> : null}
-          {result.runtimeMinutes !== undefined ? (
-            <span>{formatRuntime(result.runtimeMinutes)}</span>
-          ) : null}
-          {result.network ? <span className="truncate">{result.network}</span> : null}
-        </div>
-      </CardHeader>
 
-      <CardContent className="flex flex-col gap-2 py-2">
         {result.overview ? (
           <p className="line-clamp-2 text-sm text-muted-foreground">{result.overview}</p>
         ) : null}
-        {result.kind === "series" && result.seasons?.length ? (
-          <p className="text-xs text-muted-foreground">
-            {result.seasons.length} {result.seasons.length === 1 ? "season" : "seasons"}
-          </p>
-        ) : null}
-      </CardContent>
 
-      <CardFooter className="mt-auto py-2">
-        {available ? (
-          <Button variant="secondary" size="sm" disabled className="w-full">
-            <CheckIcon data-icon="inline-start" />
-            Available
-          </Button>
-        ) : requested ? (
-          <Button variant="secondary" size="sm" disabled className="w-full">
-            <CheckIcon data-icon="inline-start" />
-            Requested
-          </Button>
-        ) : (
-          <Button
-            size="sm"
-            className="w-full"
-            disabled={requestDisabled || requesting}
-            onClick={() => onRequest(result)}
-          >
-            {requesting ? (
-              <Loader2Icon data-icon="inline-start" className="animate-spin" />
-            ) : (
-              <PlusIcon data-icon="inline-start" />
-            )}
-            {requesting ? "Requesting…" : "Request"}
-          </Button>
-        )}
-      </CardFooter>
+        <div className="mt-auto flex flex-col gap-1.5">
+          {result.inLibrary === null ? (
+            <p className="text-xs text-muted-foreground">Status unknown</p>
+          ) : null}
+          {available ? (
+            <StatusState icon={<CheckIcon />} label="Available" />
+          ) : requested ? (
+            <StatusState icon={<ClockIcon />} label="Requested" />
+          ) : (
+            <Button
+              size="sm"
+              className="w-full"
+              disabled={requestDisabled || requesting}
+              onClick={() => onRequest(result)}
+            >
+              {requesting ? (
+                <Loader2Icon data-icon="inline-start" className="animate-spin" />
+              ) : (
+                <PlusIcon data-icon="inline-start" />
+              )}
+              {requesting ? "Requesting…" : "Request"}
+            </Button>
+          )}
+        </div>
+      </div>
     </Card>
   );
 }
 
-const voteFormat = new Intl.NumberFormat("en", {
-  notation: "compact",
-  maximumFractionDigits: 1,
-});
-
-function formatRuntime(minutes: number): string {
-  if (minutes < 60) {
-    return `${minutes}m`;
-  }
-  const hours = Math.floor(minutes / 60);
-  const remainder = minutes % 60;
-  return remainder === 0 ? `${hours}h` : `${hours}h ${remainder}m`;
+function StatusState({ icon, label }: { icon: ReactNode; label: string }) {
+  return (
+    <div className="flex h-7 items-center gap-1.5 text-xs text-muted-foreground">
+      <span aria-hidden className="[&>svg]:size-3.5">
+        {icon}
+      </span>
+      {label}
+    </div>
+  );
 }

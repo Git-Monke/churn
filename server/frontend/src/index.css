@@ -197,3 +197,18 @@
     @apply font-sans;
     }
 }
+@layer utilities {
+  /* Hairline frame drawn from long dashes: border-style:dashed fixes the dash
+     length at ~3px in every engine, so the frame is painted as four repeating
+     gradients instead. Colour tracks --border, same as the page's rules. */
+  .dashed-frame {
+    background-image:
+      repeating-linear-gradient(to right, var(--border) 0 12px, transparent 12px 22px),
+      repeating-linear-gradient(to right, var(--border) 0 12px, transparent 12px 22px),
+      repeating-linear-gradient(to bottom, var(--border) 0 12px, transparent 12px 22px),
+      repeating-linear-gradient(to bottom, var(--border) 0 12px, transparent 12px 22px);
+    background-position: 0 0, 0 100%, 0 0, 100% 0;
+    background-size: 100% 1px, 100% 1px, 1px 100%, 1px 100%;
+    background-repeat: no-repeat;
+  }
+}

@@ -27,13 +27,8 @@ import {
   InputGroupAddon,
   InputGroupInput,
 } from "@/components/ui/input-group";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
-import { RequestOptionsPopover } from "@/features/search/RequestOptionsPopover";
-import {
-  SearchResultGrid,
-  SearchResultGridSkeleton,
-} from "@/features/search/SearchResultGrid";
+
+import { SearchResults, SearchResultsSkeleton } from "@/features/search/SearchResults";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useRequestDefaults } from "@/features/search/use-request-defaults";
 
@@ -41,9 +36,6 @@ interface RequestMutationVariables {
   input: CreateRequestInput;
   result: SearchResult;
 }
-
-/** Titles below this vote count are treated as noise until asked for. */
-const MIN_VISIBLE_VOTES = 20;
 
 export function SearchSection() {
   const [query, setQuery] = useState("");
@@ -58,7 +50,7 @@ export function SearchSection() {
     queryFn: fetchRequestOptions,
     staleTime: 5 * 60_000,
   });
-  const { defaults, update } = useRequestDefaults(optionsQuery.data);
+  const defaults = useRequestDefaults(optionsQuery.data);
 
   const searchQuery = useQuery({
     queryKey: ["search", term],
@@ -171,66 +163,32 @@ export function SearchSection() {
   }
 
   const searchData = searchQuery.data;
-  const allResults = searchData?.results ?? [];
-  const visibleResults = showNiche
-    ? allResults
-    : allResults.filter((result) => (result.votes ?? 0) >= MIN_VISIBLE_VOTES);
-  const hiddenCount = allResults.length - visibleResults.length;
+  const results = searchData?.results ?? [];
   const serviceNotices = searchData?.services.filter(
     (service) => service.state !== "ok" || service.detail,
   );
 
   return (
-    <section className="flex flex-col gap-4">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-        <div className="flex flex-col gap-1">
-          <h2 className="font-heading text-xl font-semibold tracking-tight">Search</h2>
-          <p className="text-sm text-muted-foreground">
-            Find movies in Radarr and shows in Sonarr, then request a download.
-          </p>
-        </div>
-        <div className="flex flex-col gap-2 sm:flex-row lg:items-center">
-          <InputGroup className="w-full sm:w-80">
-            <InputGroupAddon>
-              <SearchIcon />
-            </InputGroupAddon>
-            <InputGroupInput
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search movies and series…"
-              aria-label="Search movies and series"
-              autoComplete="off"
-            />
-            {searchQuery.isFetching ? (
-              <InputGroupAddon align="inline-end">
-                <Loader2Icon className="animate-spin" />
-              </InputGroupAddon>
-            ) : null}
-          </InputGroup>
-          <RequestOptionsPopover
-            options={optionsQuery.data}
-            loading={optionsQuery.isLoading}
-            error={optionsQuery.error}
-            defaults={defaults}
-            onChange={update}
-          />
-        </div>
-      </div>
-
-      {searchData ? (
-        <div className="flex items-center justify-end gap-2">
-          <Switch
-            id="show-niche-results"
-            size="sm"
-            checked={showNiche}
-            onCheckedChange={setShowNiche}
-          />
-          <Label htmlFor="show-niche-results" className="text-xs font-normal text-muted-foreground">
-            Show niche results
-            {hiddenCount > 0 ? ` (${hiddenCount} hidden)` : ""}
-          </Label>
-        </div>
-      ) : null}
+    <section className="flex flex-1 flex-col gap-6">
+      <h1 className="sr-only">Search</h1>
+      <InputGroup className="h-17 w-full rounded-none border-x-0 border-t-0 border-b border-border bg-transparent shadow-none dark:bg-transparent has-[[data-slot=input-group-control]:focus-visible]:border-primary has-[[data-slot=input-group-control]:focus-visible]:ring-0">
+        <InputGroupAddon className="pl-0">
+          <SearchIcon className="size-5" />
+        </InputGroupAddon>
+        <InputGroupInput
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Type your search here…"
+          aria-label="Search movies and series"
+          autoComplete="off"
+          className="h-full pl-3! text-lg caret-primary placeholder:text-muted-foreground md:text-lg"
+        />
+        {searchQuery.isFetching ? (
+          <InputGroupAddon align="inline-end" className="pr-0">
+            <Loader2Icon className="animate-spin" />
+          </InputGroupAddon>
+        ) : null}
+      </InputGroup>
 
       {serviceNotices?.map((service) => (
         <SearchServiceNotice key={service.id} service={service} />
@@ -244,39 +202,31 @@ export function SearchSection() {
         </Alert>
       ) : null}
 
-      {!searchEnabled && !searchData ? <SearchPrompt /> : null}
-      {searchEnabled && searchQuery.isLoading ? <SearchResultGridSkeleton /> : null}
+      {!searchEnabled ? (
+        <div className="flex min-h-90 flex-1 items-center justify-center dashed-frame px-6 py-12">
+          <p className="text-center text-sm text-muted-foreground">
+            Results will appear as you begin typing…
+          </p>
+        </div>
+      ) : null}
 
-      {searchEnabled && searchData && visibleResults.length > 0 ? (
-        <SearchResultGrid
-          results={visibleResults}
+      {searchEnabled && searchQuery.isLoading ? <SearchResultsSkeleton /> : null}
+
+      {searchEnabled && searchData && results.length > 0 ? (
+        <SearchResults
+          query={searchData.query}
+          results={results}
+          showNiche={showNiche}
+          onShowNicheChange={setShowNiche}
           onRequest={handleRequest}
           requestingKey={requestingKey}
           requestDisabled={optionsQuery.isLoading || requestMutation.isPending}
         />
       ) : null}
 
-      {searchEnabled && searchData && visibleResults.length === 0 && hiddenCount > 0 ? (
-        <Empty className="border">
-          <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <SearchIcon />
-            </EmptyMedia>
-            <EmptyTitle>
-              Only niche results for “{searchData.query}”
-            </EmptyTitle>
-            <EmptyDescription>
-              {hiddenCount} {hiddenCount === 1 ? "result has" : "results have"} fewer
-              than {MIN_VISIBLE_VOTES} votes. Turn on “Show niche results” to see
-              {hiddenCount === 1 ? " it" : " them"}.
-            </EmptyDescription>
-          </EmptyHeader>
-        </Empty>
-      ) : null}
-
       {searchEnabled &&
       searchData &&
-      searchData.results.length === 0 &&
+      results.length === 0 &&
       searchData.services.some((service) => service.state === "ok") ? (
         <Empty className="border">
           <EmptyHeader>
@@ -306,23 +256,6 @@ function SearchServiceNotice({ service }: { service: SearchServiceState }) {
         {service.detail ?? `Check that ${name} is running and its API key is configured.`}
       </AlertDescription>
     </Alert>
-  );
-}
-
-function SearchPrompt() {
-  return (
-    <Empty className="border">
-      <EmptyHeader>
-        <EmptyMedia variant="icon">
-          <SearchIcon />
-        </EmptyMedia>
-        <EmptyTitle>Find something to watch</EmptyTitle>
-        <EmptyDescription>
-          Search for a movie or series. Results come from Radarr and Sonarr and can be
-          requested in one click.
-        </EmptyDescription>
-      </EmptyHeader>
-    </Empty>
   );
 }
 

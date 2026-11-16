@@ -63,7 +63,7 @@ function Dashboard() {
   return (
     <div className="flex min-h-dvh w-full flex-col">
       <AppHeader route={route} />
-      <main className="mx-auto flex w-full max-w-content flex-1 flex-col gap-8 px-4 py-8 sm:px-6 lg:px-10">
+      <main className="mx-auto flex w-full max-w-content flex-1 flex-col gap-8 px-4 py-6 sm:px-6 lg:px-10">
         {route.page === "services" ? (
           <ServicesPage
             status={statusQuery.data}
@@ -108,7 +108,7 @@ function AppLoading() {
           <Skeleton className="ml-auto h-8 w-32" />
         </div>
       </div>
-      <div className="mx-auto flex w-full max-w-content flex-col gap-8 px-4 py-8 sm:px-6 lg:px-10">
+      <div className="mx-auto flex w-full max-w-content flex-col gap-8 px-4 py-6 sm:px-6 lg:px-10">
         <Skeleton className="h-64 w-full rounded-xl" />
       </div>
     </div>
