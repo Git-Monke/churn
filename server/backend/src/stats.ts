@@ -1,9 +1,16 @@
-import type { StatsDiskUsage, StatsQbittorrent } from "./types.js";
+import type { StatsDiskUsage, StatsQbittorrent, StatsTopItem } from "./types.js";
+import { parseMediaDownloadTag } from "./direct-grab.js";
 import type {
   QbittorrentMainData,
   QbittorrentServerState,
+  QbittorrentTorrent,
 } from "./upstream/qbittorrent.js";
-import type { ServarrDiskSpace, ServarrRootFolder } from "./upstream/servarr.js";
+import type {
+  ServarrDiskSpace,
+  ServarrMovieResource,
+  ServarrRootFolder,
+  ServarrSeriesResource,
+} from "./upstream/servarr.js";
 
 /**
  * Free space may come from qBittorrent (the filesystem downloads land on),
@@ -37,6 +44,88 @@ export function aggregateStats(input: StatsAggregationInput): StatsAggregate {
     result.disk = disk;
   }
   return result;
+}
+
+/** How many entries each stats list shows. */
+export const TOP_STATS_LIMIT = 5;
+
+export interface StatsLibrary {
+  series?: ServarrSeriesResource[];
+  movies?: ServarrMovieResource[];
+}
+
+/** Rank the torrents qBittorrent still knows about by lifetime transfer. */
+export function rankTorrents(
+  torrents: QbittorrentTorrent[] | undefined,
+  metric: "downloaded" | "uploaded",
+  library?: StatsLibrary,
+  limit = TOP_STATS_LIMIT,
+): StatsTopItem[] {
+  const titles = libraryTitles(library);
+  const entries = (torrents ?? [])
+    .map((torrent) => {
+      const media = parseMediaDownloadTag(torrent.tags);
+      const mapped = media ? titles.get(`${media.kind}:${media.arrId}`) : undefined;
+      return {
+        name: mapped ?? torrent.name ?? "Untitled torrent",
+        bytes: nonNegative(torrent[metric]) ?? 0,
+        ...(media ? { kind: media.kind } : {}),
+        ...(mapped && torrent.name ? { detail: torrent.name } : {}),
+      };
+    })
+    .filter((entry) => entry.bytes > 0);
+
+  // A mapped title alone cannot tell two season packs apart; keep the release
+  // name only for those collisions so unique titles stay clean.
+  const titleCounts = new Map<string, number>();
+  for (const entry of entries) {
+    titleCounts.set(entry.name, (titleCounts.get(entry.name) ?? 0) + 1);
+  }
+
+  return entries
+    .map((entry) =>
+      entry.detail && titleCounts.get(entry.name) === 1
+        ? { name: entry.name, bytes: entry.bytes, ...(entry.kind ? { kind: entry.kind } : {}) }
+        : entry,
+    )
+    .sort((a, b) => b.bytes - a.bytes)
+    .slice(0, limit);
+}
+
+/** Rank Sonarr series and Radarr movies by the bytes each occupies. */
+export function rankStorage(
+  library: StatsLibrary | undefined,
+  limit = TOP_STATS_LIMIT,
+): StatsTopItem[] {
+  const entries: StatsTopItem[] = [];
+  for (const series of library?.series ?? []) {
+    const bytes = nonNegative(series.statistics?.sizeOnDisk) ?? 0;
+    if (bytes > 0 && series.title) {
+      entries.push({ name: series.title, bytes, kind: "series" });
+    }
+  }
+  for (const movie of library?.movies ?? []) {
+    const bytes = nonNegative(movie.statistics?.sizeOnDisk) ?? 0;
+    if (bytes > 0 && movie.title) {
+      entries.push({ name: movie.title, bytes, kind: "movie" });
+    }
+  }
+  return entries.sort((a, b) => b.bytes - a.bytes).slice(0, limit);
+}
+
+function libraryTitles(library: StatsLibrary | undefined): Map<string, string> {
+  const titles = new Map<string, string>();
+  for (const series of library?.series ?? []) {
+    if (series.id !== undefined && series.title) {
+      titles.set(`series:${series.id}`, series.title);
+    }
+  }
+  for (const movie of library?.movies ?? []) {
+    if (movie.id !== undefined && movie.title) {
+      titles.set(`movie:${movie.id}`, movie.title);
+    }
+  }
+  return titles;
 }
 
 export function parseTransferTotals(

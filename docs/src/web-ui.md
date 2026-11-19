@@ -1,13 +1,15 @@
 # Web dashboard
 
 The dashboard is a TypeScript app under `server/` with two workspaces. It has
-three pages — Services, Library and Search — selected by hash routes
-(`#/services`, `#/library`, `#/search`). An empty or unknown hash lands on the
+three pages — Library, Search and Status — selected by hash routes
+(`#/library`, `#/search`, `#/services`). An empty or unknown hash lands on the
 library (`#/library`). The selected season lives in the URL
 (`#/library/show/<source>/<id>/season/<n>`), and the player records
-where it was opened from so it can return to that season. Services has
-**Services** and **VPN** tabs; the VPN tab runs a live test when opened and on
-demand.
+where it was opened from so it can return to that season. Status is available
+to every signed-in user and has **Services**, **Stats** and **VPN** tabs; the
+VPN tab runs a live test when opened and on demand. Stats ranks the torrents
+with the most downloaded and uploaded bytes, and the Sonarr/Radarr titles using
+the most disk space, from live upstream data.
 
 ```
 server/backend/    Fastify API, also serves frontend/dist
@@ -154,6 +156,7 @@ uses the signed-in user's Jellyfin session token rather than a static token in
 | `POST /api/auth/logout` | Destroy the session and clear the cookie |
 | `GET /api/auth/session` | Current session state (200 when signed out) |
 | `GET /api/status` | Service health, version and latency |
+| `GET /api/stats` | All-time transfer totals, disk usage, and top downloads, uploads and library titles by size |
 | `GET /api/vpn` | On-demand VPN leak test from the torrent stack's protected namespace |
 | `GET /api/library` | Jellyfin movies and series with provider ids and `addedBy`, scoped to the user's library views |
 | `GET /api/library/images/:itemId` | Image proxy for posters, episode stills and 16:9 backdrops; `?tag=`, `?type=Primary\|Backdrop`, `?maxWidth=`, `?maxHeight=` |

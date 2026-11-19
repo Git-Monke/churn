@@ -5,6 +5,8 @@ import {
   aggregateStats,
   isPathWithin,
   parseTransferTotals,
+  rankStorage,
+  rankTorrents,
   selectDiskSpace,
 } from "../src/stats.js";
 
@@ -73,6 +75,68 @@ describe("stats aggregation", () => {
       totalUploadedBytes: 0,
     });
     expect(parseTransferTotals({})).toBeUndefined();
+  });
+});
+
+describe("library rankings", () => {
+  const library = {
+    series: [{ id: 2, title: "Example Show", statistics: { sizeOnDisk: 700 } }],
+    movies: [{ id: 1, title: "Big Movie", statistics: { sizeOnDisk: 900 } }],
+  };
+
+  it("ranks tagged torrents by the requested metric and maps them to titles", () => {
+    const torrents = [
+      { name: "Big.Movie.2160p", downloaded: 500, uploaded: 50, tags: "churn-movie-1" },
+      { name: "Show.S01", downloaded: 200, uploaded: 400, tags: "churn-series-2" },
+      { name: "Show.S02", downloaded: 50, uploaded: 0, tags: "churn-series-2" },
+      { name: "Unknown.Release", downloaded: 100, uploaded: 0 },
+      { name: "Empty", downloaded: 0, uploaded: 0 },
+    ];
+
+    expect(rankTorrents(torrents, "downloaded", library)).toEqual([
+      { name: "Big Movie", bytes: 500, kind: "movie" },
+      { name: "Example Show", bytes: 200, kind: "series", detail: "Show.S01" },
+      { name: "Unknown.Release", bytes: 100 },
+      { name: "Example Show", bytes: 50, kind: "series", detail: "Show.S02" },
+    ]);
+    expect(rankTorrents(torrents, "uploaded", library)).toEqual([
+      { name: "Example Show", bytes: 400, kind: "series" },
+      { name: "Big Movie", bytes: 50, kind: "movie" },
+    ]);
+  });
+
+  it("limits lists and tolerates missing torrent data", () => {
+    expect(rankTorrents(undefined, "downloaded", library)).toEqual([]);
+    expect(rankTorrents([], "uploaded", library)).toEqual([]);
+    expect(
+      rankTorrents(
+        [
+          { name: "A", downloaded: 1 },
+          { name: "B", downloaded: 2 },
+          { name: "C", downloaded: 3 },
+        ],
+        "downloaded",
+        undefined,
+        2,
+      ),
+    ).toEqual([
+      { name: "C", bytes: 3 },
+      { name: "B", bytes: 2 },
+    ]);
+  });
+
+  it("ranks series and movies together by size on disk", () => {
+    expect(rankStorage(library)).toEqual([
+      { name: "Big Movie", bytes: 900, kind: "movie" },
+      { name: "Example Show", bytes: 700, kind: "series" },
+    ]);
+    expect(
+      rankStorage({
+        series: [{ id: 3, title: "No Files", statistics: { sizeOnDisk: 0 } }],
+        movies: [],
+      }),
+    ).toEqual([]);
+    expect(rankStorage(undefined)).toEqual([]);
   });
 });
 

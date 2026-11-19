@@ -77,7 +77,7 @@ export interface StatusResponse {
   services: ServiceStatus[];
 }
 
-export type StatsSource = "qbittorrent" | "disk";
+export type StatsSource = "qbittorrent" | "disk" | "library";
 
 export interface StatsSourceError {
   source: StatsSource;
@@ -96,10 +96,20 @@ export interface StatsDiskUsage {
   usedPercent: number;
 }
 
+export interface StatsTopItem {
+  name: string;
+  bytes: number;
+  kind?: "movie" | "series";
+  detail?: string;
+}
+
 export interface StatsResponse {
   checkedAt: string;
   qbittorrent?: StatsQbittorrent;
   disk?: StatsDiskUsage;
+  topDownloads?: StatsTopItem[];
+  topUploads?: StatsTopItem[];
+  topStorage?: StatsTopItem[];
   errors: StatsSourceError[];
 }
 

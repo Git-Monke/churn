@@ -15,7 +15,7 @@ export function StorageDonut({ disk }: { disk: StatsDiskUsage }) {
   )} used of ${formatBytes(disk.totalBytes)}, ${formatBytes(disk.freeBytes)} free`;
 
   return (
-    <div className="relative size-40 shrink-0" role="img" aria-label={label}>
+    <div className="relative size-48 shrink-0" role="img" aria-label={label}>
       <svg viewBox="0 0 120 120" className="size-full -rotate-90">
         <circle
           cx="60"

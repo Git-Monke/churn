@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 
 import type { AppConfig } from "../config.js";
 import { UpstreamError } from "../errors.js";
-import { aggregateStats } from "../stats.js";
+import { aggregateStats, rankStorage, rankTorrents } from "../stats.js";
 import type { StatsResponse, StatsSource, StatsSourceError } from "../types.js";
 import { createQbittorrentClient } from "../upstream/qbittorrent.js";
 import {
@@ -21,13 +21,31 @@ export function registerStatsRoutes(app: FastifyInstance, config: AppConfig): vo
     reply.header("cache-control", "no-store");
     const checkedAt = new Date().toISOString();
 
-    // qBittorrent supplies the all-time totals and free space; Sonarr/Radarr
-    // supply total capacity for the same /data volume. Let either side fail
-    // without blanking the whole stats page.
-    const [qbittorrentResult, diskResult] = await Promise.allSettled([
-      createQbittorrentClient(config.qbittorrent, config.requestTimeoutMs).getMainData(),
-      loadDiskSource(config),
-    ]);
+    // qBittorrent supplies the all-time totals, per-torrent transfer and free
+    // space; Sonarr/Radarr supply total capacity and per-title storage. Let any
+    // source fail without blanking the whole stats page.
+    const qbittorrent = createQbittorrentClient(
+      config.qbittorrent,
+      config.requestTimeoutMs,
+    );
+    const sonarr = createArrClient(
+      "sonarr",
+      config.services.sonarr,
+      config.requestTimeoutMs,
+    );
+    const radarr = createArrClient(
+      "radarr",
+      config.services.radarr,
+      config.requestTimeoutMs,
+    );
+    const [qbittorrentResult, torrentsResult, diskResult, seriesResult, moviesResult] =
+      await Promise.allSettled([
+        qbittorrent.getMainData(),
+        qbittorrent.getTorrents(),
+        loadDiskSource(config),
+        sonarr.listSeries(),
+        radarr.listMovies(),
+      ]);
 
     const errors: StatsSourceError[] = [];
     const mainData =
@@ -39,11 +57,36 @@ export function registerStatsRoutes(app: FastifyInstance, config: AppConfig): vo
       });
     }
 
+    const torrents =
+      torrentsResult.status === "fulfilled" ? torrentsResult.value : undefined;
+    if (torrentsResult.status === "rejected") {
+      errors.push({
+        source: "qbittorrent",
+        message: sourceErrorMessage("qbittorrent", torrentsResult.reason),
+      });
+    }
+
     const diskData = diskResult.status === "fulfilled" ? diskResult.value : undefined;
     if (diskResult.status === "rejected") {
       errors.push({
         source: "disk",
         message: sourceErrorMessage("disk", diskResult.reason),
+      });
+    }
+
+    const series = seriesResult.status === "fulfilled" ? seriesResult.value : undefined;
+    if (seriesResult.status === "rejected") {
+      errors.push({
+        source: "library",
+        message: sourceErrorMessage("library", seriesResult.reason),
+      });
+    }
+
+    const movies = moviesResult.status === "fulfilled" ? moviesResult.value : undefined;
+    if (moviesResult.status === "rejected") {
+      errors.push({
+        source: "library",
+        message: sourceErrorMessage("library", moviesResult.reason),
       });
     }
 
@@ -62,7 +105,24 @@ export function registerStatsRoutes(app: FastifyInstance, config: AppConfig): vo
       errors.push({ source: "disk", message: "No disk capacity was reported" });
     }
 
-    const response: StatsResponse = { checkedAt, ...aggregate, errors };
+    const library = { series, movies };
+    const uniqueErrors = [
+      ...new Map(errors.map((error) => [`${error.source}:${error.message}`, error])).values(),
+    ];
+    const response: StatsResponse = {
+      checkedAt,
+      ...aggregate,
+      ...(torrents !== undefined
+        ? {
+            topDownloads: rankTorrents(torrents, "downloaded", library),
+            topUploads: rankTorrents(torrents, "uploaded", library),
+          }
+        : {}),
+      ...(series !== undefined || movies !== undefined
+        ? { topStorage: rankStorage(library) }
+        : {}),
+      errors: uniqueErrors,
+    };
     return response;
   });
 }
@@ -99,7 +159,11 @@ function sourceErrorMessage(source: StatsSource, error: unknown): string {
   if (error instanceof UpstreamError) {
     return error.message;
   }
-  return source === "qbittorrent"
-    ? "Could not read qBittorrent stats"
-    : "Could not read disk space from Sonarr or Radarr";
+  if (source === "qbittorrent") {
+    return "Could not read qBittorrent stats";
+  }
+  if (source === "library") {
+    return "Could not read media sizes from Sonarr or Radarr";
+  }
+  return "Could not read disk space from Sonarr or Radarr";
 }

@@ -1,4 +1,4 @@
-import { ChevronDownIcon, LogOutIcon, MonitorCogIcon, UsersIcon } from "lucide-react";
+import { ChevronDownIcon, LogOutIcon, UsersIcon } from "lucide-react";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,7 @@ interface AppHeaderProps {
 const NAV_ITEMS = [
   { page: "library", label: "Library", href: "#/library" },
   { page: "search", label: "Find something new", href: "#/search" },
+  { page: "services", label: "Status", href: "#/services" },
 ] as const;
 
 export function AppHeader({ route }: AppHeaderProps) {
@@ -92,12 +93,6 @@ export function AppHeader({ route }: AppHeaderProps) {
                   <>
                     <DropdownMenuSeparator />
                     <DropdownMenuGroup>
-                      <DropdownMenuItem asChild>
-                        <a href="#/services">
-                          <MonitorCogIcon />
-                          Services
-                        </a>
-                      </DropdownMenuItem>
                       <DropdownMenuItem asChild>
                         <a href="#/people">
                           <UsersIcon />

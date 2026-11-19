@@ -64,6 +64,14 @@ export interface ServarrSeriesStatistics {
   episodeCount?: number;
   totalEpisodeCount?: number;
   percentOfEpisodes?: number;
+  /** Bytes the series occupies on disk. */
+  sizeOnDisk?: number;
+}
+
+export interface ServarrMovieStatistics {
+  movieFileCount?: number;
+  /** Bytes the movie occupies on disk. */
+  sizeOnDisk?: number;
 }
 
 export interface ServarrLookupBase {
@@ -95,6 +103,7 @@ export interface ServarrMovieResource extends ServarrLookupBase {
   studio?: string;
   tmdbId?: number;
   hasFile?: boolean;
+  statistics?: ServarrMovieStatistics;
   ratings?: {
     imdb?: ServarrRating;
     tmdb?: ServarrRating;

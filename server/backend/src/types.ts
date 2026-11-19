@@ -20,7 +20,7 @@ export interface StatusResponse {
   services: ServiceStatus[];
 }
 
-export type StatsSource = "qbittorrent" | "disk";
+export type StatsSource = "qbittorrent" | "disk" | "library";
 
 export interface StatsSourceError {
   source: StatsSource;
@@ -42,10 +42,25 @@ export interface StatsDiskUsage {
   usedPercent: number;
 }
 
+export interface StatsTopItem {
+  name: string;
+  bytes: number;
+  /** Set when the torrent or library entry maps to a Sonarr/Radarr title. */
+  kind?: "movie" | "series";
+  /** Torrent release name when `name` is the mapped library title. */
+  detail?: string;
+}
+
 export interface StatsResponse {
   checkedAt: string;
   qbittorrent?: StatsQbittorrent;
   disk?: StatsDiskUsage;
+  /** Top torrents by downloaded bytes. */
+  topDownloads?: StatsTopItem[];
+  /** Top torrents by uploaded bytes. */
+  topUploads?: StatsTopItem[];
+  /** Largest Sonarr series and Radarr movies by `statistics.sizeOnDisk`. */
+  topStorage?: StatsTopItem[];
   /** Sources that could not be read; the rest of the response is still valid. */
   errors: StatsSourceError[];
 }

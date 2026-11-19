@@ -13,6 +13,10 @@ export interface QbittorrentTorrent {
   progress?: number;
   size?: number;
   amount_left?: number;
+  /** Total bytes downloaded for this torrent. */
+  downloaded?: number;
+  /** Total bytes uploaded for this torrent. */
+  uploaded?: number;
   /** Current download speed in bytes/second. */
   dlspeed?: number;
   /** Current upload speed in bytes/second. */

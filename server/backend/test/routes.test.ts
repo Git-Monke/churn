@@ -492,6 +492,39 @@ describe("stats", () => {
       if (url.endsWith("/api/v3/rootfolder")) {
         return jsonResponse([{ path: "/data/media/tv", accessible: true }]);
       }
+      if (url.endsWith("/api/v2/torrents/info")) {
+        return jsonResponse([
+          {
+            name: "Big.Movie.2024.2160p",
+            downloaded: 500,
+            uploaded: 50,
+            tags: "churn-movie-1",
+          },
+          {
+            name: "Show.S01.1080p",
+            downloaded: 200,
+            uploaded: 400,
+            tags: "churn-series-2",
+          },
+          {
+            name: "Show.S02.1080p",
+            downloaded: 50,
+            uploaded: 0,
+            tags: "churn-series-2",
+          },
+          { name: "Unknown.Release", downloaded: 100, uploaded: 0 },
+        ]);
+      }
+      if (url.endsWith("/api/v3/series")) {
+        return jsonResponse([
+          { id: 2, title: "Example Show", statistics: { sizeOnDisk: 700 } },
+        ]);
+      }
+      if (url.endsWith("/api/v3/movie")) {
+        return jsonResponse([
+          { id: 1, title: "Big Movie", statistics: { sizeOnDisk: 900 } },
+        ]);
+      }
       throw new Error(`unexpected URL ${url}`);
     });
 
@@ -508,6 +541,20 @@ describe("stats", () => {
       disk: { totalBytes: 2_000, freeBytes: 500, usedBytes: 1_500, usedPercent: 75 },
       errors: [],
     });
+    expect(body.topDownloads).toEqual([
+      { name: "Big Movie", bytes: 500, kind: "movie" },
+      { name: "Example Show", bytes: 200, kind: "series", detail: "Show.S01.1080p" },
+      { name: "Unknown.Release", bytes: 100 },
+      { name: "Example Show", bytes: 50, kind: "series", detail: "Show.S02.1080p" },
+    ]);
+    expect(body.topUploads).toEqual([
+      { name: "Example Show", bytes: 400, kind: "series" },
+      { name: "Big Movie", bytes: 50, kind: "movie" },
+    ]);
+    expect(body.topStorage).toEqual([
+      { name: "Big Movie", bytes: 900, kind: "movie" },
+      { name: "Example Show", bytes: 700, kind: "series" },
+    ]);
     await app.close();
   });
 
@@ -521,6 +568,14 @@ describe("stats", () => {
       }
       if (url.endsWith("/api/v3/rootfolder")) {
         return jsonResponse([{ path: "/data/media/tv", accessible: true }]);
+      }
+      if (url.endsWith("/api/v3/series")) {
+        return jsonResponse([
+          { id: 2, title: "Example Show", statistics: { sizeOnDisk: 700 } },
+        ]);
+      }
+      if (url.endsWith("/api/v3/movie")) {
+        return jsonResponse([]);
       }
       throw new Error(`unexpected URL ${url}`);
     });
@@ -539,6 +594,11 @@ describe("stats", () => {
       usedPercent: 70,
     });
     expect(body.qbittorrent).toBeUndefined();
+    expect(body.topDownloads).toBeUndefined();
+    expect(body.topUploads).toBeUndefined();
+    expect(body.topStorage).toEqual([
+      { name: "Example Show", bytes: 700, kind: "series" },
+    ]);
     expect(body.errors).toEqual([
       { source: "qbittorrent", message: "qbittorrent is unreachable" },
     ]);
