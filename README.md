@@ -139,10 +139,10 @@ answer. The two paths are then checked together: the download directory may not
 be the media directory or live inside it, because Jellyfin would index files
 that are still downloading and partial files would appear in the library.
 
-Point `MEDIA_DIR` at an existing library to adopt it in place — no copy and no
-folder restructuring. Jellyfin types each item itself, so one mixed library at
-the media root covers both films and shows; `movies/` and `tv/` exist only as
-Sonarr/Radarr root folders for new downloads.
+Point `MEDIA_DIR` at an existing library to adopt it in place — no copy. Jellyfin
+indexes `movies/` and `tv/` as two typed libraries, though, so existing films and
+shows need to live in those two folders. Anything beside them is left alone but
+not indexed, and churn says so during setup.
 
 Answers are shared between installers, so selecting both roles asks for the
 storage paths once. Reruns prefill previous answers and reuse them if you press
@@ -398,14 +398,14 @@ develop; set `PORT` to move it, and the Vite proxy follows.
 
 After the server stack starts, churn completes Jellyfin's first-run setup,
 creates an API key named `churn`, and writes it to `server/.env` as
-`JELLYFIN_API_KEY`. It also makes sure one mixed library covers `/data/media`
-(Jellyfin types each item itself, so movies and TV can share a library root),
-reusing a library that already covers it — or sits inside it, as an install
-from before the split does — and removes any `/data` library path so Jellyfin
-does not index qBittorrent's in-progress downloads. It
-also adds the private LAN ranges and Tailscale's `100.64.0.0/10` range to
-Jellyfin's LAN networks, so tailnet clients can stream directly from Jellyfin
-while remote access stays disabled. The installer asks for a Jellyfin admin
+`JELLYFIN_API_KEY`. It makes sure `Movies` and `Shows` libraries cover
+`/data/media/movies` and `/data/media/tv`, with real-time monitoring on,
+internet metadata on and `.nfo` writing off; a library that already points at
+either folder is reused as it is. It also removes any `/data` library path so
+Jellyfin does not index qBittorrent's in-progress downloads, and adds the
+private LAN ranges and Tailscale's `100.64.0.0/10` range to Jellyfin's LAN
+networks, so tailnet clients can stream directly from Jellyfin while remote
+access stays disabled. The installer asks for a Jellyfin admin
 username and password when needed; the password is not saved. Reruns reuse a
 valid key. Sonarr and Radarr keys are read automatically from
 `server/config/*/config.xml`.
@@ -677,8 +677,9 @@ They are wired up automatically by `prowlarr-init`. The `server` stack also
 runs `server-init`, which creates `/data/media/tv` and `/data/media/movies`
 inside the media directory, sets their ownership to `PUID`/`PGID`, and
 registers them as the Sonarr/Radarr root folders. It waits for both APIs and is
-idempotent. Add media under those directories; Jellyfin indexes the whole media
-root as one mixed library and works out what each item is.
+idempotent. Add media under those directories: Jellyfin indexes `movies/` and
+`tv/` as two typed libraries, and anything else under the media directory is not
+indexed.
 
 `prowlarr-init` reads the Sonarr/Radarr API keys from `../server/config`, so it
 expects both stacks on **one machine**. The installer starts `server` before

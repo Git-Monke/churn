@@ -45,8 +45,9 @@ dashboard binds `127.0.0.1` in the shipped defaults.
 - Household profiles: the admin adds a person, which creates a Jellyfin user and a
 one-time PIN the person replaces with their own password. Sign-in is a Jellyfin
 login; sessions last 12 hours of inactivity and survive restarts.
-- One mixed Jellyfin library over `/data/media`; qBittorrent's in-progress downloads
-sit outside it so Jellyfin never indexes them.
+- Two typed Jellyfin libraries, `Movies` over `/data/media/movies` and `Shows` over
+`/data/media/tv`; qBittorrent's in-progress downloads sit outside the media
+directory so Jellyfin never indexes them.
 - The torrent side runs inside a user-supplied VPN, with public indexers plus
 FlareSolverr for Cloudflare-fronted sites.
 - Objects the interface handles: movies; shows with seasons and episodes; releases

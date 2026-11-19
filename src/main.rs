@@ -930,6 +930,7 @@ fn ensure_directories(answers: &Answers, assume_yes: bool, dry_run: bool) -> io:
             }
             create_if_missing(&subdir, assume_yes, dry_run)?;
         }
+        warn_unindexed_media(path)?;
         let answers_owner = stack::stack_owner(path, download.as_deref().unwrap_or(path));
         if let Some(warning) = stack::storage_warning(path, answers_owner) {
             log::warning(warning)?;
@@ -975,6 +976,31 @@ fn create_if_missing(path: &Path, assume_yes: bool, dry_run: bool) -> io::Result
             format!("declined to create {}", path.display()),
         ))
     }
+}
+
+/// Point out media beside `movies/` and `tv/` that Jellyfin will never show.
+///
+/// The two typed libraries index those two folders exactly. An adopted library
+/// with other folders beside them keeps its files, but nothing in the stack
+/// will index them, and silence would make the missing shows look like a bug.
+fn warn_unindexed_media(media: &Path) -> io::Result<()> {
+    let Ok(entries) = fs::read_dir(media) else {
+        return Ok(());
+    };
+    let mut outside: Vec<String> = entries
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().is_dir())
+        .filter_map(|entry| entry.file_name().to_str().map(str::to_string))
+        .filter(|name| name != "movies" && name != "tv")
+        .collect();
+    outside.sort();
+    for name in outside {
+        log::warning(format!(
+            "{}/{name} is not inside movies/ or tv/, so Jellyfin will not index it",
+            media.display()
+        ))?;
+    }
+    Ok(())
 }
 
 fn show_plan(chosen: &[Stack], questions: &[Question], answers: &Answers) -> io::Result<()> {

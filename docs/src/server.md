@@ -38,9 +38,10 @@ Jellyfin still reads `/data/media`, and Sonarr/Radarr still use `/data` and
 `/data/media` for their libraries and completed downloads. No path translation
 is needed between the two stacks.
 
-Pointing `MEDIA_DIR` at an existing library adopts it in place — no copy and no
-folder restructuring. Jellyfin types each item itself, so one mixed library at
-the media root covers both films and shows.
+Pointing `MEDIA_DIR` at an existing library adopts it in place — no copy — but
+Jellyfin indexes `movies/` and `tv/` as two typed libraries, so existing films
+and shows need to be in those two folders. churn warns about anything beside
+them, which Jellyfin will not index.
 
 An install from before the split stored a single path under `DATA_DIR`. churn
 still reads that key as the download directory, so a rerun keeps the existing
@@ -66,13 +67,12 @@ docker compose run --rm server-init
 Do **not** add `/data` itself as a Jellyfin library root. qBittorrent saves
 downloads under `/data` and incomplete files under `/data/incomplete`, so a
 root-level library makes Jellyfin index media that is still downloading.
-Churn makes sure one mixed library covers `/data/media` — Jellyfin types each
-item itself, so movies and TV share a library root and the `movies/` and `tv/`
-folders exist only as arr root folders. A library that already covers the media
-root, or sits inside it (as an install from before the split does with separate
-`Movies` and `Shows` libraries), is reused rather than duplicated, because
-Jellyfin does not support nested library paths. Any `/data` library path is
-removed, and the whole thing is safe to rerun.
+Churn makes sure `Movies` and `Shows` libraries cover `/data/media/movies` and
+`/data/media/tv` — two typed libraries, so Jellyfin never has to guess whether a
+folder is a film or a series. Both are configured to watch for changes, fetch
+identities from the internet and not write `.nfo` files next to the media, and a
+library that already points at either folder is reused. Any `/data` library path
+is removed, and the whole thing is safe to rerun.
 
 churn also adds the private LAN ranges and Tailscale's `100.64.0.0/10` range to
 Jellyfin's LAN networks, so tailnet clients can stream video directly from
