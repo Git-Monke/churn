@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   CircleAlertIcon,
@@ -13,9 +14,18 @@ import type { VpnCheck, VpnStatusResponse } from "@/api/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
-import { Skeleton } from "@/components/ui/skeleton";
+
+/**
+ * The probe list the agent runs, in order. Only used while a test is in flight,
+ * to name what the run is doing before its payload exists.
+ */
+const PENDING_CHECKS = [
+  { label: "Exit route", proof: "Traffic leaves through the tunnel's public address" },
+  { label: "Kill switch", proof: "Direct egress on eth0 is refused" },
+  { label: "DNS", proof: "Queries resolve through Gluetun, not your ISP" },
+  { label: "IPv6", proof: "No IPv6 path bypasses the tunnel" },
+  { label: "Firewall", proof: "Only local addresses are exempt from the firewall" },
+];
 
 export function VpnStatusPanel() {
   const query = useQuery({
@@ -24,19 +34,13 @@ export function VpnStatusPanel() {
     staleTime: 60_000,
     refetchOnWindowFocus: false,
   });
+  const run = () => void query.refetch();
 
-  if (query.isLoading && !query.data) {
+  if (query.isFetching) {
     return (
       <section className="flex flex-col gap-3">
-        <SectionHeading
-          title="VPN"
-          description="Live proof that qBittorrent traffic stays inside the VPN tunnel"
-        />
-        <Skeleton className="h-40 rounded-xl" />
-        <div className="grid gap-4 md:grid-cols-2">
-          <Skeleton className="h-64 rounded-xl" />
-          <Skeleton className="h-64 rounded-xl" />
-        </div>
+        <PanelHeading running />
+        <RunningReport />
       </section>
     );
   }
@@ -44,32 +48,19 @@ export function VpnStatusPanel() {
   if (query.isError && !query.data) {
     return (
       <section className="flex flex-col gap-3">
-        <SectionHeading
-          title="VPN"
-          description="Live proof that qBittorrent traffic stays inside the VPN tunnel"
-        />
+        <PanelHeading onRun={run} />
         <Alert variant="destructive">
           <CircleAlertIcon />
-          <AlertTitle>Could not reach the VPN status agent</AlertTitle>
+          <AlertTitle>Could not run the VPN test</AlertTitle>
           <AlertDescription className="flex flex-col items-start gap-3">
             <p>{query.error.message}</p>
-            <p>
-              The check runs inside the torrent stack. Start its agent and try again:
-            </p>
+            <p>The test runs inside the torrent stack. Start its agent and run it again:</p>
             <code className="rounded-md bg-muted px-2 py-1 font-mono text-xs">
               cd torrent && docker compose up -d vpn-status
             </code>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => void query.refetch()}
-              disabled={query.isFetching}
-            >
-              <RefreshCwIcon
-                data-icon="inline-start"
-                className={query.isFetching ? "animate-spin" : undefined}
-              />
-              Try again
+            <Button variant="outline" size="sm" onClick={run}>
+              <RefreshCwIcon data-icon="inline-start" />
+              Run test
             </Button>
           </AlertDescription>
         </Alert>
@@ -83,256 +74,271 @@ export function VpnStatusPanel() {
   }
 
   return (
-    <section className="flex flex-col gap-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <SectionHeading
-          title="VPN"
-          description="Live proof that qBittorrent traffic stays inside the VPN tunnel"
-        />
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => void query.refetch()}
-          disabled={query.isFetching}
-        >
-          <RefreshCwIcon
-            data-icon="inline-start"
-            className={query.isFetching ? "animate-spin" : undefined}
-          />
-          {query.isFetching ? "Testing…" : "Run test again"}
-        </Button>
-      </div>
-
+    <section className="flex flex-col gap-3">
+      <PanelHeading onRun={run} />
       {query.isError ? (
         <Alert variant="destructive">
           <CircleAlertIcon />
           <AlertTitle>Could not refresh the VPN test</AlertTitle>
           <AlertDescription>
-            Showing the last successful result from {formatCheckedAt(data.checkedAt)}.{" "}
-            {query.error.message}
+            Showing the result from {formatCheckedAt(data.checkedAt)}. {query.error.message}
           </AlertDescription>
         </Alert>
       ) : null}
-
-      {data.secure ? <ProtectedBanner data={data} /> : <LeakBanner data={data} />}
-      {data.secure ? <CoverageWarning data={data} /> : null}
-
-      <DataPoints data={data} />
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Boundary checks</CardTitle>
-          <CardDescription>
-            Every check runs inside the same network namespace as qBittorrent.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3">
-          {data.checks.map((check) => (
-            <CheckRow key={check.id} check={check} />
-          ))}
-        </CardContent>
-      </Card>
-
-      <div className="flex flex-col gap-3">
-        <div className="flex flex-col gap-1">
-          <h3 className="font-heading text-base font-semibold">Container coverage</h3>
-          <p className="text-sm text-muted-foreground">
-            These loopback services answered from the protected namespace.
-          </p>
-        </div>
-        <div className="grid gap-3 md:grid-cols-3">
-          {data.coverage.map((entry) => (
-            <Card key={entry.id} size="sm">
-              <CardContent className="flex items-center gap-3">
-                <span
-                  className={
-                    entry.reachable
-                      ? "size-2.5 shrink-0 rounded-full bg-emerald-500"
-                      : "size-2.5 shrink-0 rounded-full bg-muted-foreground/40"
-                  }
-                />
-                <div className="flex flex-col">
-                  <span className="font-medium">{entry.name}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {entry.reachable ? "Shares the protected namespace" : "Not running"}
-                  </span>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      </div>
-
-      <p className="text-xs text-muted-foreground">
-        Checked {formatCheckedAt(data.checkedAt)} · took {formatDuration(data.durationMs)}
-      </p>
+      <Report data={data} />
     </section>
   );
 }
 
-function ProtectedBanner({ data }: { data: VpnStatusResponse }) {
+function PanelHeading({ running, onRun }: { running?: boolean; onRun?: () => void }) {
   return (
-    <Card className="bg-emerald-500/5 ring-emerald-500/30">
-      <CardContent className="flex items-start gap-3">
-        <span className="rounded-full bg-emerald-500/15 p-2 text-emerald-500">
-          <ShieldCheckIcon className="size-6" />
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+      <div className="flex flex-col gap-1">
+        <h2 className="font-heading text-xl font-semibold tracking-tight">VPN</h2>
+        <p className="text-sm text-muted-foreground">
+          A live leak test, run inside the same network namespace as qBittorrent.
+        </p>
+      </div>
+      {onRun || running ? (
+        <Button
+          variant="outline"
+          size="sm"
+          className="self-start sm:self-auto"
+          onClick={onRun}
+          disabled={running}
+        >
+          <RefreshCwIcon
+            data-icon="inline-start"
+            className={running ? "animate-spin motion-reduce:animate-none" : undefined}
+          />
+          {running ? "Testing…" : "Run test"}
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
+function Report({ data }: { data: VpnStatusResponse }) {
+  const failed = data.checks.filter((check) => !check.passed);
+  const unreachable = data.coverage.filter((entry) => !entry.reachable);
+
+  return (
+    <div className="overflow-hidden rounded-xl bg-card text-sm ring-1 ring-foreground/10">
+      <div
+        className={
+          data.secure
+            ? "flex items-start gap-4 border-b border-emerald-500/20 bg-emerald-500/[0.06] px-5 py-5"
+            : "flex items-start gap-4 border-b border-destructive/25 bg-destructive/[0.06] px-5 py-5"
+        }
+      >
+        <span
+          className={
+            data.secure
+              ? "rounded-full bg-emerald-500/15 p-2 text-emerald-500"
+              : "rounded-full bg-destructive/15 p-2 text-destructive"
+          }
+        >
+          {data.secure ? (
+            <ShieldCheckIcon className="size-6" aria-hidden="true" />
+          ) : (
+            <ShieldAlertIcon className="size-6" aria-hidden="true" />
+          )}
         </span>
-        <div className="flex flex-col gap-1">
-          <p className="font-heading text-lg font-semibold">
-            Your torrents are protected by {providerLabel(data)}
+        <div className="flex min-w-0 flex-col gap-1">
+          <h3 className="font-heading text-lg font-semibold">
+            {data.secure
+              ? `Torrents are protected by ${providerLabel(data)}`
+              : "A VPN leak was detected"}
+          </h3>
+          <p className={data.secure ? "text-foreground/70" : "text-foreground/80"}>
+            {data.secure
+              ? "Traffic can only leave through the tunnel."
+              : "qBittorrent traffic can leave the tunnel. Fix the failing probes before you download anything."}
           </p>
-          <p className="text-sm text-muted-foreground">
-            All boundary checks passed. No direct route, DNS resolver or IPv6 path
-            was found outside the tunnel.
-          </p>
-          <p className="text-xs text-muted-foreground">
-            Public exit {data.exit.ip ?? "unknown"}
-            {data.exit.country ? ` · ${data.exit.country}` : ""}
-            {` · ${formatProtocol(data.protocol)}`}
+          <p className="font-mono text-xs text-foreground/60">
+            {[
+              data.exit.ip,
+              data.exit.country,
+              data.exit.organization,
+              formatProtocol(data.protocol),
+            ]
+              .filter(Boolean)
+              .join(" · ")}
           </p>
         </div>
-      </CardContent>
-    </Card>
-  );
-}
+      </div>
 
-function CoverageWarning({ data }: { data: VpnStatusResponse }) {
-  const unreachable = data.coverage.filter((entry) => !entry.reachable);
-  if (unreachable.length === 0) {
-    return null;
-  }
-  return (
-    <Alert>
-      <CircleAlertIcon />
-      <AlertTitle>VPN is secure, but the torrent apps are not reachable</AlertTitle>
-      <AlertDescription className="flex flex-col gap-2">
-        <p>
-          The tunnel is healthy, but {unreachable.map((entry) => entry.name).join(", ")}{" "}
-          did not answer inside the protected namespace. They may be stopped or
-          stuck in an older network namespace.
-        </p>
-        <p>
-          Recreate the whole torrent stack so every app joins Gluetun&apos;s current
-          namespace:
-        </p>
-        <code className="rounded-md bg-muted px-2 py-1 font-mono text-xs">
-          cd torrent && docker compose down && docker compose up -d
-        </code>
-      </AlertDescription>
-    </Alert>
-  );
-}
+      <div className="flex items-baseline justify-between gap-4 px-5 pt-4 pb-1">
+        <h4 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+          Boundary checks
+        </h4>
+        <span
+          className={
+            failed.length > 0 ? "text-xs font-medium text-destructive" : "text-xs text-muted-foreground"
+          }
+        >
+          {data.checks.length - failed.length} of {data.checks.length} passed
+        </span>
+      </div>
+      <ul className="divide-y divide-border">
+        {data.checks.map((check) => (
+          <CheckRow key={check.id} check={check} />
+        ))}
+      </ul>
 
-function LeakBanner({ data }: { data: VpnStatusResponse }) {
-  const failed = data.checks.filter((check) => !check.passed);
-  return (
-    <Alert variant="destructive">
-      <ShieldAlertIcon />
-      <AlertTitle>A VPN leak was detected</AlertTitle>
-      <AlertDescription className="flex flex-col gap-2">
-        <p>
-          qBittorrent&apos;s network namespace did not pass every boundary check.
-          Traffic may be able to leave outside the VPN.
-        </p>
-        <ul className="list-disc pl-5">
-          {failed.map((check) => (
-            <li key={check.id}>{check.label}</li>
-          ))}
-        </ul>
-        <p>
-          Check <code className="font-mono text-xs">docker logs gluetun</code> and{" "}
-          <code className="font-mono text-xs">docker logs vpn-check</code>.
-        </p>
-      </AlertDescription>
-    </Alert>
-  );
-}
+      {failed.length > 0 ? (
+        <div className="border-t px-5 py-4">
+          <p>
+            Find the failing probe in the tunnel logs:{" "}
+            <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">docker logs gluetun</code>{" "}
+            and{" "}
+            <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">docker logs vpn-check</code>.
+          </p>
+        </div>
+      ) : null}
 
-function DataPoints({ data }: { data: VpnStatusResponse }) {
-  const ipv6 = data.checks.find((check) => check.id === "ipv6");
-  const provider = [data.exit.organization, formatProtocol(data.protocol)]
-    .filter(Boolean)
-    .join(" · ");
+      <div className="grid gap-1 border-t px-5 py-4 sm:grid-cols-[minmax(0,22rem)_1fr] sm:gap-4">
+        <span className="font-medium">Tunnel coverage</span>
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-wrap gap-x-5 gap-y-1.5">
+            {data.coverage.map((entry) => (
+              <span key={entry.id} className="inline-flex items-center gap-2">
+                <span
+                  aria-hidden="true"
+                  className={
+                    entry.reachable
+                      ? "size-1.5 rounded-full bg-emerald-500"
+                      : "size-1.5 rounded-full bg-destructive"
+                  }
+                />
+                <span className={entry.reachable ? undefined : "text-destructive"}>
+                  {entry.name}
+                </span>
+                <span className="sr-only">
+                  {entry.reachable ? "is reachable inside the tunnel" : "is not reachable"}
+                </span>
+              </span>
+            ))}
+          </div>
+          {unreachable.length > 0 ? (
+            <p className="text-muted-foreground">
+              {unreachable.map((entry) => entry.name).join(", ")} did not answer inside the
+              tunnel. They may be stopped or stuck in an older namespace. Recreate the stack so
+              every app joins Gluetun&apos;s current one:
+              <code className="mt-1 block w-fit rounded-md bg-muted px-2 py-1 font-mono text-xs">
+                cd torrent && docker compose down && docker compose up -d
+              </code>
+            </p>
+          ) : null}
+        </div>
+      </div>
 
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>What was tested</CardTitle>
-        <CardDescription>
-          This snapshot describes the live path qBittorrent uses right now.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <DataPoint label="Public exit IP" value={data.exit.ip ?? "Unknown"} mono />
-          <DataPoint label="Exit location" value={data.exit.country || "Unknown"} />
-          <DataPoint label="Provider" value={provider || "Unknown"} />
-          <DataPoint
-            label="DNS resolver"
-            value={data.dnsNameservers.join(", ") || "Not configured"}
-            mono
-          />
-          <DataPoint
-            label="Firewall exemption"
-            value={data.firewallException ?? "Loopback only"}
-            mono
-          />
-          <DataPoint label="IPv6" value={ipv6?.passed ? "Disabled" : "Enabled"} />
-          <DataPoint label="Test duration" value={formatDuration(data.durationMs)} />
-        </dl>
-      </CardContent>
-    </Card>
-  );
-}
-
-function DataPoint({
-  label,
-  value,
-  mono = false,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-}) {
-  return (
-    <div className="flex flex-col gap-0.5">
-      <dt className="text-xs uppercase tracking-wide text-muted-foreground">{label}</dt>
-      <dd className={mono ? "truncate font-mono text-sm" : "truncate text-sm font-medium"}>
-        {value}
-      </dd>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t px-5 py-3 text-xs text-muted-foreground">
+        <span>Checked {formatCheckedAt(data.checkedAt)}</span>
+        <span className="tabular-nums">Took {formatDuration(data.durationMs)}</span>
+      </div>
     </div>
   );
 }
 
 function CheckRow({ check }: { check: VpnCheck }) {
   return (
-    <>
-      <div className="flex items-start gap-3">
+    <li className="grid items-start gap-x-4 gap-y-1 px-5 py-3.5 sm:grid-cols-[minmax(0,22rem)_1fr]">
+      <span className="flex flex-wrap items-center gap-x-2 gap-y-1 font-medium">
         {check.passed ? (
-          <CircleCheckIcon className="mt-0.5 size-4 shrink-0 text-emerald-500" />
+          <CircleCheckIcon
+            className="size-4 shrink-0 text-emerald-500"
+            role="img"
+            aria-label="Passed"
+          />
         ) : (
-          <CircleXIcon className="mt-0.5 size-4 shrink-0 text-destructive" />
+          <CircleXIcon className="size-4 shrink-0 text-destructive" role="img" aria-label="Failed" />
         )}
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <p className="font-medium">{check.label}</p>
-          <p className="text-xs text-muted-foreground">{check.detail}</p>
-        </div>
-        <Badge variant={check.passed ? "secondary" : "destructive"}>
-          {check.passed ? "Passed" : "Failed"}
-        </Badge>
-      </div>
-      <Separator className="last:hidden" />
-    </>
+        {check.label}
+        {check.passed ? null : (
+          <Badge variant="destructive" className="ml-1">
+            Failed
+          </Badge>
+        )}
+      </span>
+      <span className="text-muted-foreground">{check.detail === check.label ? "" : check.detail}</span>
+    </li>
   );
 }
 
-function SectionHeading({ title, description }: { title: string; description: string }) {
+function RunningReport() {
+  const elapsed = useElapsedSeconds();
+
   return (
-    <div className="flex flex-col gap-1">
-      <h2 className="font-heading text-xl font-semibold tracking-tight">{title}</h2>
-      <p className="text-sm text-muted-foreground">{description}</p>
+    <div className="overflow-hidden rounded-xl bg-card text-sm ring-1 ring-foreground/10">
+      <div className="flex flex-col gap-4 border-b bg-muted/40 px-5 py-5">
+        <div className="flex items-start gap-4">
+          <span className="rounded-full bg-primary/10 p-2 text-primary">
+            <ShieldCheckIcon className="size-6" aria-hidden="true" />
+          </span>
+          <div className="flex flex-col gap-1">
+            <h3 className="font-heading text-lg font-semibold" role="status">
+              Running the leak test
+            </h3>
+            <p className="text-muted-foreground">
+              A real probe inside qBittorrent&apos;s namespace, not a cached read. It takes a
+              few seconds.
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3 pl-12">
+          <div className="h-1 flex-1 overflow-hidden rounded-full bg-muted" aria-hidden="true">
+            <div className="h-full w-1/3 rounded-full bg-primary animate-test-sweep motion-reduce:w-full motion-reduce:animate-none" />
+          </div>
+          <span
+            className="w-14 shrink-0 text-right font-mono text-xs tabular-nums text-muted-foreground"
+            aria-hidden="true"
+          >
+            {elapsed.toFixed(1)} s
+          </span>
+        </div>
+      </div>
+
+      <div className="flex items-baseline justify-between gap-4 px-5 pt-4 pb-1">
+        <h4 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+          Boundary checks
+        </h4>
+      </div>
+      <ul className="divide-y divide-border">
+        {PENDING_CHECKS.map((check) => (
+          <li
+            key={check.label}
+            className="grid items-start gap-x-4 gap-y-1 px-5 py-3.5 sm:grid-cols-[minmax(0,22rem)_1fr]"
+          >
+            <span className="flex items-center gap-2 font-medium">
+              <span
+                aria-hidden="true"
+                className="size-4 shrink-0 rounded-full border border-muted-foreground/40 animate-pulse motion-reduce:animate-none"
+              />
+              {check.label}
+            </span>
+            <span className="text-muted-foreground">{check.proof}</span>
+          </li>
+        ))}
+      </ul>
+      <div className="border-t px-5 py-3 text-xs text-muted-foreground">
+        Each probe runs in the same network namespace as qBittorrent.
+      </div>
     </div>
   );
+}
+
+/** Seconds since mount, shown while the probe is in flight. */
+function useElapsedSeconds() {
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    const started = performance.now();
+    const id = window.setInterval(() => setElapsed((performance.now() - started) / 1000), 100);
+    return () => window.clearInterval(id);
+  }, []);
+
+  return elapsed;
 }
 
 /** Gluetun ids are lowercase, so "private internet access" reads badly as-is. */

@@ -7,6 +7,12 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
+    /* Indeterminate ping-pong sweep for the VPN leak test's running strip. */
+    --animate-test-sweep: test-sweep 1.1s ease-in-out infinite alternate;
+    @keyframes test-sweep {
+        from { transform: translateX(0); }
+        to { transform: translateX(200%); }
+    }
     --font-heading: "Space Grotesk Variable", ui-sans-serif, system-ui, sans-serif;
     --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
     --container-content: 87.5rem;
