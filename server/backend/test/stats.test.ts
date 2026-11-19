@@ -13,16 +13,18 @@ import {
 const TB = 1024 ** 4;
 
 describe("stats aggregation", () => {
-  it("combines qBittorrent all-time totals and free space with arr capacity", () => {
+  it("combines qBittorrent all-time totals with the library mount capacity", () => {
     const result = aggregateStats({
       mainData: {
         server_state: {
           alltime_dl: 3 * TB,
           alltime_ul: TB,
-          free_space_on_disk: 0.5 * TB,
         },
       },
-      diskSpace: [{ path: "/data", freeSpace: 0.75 * TB, totalSpace: 2 * TB }],
+      diskSpace: [
+        { path: "/data", freeSpace: 0.5 * TB, totalSpace: 1 * TB },
+        { path: "/data/media", freeSpace: 1.5 * TB, totalSpace: 2 * TB },
+      ],
       rootFolders: [{ path: "/data/media/tv", accessible: true }],
     });
 
@@ -32,40 +34,51 @@ describe("stats aggregation", () => {
     });
     expect(result.disk).toEqual({
       totalBytes: 2 * TB,
-      freeBytes: 0.5 * TB,
-      usedBytes: 1.5 * TB,
-      usedPercent: 75,
+      freeBytes: 1.5 * TB,
+      usedBytes: 0.5 * TB,
+      usedPercent: 25,
     });
   });
 
-  it("uses the arr free space when qBittorrent reports more free than capacity", () => {
+  it("takes free space from the same diskspace record as the capacity", () => {
+    // Regression: downloads on a 500GB system disk, media on a 2TB bulk disk.
+    // Mixing the bulk disk's total with the system disk's free space reported
+    // ~1.6TB used on a disk with ~380GB of media.
     expect(
       aggregateDiskUsage(
-        [{ path: "/data", freeSpace: 40, totalSpace: 100 }],
-        120,
+        [
+          { path: "/data", freeSpace: 268_000_000_000, totalSpace: 500_000_000_000 },
+          { path: "/data/media", freeSpace: 1_616_000_000_000, totalSpace: 2_000_000_000_000 },
+        ],
         [{ path: "/data/media/movies", accessible: true }],
       ),
-    ).toEqual({ totalBytes: 100, freeBytes: 40, usedBytes: 60, usedPercent: 60 });
+    ).toEqual({
+      totalBytes: 2_000_000_000_000,
+      freeBytes: 1_616_000_000_000,
+      usedBytes: 384_000_000_000,
+      usedPercent: 19.2,
+    });
   });
 
   it("omits disk usage when no total capacity is available", () => {
-    expect(aggregateDiskUsage([{ path: "/data", freeSpace: 40 }], 40)).toBeUndefined();
-    expect(aggregateDiskUsage(undefined, 40)).toBeUndefined();
+    expect(aggregateDiskUsage([{ path: "/data", freeSpace: 40 }])).toBeUndefined();
+    expect(aggregateDiskUsage(undefined)).toBeUndefined();
   });
 
   it("rounds percentages to one decimal and clamps the range", () => {
     expect(
-      aggregateDiskUsage([{ path: "/data", totalSpace: 3 }], 2),
+      aggregateDiskUsage([{ path: "/data", totalSpace: 3, freeSpace: 1 }]),
     ).toEqual({
       totalBytes: 3,
-      freeBytes: 2,
-      usedBytes: 1,
-      usedPercent: 33.3,
+      freeBytes: 1,
+      usedBytes: 2,
+      usedPercent: 66.7,
     });
-    expect(aggregateDiskUsage([{ path: "/data", totalSpace: 100 }], 0)?.usedPercent).toBe(100);
-    expect(aggregateDiskUsage([{ path: "/data", totalSpace: 100 }], 200)).toBeUndefined();
     expect(
-      aggregateDiskUsage([{ path: "/data", totalSpace: 100, freeSpace: 200 }], 200),
+      aggregateDiskUsage([{ path: "/data", totalSpace: 100, freeSpace: 0 }])?.usedPercent,
+    ).toBe(100);
+    expect(
+      aggregateDiskUsage([{ path: "/data", totalSpace: 100, freeSpace: 200 }]),
     ).toEqual({ totalBytes: 100, freeBytes: 100, usedBytes: 0, usedPercent: 0 });
   });
 

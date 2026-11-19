@@ -13,16 +13,13 @@ import type {
 } from "./upstream/servarr.js";
 
 /**
- * Free space may come from qBittorrent (the filesystem downloads land on),
- * while total capacity comes from the arr's `/diskspace` (the same `/data`
- * volume). qBittorrent does not expose a total.
+ * Transfer totals come from qBittorrent; capacity and free space both come
+ * from a single arr `/diskspace` record so they describe the same mount.
  */
 export interface StatsAggregationInput {
   mainData?: QbittorrentMainData;
   diskSpace?: ServarrDiskSpace[];
   rootFolders?: ServarrRootFolder[];
-  /** Overrides the free-space value from `mainData` (used by tests). */
-  qbittorrentFreeBytes?: number;
 }
 
 export interface StatsAggregate {
@@ -37,9 +34,7 @@ export function aggregateStats(input: StatsAggregationInput): StatsAggregate {
   if (qbittorrent !== undefined) {
     result.qbittorrent = qbittorrent;
   }
-  const qbittorrentFreeBytes =
-    input.qbittorrentFreeBytes ?? input.mainData?.server_state?.free_space_on_disk;
-  const disk = aggregateDiskUsage(input.diskSpace, qbittorrentFreeBytes, input.rootFolders);
+  const disk = aggregateDiskUsage(input.diskSpace, input.rootFolders);
   if (disk !== undefined) {
     result.disk = disk;
   }
@@ -176,24 +171,21 @@ export function selectDiskSpace(
 
 export function aggregateDiskUsage(
   diskSpace: ServarrDiskSpace[] | undefined,
-  qbittorrentFreeBytes: number | undefined,
   rootFolders?: ServarrRootFolder[],
 ): StatsDiskUsage | undefined {
   const entry = selectDiskSpace(diskSpace, rootFolders);
   const totalBytes = nonNegative(entry?.totalSpace);
-  if (entry === undefined || totalBytes === undefined || totalBytes <= 0) {
+  const entryFreeBytes = nonNegative(entry?.freeSpace);
+  if (totalBytes === undefined || totalBytes <= 0 || entryFreeBytes === undefined) {
     return undefined;
   }
 
-  const qbittorrentFree = nonNegative(qbittorrentFreeBytes);
-  const arrFree = nonNegative(entry.freeSpace);
-  const freeCandidate =
-    qbittorrentFree !== undefined && qbittorrentFree <= totalBytes ? qbittorrentFree : arrFree;
-  if (freeCandidate === undefined) {
-    return undefined;
-  }
-  const freeBytes = Math.min(freeCandidate, totalBytes);
-  const usedBytes = Math.max(0, Math.min(totalBytes, totalBytes - freeBytes));
+  // Total and free must come from the same `/diskspace` record. qBittorrent's
+  // `free_space_on_disk` describes its download directory, which may live on a
+  // different filesystem than the library mount (downloads on the system disk,
+  // media on a bulk disk) and would inflate the used figure.
+  const freeBytes = Math.min(entryFreeBytes, totalBytes);
+  const usedBytes = totalBytes - freeBytes;
   const usedPercent = roundPercent((usedBytes / totalBytes) * 100);
 
   return { totalBytes, freeBytes, usedBytes, usedPercent };

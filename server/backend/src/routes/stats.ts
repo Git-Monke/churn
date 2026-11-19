@@ -21,8 +21,8 @@ export function registerStatsRoutes(app: FastifyInstance, config: AppConfig): vo
     reply.header("cache-control", "no-store");
     const checkedAt = new Date().toISOString();
 
-    // qBittorrent supplies the all-time totals, per-torrent transfer and free
-    // space; Sonarr/Radarr supply total capacity and per-title storage. Let any
+    // qBittorrent supplies the all-time totals and per-torrent transfer;
+    // Sonarr/Radarr supply capacity, free space and per-title storage. Let any
     // source fail without blanking the whole stats page.
     const qbittorrent = createQbittorrentClient(
       config.qbittorrent,

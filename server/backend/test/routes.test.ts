@@ -538,7 +538,7 @@ describe("stats", () => {
     expect(response.headers["cache-control"]).toBe("no-store");
     expect(body).toMatchObject({
       qbittorrent: { totalDownloadedBytes: 300, totalUploadedBytes: 100 },
-      disk: { totalBytes: 2_000, freeBytes: 500, usedBytes: 1_500, usedPercent: 75 },
+      disk: { totalBytes: 2_000, freeBytes: 600, usedBytes: 1_400, usedPercent: 70 },
       errors: [],
     });
     expect(body.topDownloads).toEqual([
