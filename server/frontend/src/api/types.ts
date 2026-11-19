@@ -712,6 +712,8 @@ export interface PlaybackItem {
   quality: PlaybackQuality;
   /** Selectable presets for this source; always contains `max`. */
   qualities: PlaybackQualityOption[];
+  /** Text subtitle tracks the browser can render as WebVTT overlays. */
+  subtitles: PlaybackSubtitle[];
   /** The next episode in Jellyfin's list, when this item is an episode. */
   nextEpisode?: PlaybackNextEpisode;
   /**
@@ -719,6 +721,16 @@ export interface PlaybackItem {
    * was grabbed. Absent when there is no cached data for this episode.
    */
   segments?: PlaybackSegments;
+}
+
+export interface PlaybackSubtitle {
+  /** Jellyfin stream index; stable per item, not across episodes. */
+  index: number;
+  /** Container track name such as `English [SDH]`, when tagged. */
+  title?: string;
+  language?: string;
+  /** Same-origin WebVTT proxy; never contains the Jellyfin token. */
+  url: string;
 }
 
 export interface PlaybackNextEpisode {

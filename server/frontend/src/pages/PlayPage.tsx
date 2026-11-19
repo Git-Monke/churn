@@ -28,6 +28,7 @@ import { PlaybackTitleRow } from "@/features/player/PlaybackTitleRow";
 import { UpNextCard } from "@/features/player/UpNextCard";
 import {
   resumeStartSeconds,
+  subtitleLabel,
   TICKS_PER_SECOND,
   upNextTriggerSeconds,
   UP_NEXT_COUNTDOWN_SECONDS,
@@ -89,11 +90,19 @@ export function PlayPage({
 }) {
   const queryClient = useQueryClient();
   const [quality, setQuality] = useState<PlaybackQuality>(readPlaybackQuality);
+  // Jellyfin stream index of the chosen text track; indexes differ per episode.
+  const [subtitle, setSubtitle] = useState<number | null>(null);
   const [autoplay, setAutoplay] = useState(readAutoplay);
   const playbackQuery = useQuery({
     queryKey: ["playback", id, quality],
     queryFn: () => fetchPlayback(id, quality),
     retry: false,
+    // Every request mints a new Jellyfin play session, which changes the
+    // stream URL. A background refetch would therefore tear down the player
+    // and start the new transcode at 0:00. Only a quality switch (its own
+    // query key) may replace the stream after mount.
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     // Keep the current stream on screen while a new quality is fetched instead
     // of dropping back to the loading skeleton.
     placeholderData: (previous) => previous,
@@ -316,7 +325,13 @@ export function PlayPage({
       const body = reportBody(current, positionTicks, true);
       void reportPlaybackStop(current.id, body)
         .then(() => {
-          void queryClient.invalidateQueries({ queryKey: ["playback", current.id] });
+          // Mark the cached item stale (the resume point moved) but never
+          // refetch it while this player is mounted: that would hand it a new
+          // play session and rebuild the stream the user just stopped.
+          void queryClient.invalidateQueries({
+            queryKey: ["playback", current.id],
+            refetchType: "none",
+          });
           void queryClient.invalidateQueries({ queryKey: ["resume"] });
         })
         .catch(() => {
@@ -351,6 +366,7 @@ export function PlayPage({
     setShowSkipIntro(false);
     setNextPrompt(null);
     setEnded(false);
+    setSubtitle(null);
     promptShownRef.current = false;
     promptDismissedRef.current = false;
     advancingRef.current = false;
@@ -361,6 +377,35 @@ export function PlayPage({
     lastSeekAtRef.current = 0;
     return () => clearRecoveryTimer();
   }, [item?.id]);
+
+  // Track elements are DOM children of the video, so selection is a mode flip.
+  // Re-apply after a quality switch fetches the item again.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) {
+      return;
+    }
+    const chosen =
+      subtitle === null
+        ? -1
+        : (item?.subtitles ?? []).findIndex(
+            (track) => track.index === subtitle,
+          );
+    // A new media resource resets the element's track modes, so apply the
+    // selection again once the stream's metadata arrives.
+    const applyMode = () => {
+      const tracks = video.textTracks;
+      for (let index = 0; index < tracks.length; index += 1) {
+        const track = tracks[index];
+        if (track) {
+          track.mode = index === chosen ? "showing" : "disabled";
+        }
+      }
+    };
+    applyMode();
+    video.addEventListener("loadedmetadata", applyMode);
+    return () => video.removeEventListener("loadedmetadata", applyMode);
+  }, [item?.subtitles, subtitle]);
 
   function clearRecoveryTimer() {
     if (recoveryTimerRef.current !== null) {
@@ -617,7 +662,10 @@ export function PlayPage({
       clearSeekReport();
       const currentItem = itemRef.current;
       if (currentItem) {
-        void queryClient.invalidateQueries({ queryKey: ["playback", currentItem.id] });
+        void queryClient.invalidateQueries({
+          queryKey: ["playback", currentItem.id],
+          refetchType: "none",
+        });
         void queryClient.invalidateQueries({ queryKey: ["resume"] });
       }
     };
@@ -1142,7 +1190,17 @@ export function PlayPage({
           onPlaying={handlePlaying}
           onCanPlay={handleCanPlay}
           onError={handleVideoError}
-        />
+        >
+          {item.subtitles.map((track) => (
+            <track
+              key={track.index}
+              kind="subtitles"
+              src={track.url}
+              srcLang={track.language ?? "und"}
+              label={subtitleLabel(track)}
+            />
+          ))}
+        </video>
         {mediaIssue ? <PlaybackErrorOverlay onRetry={retryPlayback} /> : null}
         {!mediaIssue && ended ? (
           <EndedOverlay
@@ -1177,6 +1235,9 @@ export function PlayPage({
             qualities={item.qualities}
             quality={quality}
             onQualityChange={handleQualityChange}
+            subtitles={item.subtitles}
+            subtitle={subtitle}
+            onSubtitleChange={setSubtitle}
             autoplay={item.type === "Episode" ? autoplay : undefined}
             onAutoplayChange={
               item.type === "Episode" ? handleAutoplayChange : undefined

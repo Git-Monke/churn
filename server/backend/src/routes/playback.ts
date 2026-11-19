@@ -39,6 +39,15 @@ interface ItemQuery {
   quality?: unknown;
 }
 
+interface SubtitleParams {
+  itemId: string;
+  index: string;
+}
+
+interface SubtitleQuery {
+  mediaSourceId?: unknown;
+}
+
 const ITEM_ID_PATTERN = /^[A-Za-z0-9-]{1,64}$/;
 const SESSION_ID_PATTERN = /^[A-Za-z0-9._~-]{1,128}$/;
 
@@ -300,6 +309,49 @@ export function registerPlaybackRoutes(
     },
   );
 
+  app.get<{ Params: SubtitleParams; Querystring: SubtitleQuery }>(
+    "/api/playback/items/:itemId/subtitles/:index",
+    async (request, reply) => {
+      // Text tracks are immutable per media file, so let the browser reuse them
+      // across quality switches that keep the same source.
+      reply.header("cache-control", "private, max-age=3600");
+      reply.header("referrer-policy", "no-referrer");
+      const auth = requireAuth(request);
+      const itemId = parseItemId(request.params.itemId);
+      const mediaSourceId = parseOptionalSessionId(
+        request.query.mediaSourceId,
+        "mediaSourceId",
+      );
+      if (!mediaSourceId) {
+        throw new ApiError(400, "invalid_query", "mediaSourceId is required");
+      }
+      const index = parseSubtitleIndex(request.params.index);
+      const client = createJellyfinClient(
+        config.services.jellyfin,
+        config.requestTimeoutMs,
+        auth.accessToken,
+        {
+          deviceId: auth.deviceId,
+        },
+      );
+
+      let vtt: string | null;
+      try {
+        vtt = await client.getSubtitle(itemId, mediaSourceId, index);
+      } catch (error) {
+        throw playbackRouteError(
+          error,
+          "Jellyfin could not deliver subtitles",
+          request,
+        );
+      }
+      if (vtt === null) {
+        throw new ApiError(404, "subtitle_not_found", "Subtitle track not found");
+      }
+      return reply.type("text/vtt; charset=utf-8").send(vtt);
+    },
+  );
+
   app.post<{ Params: PlaybackParams; Body: unknown }>(
     "/api/playback/items/:itemId/start",
     (request, reply) => reportPlayback(request, reply, config, "start"),
@@ -404,6 +456,13 @@ async function resolveSeriesImdb(
   }
   cache.set(seriesId, { ...(imdbId ? { imdbId } : {}), fetchedAt: Date.now() });
   return imdbId;
+}
+
+function parseSubtitleIndex(value: string): number {
+  if (!/^\d{1,4}$/.test(value)) {
+    throw new ApiError(400, "invalid_subtitle_index", "Invalid subtitle index");
+  }
+  return Number(value);
 }
 
 function parseItemId(value: string): string {

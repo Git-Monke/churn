@@ -1,6 +1,11 @@
 import { MoreHorizontalIcon, RotateCcwIcon } from "lucide-react";
 
-import type { PlaybackQuality, PlaybackQualityOption } from "@/api/types";
+import type {
+  PlaybackQuality,
+  PlaybackQualityOption,
+  PlaybackSubtitle,
+} from "@/api/types";
+import { subtitleLabel } from "@/features/player/playback-meta";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -18,6 +23,11 @@ export interface PlaybackSettingsMenuProps {
   qualities: PlaybackQualityOption[];
   quality: PlaybackQuality;
   onQualityChange: (quality: PlaybackQuality) => void;
+  /** Text tracks for this file; the section is omitted when empty. */
+  subtitles: PlaybackSubtitle[];
+  /** Selected subtitle stream index, or `null` for off. */
+  subtitle: number | null;
+  onSubtitleChange: (index: number | null) => void;
   /** Episodes only; the menu omits the item for movies. */
   autoplay?: boolean;
   onAutoplayChange?: (enabled: boolean) => void;
@@ -34,6 +44,9 @@ export function PlaybackSettingsMenu({
   qualities,
   quality,
   onQualityChange,
+  subtitles,
+  subtitle,
+  onSubtitleChange,
   autoplay,
   onAutoplayChange,
   onStartOver,
@@ -69,6 +82,25 @@ export function PlaybackSettingsMenu({
               {tiers.map((option) => (
                 <DropdownMenuRadioItem key={option.id} value={option.id}>
                   {option.label}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+            <DropdownMenuSeparator />
+          </>
+        ) : null}
+        {subtitles.length > 0 ? (
+          <>
+            <DropdownMenuLabel>Subtitles</DropdownMenuLabel>
+            <DropdownMenuRadioGroup
+              value={subtitle === null ? "off" : String(subtitle)}
+              onValueChange={(value) =>
+                onSubtitleChange(value === "off" ? null : Number(value))
+              }
+            >
+              <DropdownMenuRadioItem value="off">Off</DropdownMenuRadioItem>
+              {subtitles.map((track) => (
+                <DropdownMenuRadioItem key={track.index} value={String(track.index)}>
+                  {subtitleLabel(track)}
                 </DropdownMenuRadioItem>
               ))}
             </DropdownMenuRadioGroup>

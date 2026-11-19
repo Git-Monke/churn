@@ -67,8 +67,12 @@ export interface JellyfinItem {
 
 export interface JellyfinMediaStream {
   Type?: string;
+  /** Jellyfin/ffmpeg stream index; subtitle delivery addresses tracks by it. */
+  Index?: number;
   Codec?: string;
   Language?: string;
+  /** Track name from the container tag, e.g. `English [SDH]`. */
+  Title?: string;
   DisplayTitle?: string;
   IsExternal?: boolean;
   BitRate?: number;
@@ -563,6 +567,47 @@ export function createJellyfinClient(
       if (!response.ok) {
         throw await upstreamResponseError("jellyfin", response);
       }
+    },
+
+    /** One subtitle track as WebVTT; Jellyfin converts embedded formats. */
+    async getSubtitle(
+      itemId: string,
+      mediaSourceId: string,
+      index: number,
+    ): Promise<string | null> {
+      if (!token) {
+        throw new UpstreamError("jellyfin", "unauthorized", "Jellyfin API key is not configured");
+      }
+      const url =
+        `${config.url}/Videos/${encodeURIComponent(itemId)}` +
+        `/${encodeURIComponent(mediaSourceId)}` +
+        `/Subtitles/${encodeURIComponent(String(index))}/Stream.vtt`;
+      const response = await fetchWithTimeout(
+        "jellyfin",
+        url,
+        { headers: { ...authHeaders(), accept: "text/vtt" } },
+        timeoutMs,
+      );
+      if (response.status === 404) {
+        return null;
+      }
+      if (!response.ok) {
+        if (response.status === 401 || response.status === 403) {
+          throw new UpstreamError(
+            "jellyfin",
+            "unauthorized",
+            "Jellyfin rejected the API key",
+            response.status,
+          );
+        }
+        throw new UpstreamError(
+          "jellyfin",
+          "http",
+          `Jellyfin returned HTTP ${response.status}`,
+          response.status,
+        );
+      }
+      return await response.text();
     },
 
     async getItemImage(itemId: string, query: JellyfinImageQuery): Promise<JellyfinImage | null> {

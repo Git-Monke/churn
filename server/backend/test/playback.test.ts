@@ -194,6 +194,50 @@ describe("playback item mapping", () => {
     expect(mapPlaybackItem({ Id: "x", Name: "Song", Type: "Audio" }, undefined, undefined, "/x")).toBeNull();
     expect(mapPlaybackItem({ Name: "No id", Type: "Movie" }, undefined, undefined, "/x")).toBeNull();
   });
+
+  it("lists text subtitle tracks and skips bitmap ones", () => {
+    const playback = mapPlaybackItem(
+      item,
+      {
+        Id: "source-1",
+        MediaStreams: [
+          { Type: "Video", Index: 0, Codec: "h264" },
+          { Type: "Audio", Index: 1, Codec: "eac3" },
+          {
+            Type: "Subtitle",
+            Index: 2,
+            Codec: "subrip",
+            Title: "English [Forced]",
+            Language: "eng",
+          },
+          {
+            Type: "Subtitle",
+            Index: 3,
+            Codec: "hdmv_pgs_subtitle",
+            Language: "eng",
+          },
+          { Type: "Subtitle", Index: 4, Codec: "ass", Language: "jpn" },
+        ],
+      },
+      "session-1",
+      "/api/playback/items/item-1/stream",
+      true,
+    );
+
+    expect(playback?.subtitles).toEqual([
+      {
+        index: 2,
+        title: "English [Forced]",
+        language: "eng",
+        url: "/api/playback/items/item-1/subtitles/2?mediaSourceId=source-1",
+      },
+      {
+        index: 4,
+        language: "jpn",
+        url: "/api/playback/items/item-1/subtitles/4?mediaSourceId=source-1",
+      },
+    ]);
+  });
 });
 
 describe("playback report parsing", () => {

@@ -4772,6 +4772,30 @@ describe("playback", () => {
     await app.close();
   });
 
+  it("proxies a subtitle track as WebVTT", async () => {
+    const fetchMock = installFetch((url) => {
+      if (url.includes("/Videos/item-1/source-1/Subtitles/2/Stream.vtt")) {
+        return new Response("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHello\n", {
+          headers: { "content-type": "text/vtt" },
+        });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+    const app = await buildAuthedServer(makeConfig());
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/playback/items/item-1/subtitles/2?mediaSourceId=source-1",
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-type"]).toContain("text/vtt");
+    expect(response.body).toContain("Hello");
+    for (const [url] of fetchMock.mock.calls) {
+      expect(String(url)).not.toContain("test-user-token");
+    }
+    await app.close();
+  });
+
   it("adds the next episode from Jellyfin's series list", async () => {
     installEpisodeFetch(
       {

@@ -1,4 +1,4 @@
-import type { PlaybackSegment } from "@/api/types";
+import type { PlaybackSegment, PlaybackSubtitle } from "@/api/types";
 
 export const TICKS_PER_SECOND = 10_000_000;
 
@@ -83,6 +83,11 @@ export function playbackMinutes(runtimeTicks: number | undefined): number | unde
     return undefined;
   }
   return Math.max(1, Math.round(runtimeTicks / (60 * TICKS_PER_SECOND)));
+}
+
+/** Track label for the settings menu and the video's native track list. */
+export function subtitleLabel(track: PlaybackSubtitle): string {
+  return track.title ?? track.language ?? `Track ${track.index}`;
 }
 
 /** `S1 · E2`, split so the metadata line can keep its own separators. */

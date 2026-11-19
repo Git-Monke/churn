@@ -81,6 +81,8 @@ export interface PlaybackItem {
   quality: PlaybackQuality;
   /** Selectable presets for this source; always contains `max`. */
   qualities: PlaybackQualityOption[];
+  /** Text subtitle tracks the browser can render as WebVTT overlays. */
+  subtitles: PlaybackSubtitle[];
   /** The next episode in Jellyfin's list, when this item is an episode. */
   nextEpisode?: PlaybackNextEpisode;
   /**
@@ -95,6 +97,16 @@ export interface PlaybackNextEpisode {
   name: string;
   seasonNumber: number;
   episodeNumber: number;
+}
+
+export interface PlaybackSubtitle {
+  /** Jellyfin stream index; stable per item, not across episodes. */
+  index: number;
+  /** Container track name such as `English [SDH]`, when tagged. */
+  title?: string;
+  language?: string;
+  /** Same-origin WebVTT proxy; never contains the Jellyfin token. */
+  url: string;
 }
 
 export interface PlaybackItemResponse {
@@ -165,6 +177,31 @@ export function playbackHlsPath(
   }
   const suffix = params.size > 0 ? `?${params.toString()}` : "";
   return `/api/playback/items/${encodeURIComponent(itemId)}/hls.m3u8${suffix}`;
+}
+
+/**
+ * Subtitle codecs Jellyfin can convert to WebVTT. Bitmap tracks (PGS, DVDSUB)
+ * are not listed: they would have to be burned into a transcode.
+ */
+const TEXT_SUBTITLE_CODECS: Record<string, true> = {
+  subrip: true,
+  srt: true,
+  ass: true,
+  ssa: true,
+  webvtt: true,
+  vtt: true,
+  mov_text: true,
+  text: true,
+};
+
+/** Same-origin WebVTT proxy URL for one subtitle stream. */
+export function subtitleTrackPath(
+  itemId: string,
+  mediaSourceId: string,
+  index: number,
+): string {
+  const params = new URLSearchParams({ mediaSourceId });
+  return `/api/playback/items/${encodeURIComponent(itemId)}/subtitles/${index}?${params.toString()}`;
 }
 
 /** Validate a `quality` query value; missing means the original stream. */
@@ -458,6 +495,43 @@ export function pickMediaSource(
   };
 }
 
+/**
+ * Text subtitle streams the player can overlay. Bitmap tracks are skipped:
+ * the player has no burn-in path, so listing them would offer a track that
+ * cannot render.
+ */
+function mapSubtitles(
+  itemId: string,
+  source: JellyfinMediaSource | undefined,
+): PlaybackSubtitle[] {
+  if (!source?.Id) {
+    return [];
+  }
+  const tracks: PlaybackSubtitle[] = [];
+  for (const stream of source.MediaStreams ?? []) {
+    if (
+      stream.Type !== "Subtitle" ||
+      stream.Index === undefined ||
+      stream.Codec === undefined ||
+      TEXT_SUBTITLE_CODECS[stream.Codec.toLowerCase()] !== true
+    ) {
+      continue;
+    }
+    const track: PlaybackSubtitle = {
+      index: stream.Index,
+      url: subtitleTrackPath(itemId, source.Id, stream.Index),
+    };
+    if (stream.Title) {
+      track.title = stream.Title;
+    }
+    if (stream.Language) {
+      track.language = stream.Language;
+    }
+    tracks.push(track);
+  }
+  return tracks;
+}
+
 export function mapPlaybackItem(
   item: JellyfinItem,
   source: JellyfinMediaSource | undefined,
@@ -474,9 +548,10 @@ export function mapPlaybackItem(
     return null;
   }
 
+  const itemId = item.Id;
   const tag = item.ImageTags?.Primary;
   const playback: PlaybackItem = {
-    id: item.Id,
+    id: itemId,
     type: item.Type,
     name: item.Name,
     streamUrl,
@@ -484,6 +559,7 @@ export function mapPlaybackItem(
     playbackMethod: directPlay ? "direct" : "hls",
     quality,
     qualities: availablePlaybackQualities(source),
+    subtitles: mapSubtitles(itemId, source),
   };
 
   assignIfDefined(playback, "seriesName", item.SeriesName);
