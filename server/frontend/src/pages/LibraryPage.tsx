@@ -39,7 +39,7 @@ import { LibraryGrid, LibraryGridSkeleton } from "@/features/library/LibraryGrid
 import { OnTheWay } from "@/features/library/OnTheWay";
 import { searchLibraryEntries } from "@/features/library/library-search";
 import { LibraryStateNotice } from "@/features/library/LibraryStateNotice";
-import { mergeLibraryEntries } from "@/features/library/library-entries";
+import { mergeLibraryEntries, type LibraryEntryStatus } from "@/features/library/library-entries";
 import { useLibraryScanState } from "@/features/library/use-library-scan-state";
 import { cn } from "@/lib/utils";
 
@@ -55,6 +55,8 @@ export function LibraryPage({ jellyfinUrl }: { jellyfinUrl?: string }) {
   const [dismissedRepicks, setDismissedRepicks] = useState<number[]>([]);
   const [scanActive, setScanActive] = useState(false);
   const [activityActive, setActivityActive] = useState(false);
+  const [newlyReady, setNewlyReady] = useState<ReadonlySet<string>>(() => new Set());
+  const previousEntries = useRef<Map<string, LibraryEntryStatus> | null>(null);
   const previousActivityKeys = useRef<Set<string>>(new Set());
   const libraryQuery = useQuery({
     queryKey: ["library"],
@@ -126,6 +128,23 @@ export function LibraryPage({ jellyfinUrl }: { jellyfinUrl?: string }) {
   const loading =
     (libraryQuery.isLoading || requestedQuery.isLoading || activityQuery.isLoading) &&
     displayEntries.length === 0;
+
+  useEffect(() => {
+    if (!libraryQuery.isSuccess || !requestedQuery.isSuccess || !activityQuery.isSuccess) return;
+    const previous = previousEntries.current;
+    previousEntries.current = new Map(displayEntries.map((entry) => [entry.key, entry.status]));
+    const ready = displayEntries.filter((entry) => {
+      const status = previous?.get(entry.key);
+      return status !== undefined && status !== "available" && entry.status === "available";
+    });
+    if (ready.length > 0) setNewlyReady((keys) => new Set([...keys, ...ready.map((entry) => entry.key)]));
+  }, [activityQuery.isSuccess, displayEntries, libraryQuery.isSuccess, requestedQuery.isSuccess]);
+
+  useEffect(() => {
+    if (newlyReady.size === 0) return;
+    const timeout = window.setTimeout(() => setNewlyReady(new Set()), 7_000);
+    return () => window.clearTimeout(timeout);
+  }, [newlyReady]);
 
   useEffect(() => {
     setScanActive(displayEntries.some((entry) => entry.status === "scanning"));
@@ -264,7 +283,7 @@ export function LibraryPage({ jellyfinUrl }: { jellyfinUrl?: string }) {
         {loading ? <LibraryGridSkeleton /> : null}
 
         {!loading && filtered.length > 0 ? (
-          <LibraryGrid entries={filtered} />
+          <LibraryGrid entries={filtered} newlyReady={newlyReady} />
         ) : null}
 
         {!loading && filtered.length === 0 && browseable.length > 0 ? (

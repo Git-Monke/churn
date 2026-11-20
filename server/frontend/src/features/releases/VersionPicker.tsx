@@ -21,6 +21,7 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { TitlePrimaryAction, type TitleAction } from "@/features/title/TitlePrimaryAction";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -60,6 +61,7 @@ export interface VersionPickerProps {
   /** Renders the "Close" button; used when the picker was opened on demand. */
   onClose?: () => void;
   onGrabbed?: () => void;
+  downloadStatus?: Extract<TitleAction, { kind: "downloading" }>;
 }
 
 /**
@@ -108,6 +110,7 @@ function VersionPickerCard({
   footerExtra,
   onClose,
   onGrabbed,
+  downloadStatus,
 }: VersionPickerProps & { target: ReleaseSearchTarget }) {
   const search = useReleaseSearch(target, { onGrabbed });
   const groups = search.groups;
@@ -117,10 +120,12 @@ function VersionPickerCard({
   const [alternativesOpen, setAlternativesOpen] = useState(false);
   const [showAllAlternatives, setShowAllAlternatives] = useState(false);
   const [attemptedReleaseId, setAttemptedReleaseId] = useState<string | null>(null);
+  const attemptedRelease = useRef<ShowRelease | null>(null);
   const clearGrabErrorRef = useRef<(() => void) | undefined>(undefined);
   clearGrabErrorRef.current = search.clearGrabError;
 
   useEffect(() => {
+    if (downloadStatus) return;
     if (groups.length === 0) {
       setSelectedTier(null);
       setTierPinned(false);
@@ -131,7 +136,7 @@ function VersionPickerCard({
         ? current
         : defaultTier(groups),
     );
-  }, [groups, tierPinned]);
+  }, [downloadStatus, groups, tierPinned]);
 
   // A different tier is a different set of releases, so drop the previous
   // inline failure and collapse the alternatives again.
@@ -143,8 +148,13 @@ function VersionPickerCard({
   }, [selectedTier]);
 
   const selectedGroup = groups.find((group) => group.tier === selectedTier) ?? groups[0];
-  const bestRelease = selectedGroup?.releases[0];
   const alternatives = selectedGroup?.releases.slice(1) ?? [];
+  const activeAlternative = downloadStatus && alternativesOpen
+    ? alternatives.find((release) => release.id === attemptedRelease.current?.id)
+    : undefined;
+  const bestRelease = downloadStatus && !activeAlternative
+    ? attemptedRelease.current ?? selectedGroup?.releases[0]
+    : selectedGroup?.releases[0];
   const visibleAlternatives = showAllAlternatives
     ? alternatives
     : alternatives.slice(0, ALTERNATIVE_PAGE_SIZE);
@@ -156,6 +166,7 @@ function VersionPickerCard({
   const showSkeleton = (!data || (searching && !hasResults)) && !search.queryError;
 
   const download = (release: ShowRelease) => {
+    attemptedRelease.current = release;
     setAttemptedReleaseId(release.id);
     search.grab(release);
   };
@@ -183,7 +194,7 @@ function VersionPickerCard({
             size="sm"
             className="h-10 px-3"
             onClick={search.refresh}
-            disabled={search.refreshing}
+            disabled={search.refreshing || search.grabbing || !!downloadStatus}
           >
             <RefreshCwIcon
               data-icon="inline-start"
@@ -202,16 +213,17 @@ function VersionPickerCard({
         />
       ) : null}
 
-      {showSkeleton ? <BestMatchSkeleton /> : null}
+      {downloadStatus && !bestRelease ? <TitlePrimaryAction action={downloadStatus} /> : null}
+      {showSkeleton && !downloadStatus ? <BestMatchSkeleton /> : null}
 
-      {noResults ? (
+      {noResults && !downloadStatus ? (
         <PickerMessage
           title="No versions found."
           detail="Sources sometimes miss older or less common titles. Try again later."
         />
       ) : null}
 
-      {allFailed ? (
+      {allFailed && !downloadStatus ? (
         <PickerMessage
           title="Couldn't reach any sources."
           detail="Check that the torrent stack and VPN are running."
@@ -227,6 +239,7 @@ function VersionPickerCard({
               type="single"
               spacing={2}
               aria-label="Quality"
+              disabled={search.grabbing || !!downloadStatus}
               value={selectedTier === null ? "" : String(selectedTier)}
               onValueChange={(value) => {
                 if (!value) {
@@ -264,25 +277,31 @@ function VersionPickerCard({
           {bestRelease ? (
             <div className="flex flex-col gap-2">
               <div className="flex flex-wrap items-center gap-3 rounded-lg border border-primary/45 bg-secondary/60 p-4.5 sm:p-5">
-                <div className="flex min-w-0 flex-[999_1_360px] flex-col gap-2">
+                <div key={selectedGroup?.tier} className="motion-release-match flex min-w-0 flex-[999_1_360px] flex-col gap-2">
                   <span className="text-xs font-semibold tracking-wide text-primary uppercase">
-                    Best match
+                    {downloadStatus && !activeAlternative ? "Selected release" : "Best match"}
                   </span>
                   <ReleaseName release={bestRelease} className="text-base font-medium" />
                   <ReleaseMeta release={bestRelease} />
                 </div>
-                <Button
-                  className="h-12 w-full px-5 sm:w-auto"
-                  disabled={!bestRelease.canGrab || search.grabbing}
-                  onClick={() => download(bestRelease)}
+                {downloadStatus && !activeAlternative ? (
+                  <div className="w-full sm:w-52">
+                    <TitlePrimaryAction action={downloadStatus} />
+                  </div>
+                ) : <Button
+                  className="h-12 w-full px-5 sm:w-52"
+                  aria-disabled={!!downloadStatus || !bestRelease.canGrab || search.grabbing}
+                  onClick={() => {
+                    if (!downloadStatus && bestRelease.canGrab && !search.grabbing) download(bestRelease);
+                  }}
                 >
                   {search.grabbingId === bestRelease.id ? (
                     <Loader2Icon data-icon="inline-start" className="animate-spin" />
                   ) : (
                     <DownloadIcon data-icon="inline-start" />
                   )}
-                  {search.grabbingId === bestRelease.id ? "Starting…" : primaryLabel}
-                </Button>
+                  {search.grabbingId === bestRelease.id ? "Starting…" : grabError && attemptedReleaseId === bestRelease.id ? "Retry download" : primaryLabel}
+                </Button>}
               </div>
               {grabError && attemptedReleaseId === bestRelease.id ? (
                 <InlineGrabError />
@@ -290,8 +309,31 @@ function VersionPickerCard({
             </div>
           ) : null}
 
-          {alternativesOpen && alternatives.length > 0 ? (
-            <ul id="version-picker-alternatives" className="flex flex-col">
+          {!downloadStatus ? (
+            <div className="flex items-center gap-4">
+              {alternatives.length === 0 ? (
+                <span className="text-sm text-muted-foreground">
+                  No other versions at this quality
+                </span>
+              ) : (
+                <Button
+                  variant="link"
+                  size="sm"
+                  className="h-auto px-0 text-sm underline"
+                  aria-expanded={alternativesOpen}
+                  aria-controls={alternativesOpen ? "version-picker-alternatives" : undefined}
+                  onClick={() => setAlternativesOpen((open) => !open)}
+                >
+                  {alternativesOpen
+                    ? "Show fewer"
+                    : `Show ${alternatives.length} more version${alternatives.length === 1 ? "" : "s"}`}
+                </Button>
+              )}
+            </div>
+          ) : null}
+
+          {alternativesOpen && (!downloadStatus || activeAlternative) && alternatives.length > 0 ? (
+            <ul id="version-picker-alternatives" className="motion-alternatives flex flex-col">
               {visibleAlternatives.map((release) => (
                 <li key={release.id}>
                   <div className="flex flex-col gap-2 border-t border-border py-3.5 sm:flex-row sm:items-center sm:gap-4">
@@ -305,19 +347,25 @@ function VersionPickerCard({
                       release={release}
                       className="text-sm sm:w-56"
                     />
-                    <Button
+                    {activeAlternative?.id === release.id && downloadStatus ? (
+                      <div className="w-full sm:ml-auto sm:w-44">
+                        <TitlePrimaryAction action={downloadStatus} />
+                      </div>
+                    ) : <Button
                       variant="outline"
-                      className="h-10 shrink-0 sm:ml-auto"
-                      disabled={!release.canGrab || search.grabbing}
-                      onClick={() => download(release)}
+                      className="h-10 shrink-0 sm:ml-auto sm:w-44"
+                      aria-disabled={!!downloadStatus || !release.canGrab || search.grabbing}
+                      onClick={() => {
+                    if (!downloadStatus && release.canGrab && !search.grabbing) download(release);
+                  }}
                     >
                       {search.grabbingId === release.id ? (
                         <Loader2Icon data-icon="inline-start" className="animate-spin" />
                       ) : (
                         <DownloadIcon data-icon="inline-start" />
                       )}
-                      {search.grabbingId === release.id ? "Starting…" : primaryLabel}
-                    </Button>
+                      {search.grabbingId === release.id ? "Starting…" : grabError && attemptedReleaseId === release.id ? "Retry download" : primaryLabel}
+                    </Button>}
                   </div>
                   {grabError && attemptedReleaseId === release.id ? (
                     <InlineGrabError />
@@ -343,24 +391,6 @@ function VersionPickerCard({
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-4">
-          {alternatives.length === 0 ? (
-            <span className="text-sm text-muted-foreground">
-              No other versions at this quality
-            </span>
-          ) : (
-            <Button
-              variant="link"
-              size="sm"
-              className="h-auto px-0 text-sm underline"
-              aria-expanded={alternativesOpen}
-              aria-controls="version-picker-alternatives"
-              onClick={() => setAlternativesOpen((open) => !open)}
-            >
-              {alternativesOpen
-                ? "Show fewer"
-                : `Show ${alternatives.length} more version${alternatives.length === 1 ? "" : "s"}`}
-            </Button>
-          )}
           {footerExtra}
         </div>
         <SearchStatus
@@ -459,7 +489,7 @@ function PickerMessage({
 function InlineGrabError() {
   return (
     <p className="text-sm text-destructive" role="alert">
-      Couldn&apos;t start that download. Try another version.
+      Couldn&apos;t start that download. Retry here or choose another version.
     </p>
   );
 }
@@ -472,7 +502,7 @@ function BestMatchSkeleton() {
         <Skeleton className="h-5 w-3/4 max-w-md" />
         <Skeleton className="h-4 w-2/3 max-w-sm" />
       </div>
-      <Skeleton className="h-12 w-full sm:w-32" />
+      <Skeleton className="h-12 w-full sm:w-52" />
     </div>
   );
 }

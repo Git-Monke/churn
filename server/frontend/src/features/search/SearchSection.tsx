@@ -14,6 +14,7 @@ import type {
   SearchResult,
   SearchServiceState,
 } from "@/api/types";
+import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Empty,
@@ -44,6 +45,10 @@ export function SearchSection() {
   const term = debounced.trim();
   const searchEnabled = term.length >= 2;
   const queryClient = useQueryClient();
+  const [requestErrors, setRequestErrors] = useState<Record<string, string>>({});
+  const [requestLinks, setRequestLinks] = useState(() =>
+    queryClient.getQueryData<Record<string, string>>(["search-request-links"]) ?? {},
+  );
 
   const optionsQuery = useQuery({
     queryKey: ["request-options"],
@@ -64,18 +69,19 @@ export function SearchSection() {
     mutationFn: ({ input }: RequestMutationVariables) => createRequest(input),
     onSuccess: (data, variables) => {
       const key = requestKey(variables.input);
-      const viewAction =
-        data.id !== undefined
-          ? {
-              label: "View releases",
-              onClick: () => {
-                window.location.hash =
-                  data.service === "sonarr"
-                    ? `#/library/show/sonarr/${data.id}`
-                    : `#/library/movie/radarr/${data.id}`;
-              },
-            }
-          : undefined;
+      const href = data.id === undefined ? undefined : data.service === "sonarr"
+        ? `#/library/show/sonarr/${data.id}`
+        : `#/library/movie/radarr/${data.id}`;
+      if (key && href) {
+        const links = queryClient.setQueryData<Record<string, string>>(
+          ["search-request-links"],
+          (previous) => ({ ...previous, [key]: href }),
+        );
+        if (links) setRequestLinks(links);
+      }
+      const viewAction = href
+        ? { label: "Pick a version", onClick: () => { window.location.hash = href; } }
+        : undefined;
       if (data.status === "added") {
         toast.success(`Requested ${formatTitle(data.title, data.year)}`, {
           description:
@@ -106,9 +112,7 @@ export function SearchSection() {
       void queryClient.invalidateQueries({ queryKey: ["activity"] });
       void queryClient.invalidateQueries({ queryKey: ["requested-library"] });
     },
-    onError: (error) => {
-      toast.error(error.message);
-    },
+    onError: (error, { result }) => reportRequestError(result.key, error.message),
   });
 
   const requestingKey =
@@ -116,13 +120,16 @@ export function SearchSection() {
       ? requestKey(requestMutation.variables.input)
       : null;
 
+  function reportRequestError(key: string, message: string) {
+    setRequestErrors((errors) => ({ ...errors, [key]: message }));
+  }
+
   function handleRequest(result: SearchResult) {
+    if (requestMutation.isPending) return;
     const service = result.kind === "movie" ? "radarr" : "sonarr";
     const serviceOptions = optionsQuery.data?.services[service];
     if (serviceOptions && serviceOptions.state !== "ok") {
-      toast.error(`${service === "sonarr" ? "Sonarr" : "Radarr"} is not ready`, {
-        description: serviceOptions.detail,
-      });
+      reportRequestError(result.key, serviceOptions.detail ?? `${service === "sonarr" ? "Sonarr" : "Radarr"} is not ready.`);
       return;
     }
 
@@ -131,9 +138,7 @@ export function SearchSection() {
       serviceDefaults.qualityProfileId === undefined ||
       !serviceDefaults.rootFolderPath
     ) {
-      toast.error("Choose request options first", {
-        description: "Open Request options and select a quality profile and root folder.",
-      });
+      reportRequestError(result.key, "Choose a quality profile and root folder in Request options, then retry.");
       return;
     }
 
@@ -147,18 +152,23 @@ export function SearchSection() {
 
     if (result.kind === "movie") {
       if (result.tmdbId === undefined) {
-        toast.error("This movie cannot be requested (missing TMDB id)");
+        reportRequestError(result.key, "This movie cannot be requested because it has no TMDB ID.");
         return;
       }
       input.tmdbId = result.tmdbId;
     } else {
       if (result.tvdbId === undefined) {
-        toast.error("This series cannot be requested (missing TVDB id)");
+        reportRequestError(result.key, "This series cannot be requested because it has no TVDB ID.");
         return;
       }
       input.tvdbId = result.tvdbId;
     }
 
+    setRequestErrors((errors) => {
+      const next = { ...errors };
+      delete next[result.key];
+      return next;
+    });
     requestMutation.mutate({ input, result });
   }
 
@@ -199,6 +209,9 @@ export function SearchSection() {
           <CircleAlertIcon />
           <AlertTitle>Search failed</AlertTitle>
           <AlertDescription>{searchQuery.error.message}</AlertDescription>
+          <Button variant="outline" size="sm" className="mt-2 w-fit" onClick={() => void searchQuery.refetch()}>
+            Retry search
+          </Button>
         </Alert>
       ) : null}
 
@@ -218,6 +231,9 @@ export function SearchSection() {
           results={results}
           showNiche={showNiche}
           onShowNicheChange={setShowNiche}
+          pending={searchQuery.isPlaceholderData}
+          requestLinks={requestLinks}
+          requestErrors={requestErrors}
           onRequest={handleRequest}
           requestingKey={requestingKey}
           requestDisabled={optionsQuery.isLoading || requestMutation.isPending}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   ChevronLeftIcon,
@@ -40,10 +40,12 @@ export function ShowPage({
   source,
   id,
   season,
+  pendingPosterUrl,
 }: {
   source: ShowSource;
   id: string;
   season?: number;
+  pendingPosterUrl?: string;
 }) {
   const showQuery = useQuery({
     queryKey: ["show", source, id],
@@ -73,6 +75,8 @@ export function ShowPage({
   /** Off by default: the season picker grabs a whole season pack at once. */
   const [pickEpisodes, setPickEpisodes] = useState(false);
   /** The season picker, opened from the banner for a partially downloaded season. */
+  const observedSeasonDownload = useRef(false);
+  const [startedSeason, setStartedSeason] = useState<number | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
 
   useEffect(() => {
@@ -131,6 +135,7 @@ export function ShowPage({
   const seasonHasFile = episodes.some(
     (episode) => episode.availability === "jellyfin" || episode.imported,
   );
+  const currentReleaseEpisode = episodes.find((episode) => episode.key === releaseEpisode?.key);
   const missingEpisodes = episodes.filter(
     (episode) => episode.availability === "missing" && !episode.imported,
   );
@@ -143,7 +148,27 @@ export function ShowPage({
     !seasonDownloadActive &&
     !pickEpisodes &&
     missingEpisodes.length > 0;
-  const showSeasonPicker = canPickSeason && (seasonMissing || pickerOpen);
+  const activeSeasonDownloads = episodes.flatMap(({ download }) =>
+    download && download.status !== "warning" ? [download] : [],
+  );
+  const seasonDownload = activeSeasonDownloads.find((download) => download.seasonPack) ?? activeSeasonDownloads[0];
+  const startedThisSeason = startedSeason !== null && startedSeason === selectedSeason;
+  const showStartedSeason = startedThisSeason;
+  useEffect(() => {
+    if (!startedThisSeason) return;
+    if (seasonDownloadActive) {
+      observedSeasonDownload.current = true;
+      return;
+    }
+    if (observedSeasonDownload.current) {
+      setStartedSeason(null);
+      return;
+    }
+    const timeout = window.setTimeout(() => setStartedSeason(null), 30_000);
+    return () => window.clearTimeout(timeout);
+  }, [seasonDownloadActive, startedThisSeason]);
+
+  const showSeasonPicker = showStartedSeason || (canPickSeason && (seasonMissing || pickerOpen));
   const showMissingBanner = canPickSeason && !seasonMissing && !pickerOpen;
 
   return (
@@ -159,7 +184,7 @@ export function ShowPage({
         </a>
       )}
 
-      {showQuery.isLoading ? <ShowPageSkeleton /> : null}
+      {showQuery.isLoading ? <ShowPageSkeleton posterUrl={pendingPosterUrl} /> : null}
 
       {showQuery.error && !showQuery.data ? (
         <Alert variant="destructive">
@@ -220,6 +245,12 @@ export function ShowPage({
                           } will download together.`
                     }
                     primaryLabel="Download season"
+                    downloadStatus={showStartedSeason ? {
+                      kind: "downloading",
+                      progress: seasonDownload?.progress ?? 0,
+                      starting: !seasonDownload,
+                      status: seasonDownload?.status,
+                    } : undefined}
                     footerExtra={
                       <Button
                         variant="link"
@@ -230,7 +261,11 @@ export function ShowPage({
                         Pick episodes one at a time
                       </Button>
                     }
-                    onGrabbed={() => void showQuery.refetch()}
+                    onGrabbed={() => {
+                      observedSeasonDownload.current = false;
+                      setStartedSeason(selectedSeason);
+                      void showQuery.refetch();
+                    }}
                   />
                 </div>
               ) : null}
@@ -269,6 +304,7 @@ export function ShowPage({
               ) : null}
 
               <ReleasePickerDialog
+                key={releaseEpisode?.key}
                 open={releaseEpisode !== null}
                 onOpenChange={(open) => {
                   if (!open) {
@@ -279,6 +315,9 @@ export function ShowPage({
                 seasonNumber={releaseEpisode?.seasonNumber}
                 episodeNumber={releaseEpisode?.episodeNumber}
                 showTitle={showQuery.data.series.title}
+                download={currentReleaseEpisode?.download}
+                ready={currentReleaseEpisode?.availability === "jellyfin"}
+                onGrabbed={() => void showQuery.refetch()}
               />
 
               <CancelEpisodeDownloadDialog
@@ -492,11 +531,15 @@ function ShowStateNotice({ show }: { show: ShowDetailResponse }) {
   );
 }
 
-function ShowPageSkeleton() {
+function ShowPageSkeleton({ posterUrl }: { posterUrl?: string }) {
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-end gap-x-10 gap-y-6">
-        <Skeleton className="aspect-[2/3] w-35 shrink-0 rounded-lg sm:w-55" />
+        {posterUrl ? (
+          <img data-detail-poster src={posterUrl} alt="" className="aspect-[2/3] w-35 shrink-0 rounded-lg object-cover sm:w-55" />
+        ) : (
+          <Skeleton className="aspect-[2/3] w-35 shrink-0 rounded-lg sm:w-55" />
+        )}
         <div className="flex min-w-0 flex-[999_1_480px] flex-col gap-4.5">
           <Skeleton className="h-3.5 w-20" />
           <Skeleton className="h-10 w-2/3 max-w-md" />

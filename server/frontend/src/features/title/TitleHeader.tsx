@@ -43,6 +43,7 @@ export function TitleHeader({
   return (
     <section className="flex flex-wrap items-end gap-x-10 gap-y-6">
       <div
+        data-detail-poster
         className={cn(
           "w-35 shrink-0 overflow-hidden rounded-lg bg-muted sm:w-55",
           dimmed && "opacity-70",
@@ -61,7 +62,7 @@ export function TitleHeader({
         )}
       </div>
 
-      <div className="flex min-w-0 flex-[999_1_480px] flex-col gap-4.5">
+      <div className="motion-title-copy flex min-w-0 flex-[999_1_480px] flex-col gap-4.5">
         <a
           href={backHref}
           className="inline-flex w-fit items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"

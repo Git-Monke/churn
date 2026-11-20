@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export type ShowSource = "jellyfin" | "sonarr";
 export type MovieSource = "jellyfin" | "radarr";
@@ -19,14 +19,26 @@ export type AppRoute =
   | { page: "search" }
   | { page: "people" };
 
-export function useHashRoute(): AppRoute {
+export function useHashRoute(
+  onNavigate?: (previous: AppRoute, next: AppRoute, commit: () => void) => void,
+): AppRoute {
   const [route, setRoute] = useState<AppRoute>(() => parseHash(window.location.hash));
+  const current = useRef(route);
 
   useEffect(() => {
-    const onChange = () => setRoute(parseHash(window.location.hash));
+    const onChange = () => {
+      const next = parseHash(window.location.hash);
+      const previous = current.current;
+      const commit = () => {
+        current.current = next;
+        setRoute(next);
+      };
+      if (onNavigate) onNavigate(previous, next, commit);
+      else commit();
+    };
     window.addEventListener("hashchange", onChange);
     return () => window.removeEventListener("hashchange", onChange);
-  }, []);
+  }, [onNavigate]);
 
   return route;
 }

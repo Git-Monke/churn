@@ -191,6 +191,60 @@
     --shadow-2xl: 0 1px 3px 0px hsl(0 0% 0% / 0.25);
 }
 
+@layer components {
+  .churn-popover-motion {
+    --popover-enter-scale: 0.97;
+    --popover-enter-duration: 150ms;
+  }
+
+  /* Radix keeps the portal mounted while the exit animation plays. */
+  .churn-popover-motion[data-state="open"] {
+    animation: popover-reveal var(--popover-enter-duration) cubic-bezier(0.23, 1, 0.32, 1);
+  }
+
+  .churn-popover-motion[data-state="closed"] {
+    pointer-events: none;
+    animation: popover-dismiss 90ms cubic-bezier(0.23, 1, 0.32, 1) forwards;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .churn-popover-motion {
+      --popover-enter-scale: 1;
+      --popover-enter-duration: 75ms;
+    }
+  }
+}
+
+@keyframes popover-reveal {
+  from {
+    opacity: 0;
+    transform: scale(var(--popover-enter-scale));
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes popover-dismiss {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+/* Capture only the selected poster so the rest of the page can update immediately. */
+:root[data-library-poster-transition] {
+  view-transition-name: none;
+}
+
+:root[data-library-poster-transition] [data-title-from-library] [data-detail-poster] {
+  view-transition-name: library-poster;
+}
+
+::view-transition-group(library-poster) {
+  animation-duration: 240ms;
+  animation-timing-function: cubic-bezier(0.23, 1, 0.32, 1);
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -217,4 +271,125 @@
     background-size: 100% 1px, 100% 1px, 1px 100%, 1px 100%;
     background-repeat: no-repeat;
   }
+}
+
+.motion-selection-underline {
+  position: absolute;
+  height: 2px;
+  background: var(--primary);
+  pointer-events: none;
+  transform-origin: left center;
+}
+
+.motion-action-swap,
+.motion-release-match,
+.motion-title-copy,
+.motion-overlay-fade,
+.motion-image[data-reveal] {
+  animation: churn-fade-in 140ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.motion-ready {
+  animation: churn-ready 700ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.motion-alternatives,
+.motion-up-next {
+  animation: churn-reveal 160ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.motion-dialog[data-state="open"] {
+  animation: churn-dialog-in 150ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.motion-dialog[data-state="closed"] {
+  animation: churn-fade-out 90ms cubic-bezier(0.23, 1, 0.32, 1) forwards;
+}
+
+.motion-buffering {
+  opacity: 0;
+  transition: opacity 110ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.motion-buffering[data-visible="true"] {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .motion-progress {
+    transition: transform 240ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+
+  .motion-synopsis {
+    animation: churn-synopsis 180ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+
+  .motion-poster-card {
+    transition: transform 140ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+
+  .motion-poster-card:active {
+    transform: scale(0.985);
+    transition-duration: 70ms;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) and (hover: hover) and (pointer: fine) {
+  .motion-poster-card:hover:not(:active) {
+    transform: translateY(-2px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .motion-alternatives,
+  .motion-up-next,
+  .motion-dialog[data-state="open"] {
+    animation: churn-fade-in 100ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+
+  .motion-ready {
+    animation: none;
+  }
+}
+
+@keyframes churn-fade-in {
+  from { opacity: 0.35; }
+  to { opacity: 1; }
+}
+
+@keyframes churn-fade-out {
+  to { opacity: 0; }
+}
+
+@keyframes churn-ready {
+  from { opacity: 0.45; }
+  to { opacity: 1; }
+}
+
+@keyframes churn-reveal {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes churn-dialog-in {
+  from { opacity: 0; transform: scale(0.975); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes churn-synopsis {
+  from { clip-path: inset(0 0 max(0px, calc(100% - var(--synopsis-visible-height))) 0); }
+  to { clip-path: inset(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-spin {
+    animation: none;
+  }
+}
+
+.churn-player-frame:fullscreen {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  aspect-ratio: auto;
 }

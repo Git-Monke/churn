@@ -104,6 +104,7 @@ export function DeleteTitleDialog({
           </DialogClose>
           <Button
             variant="destructive"
+            className="min-w-40"
             onClick={() => deleteMutation.mutate()}
             disabled={deleteMutation.isPending}
           >

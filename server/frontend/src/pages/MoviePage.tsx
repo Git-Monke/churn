@@ -29,15 +29,18 @@ import {
 export function MoviePage({
   source,
   id,
+  pendingPosterUrl,
 }: {
   source: "jellyfin" | "radarr";
   id: string;
+  pendingPosterUrl?: string;
 }) {
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelRequestOpen, setCancelRequestOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   /** The picker is open on demand for a title that is already playable. */
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [startedInPicker, setStartedInPicker] = useState(false);
   const [awaitingDownload, setAwaitingDownload] = useState(false);
   // Briefly disable Cancel after a grab. The release picker is replaced by the
   // downloading header under the cursor, so a second click (double-click) could
@@ -156,14 +159,13 @@ export function MoviePage({
   // demand for a title that already plays. Never while the downloaded file
   // waits for Jellyfin to index it — a version was already chosen.
   const showPicker =
-    !downloading &&
     !imported &&
     radarrId !== undefined &&
-    ((playable && pickerOpen) || (!playable && jellyfinId === undefined));
+    (downloading ? startedInPicker : (playable && pickerOpen) || (!playable && jellyfinId === undefined));
 
   return (
     <div className="flex flex-col gap-6">
-      {movieQuery.isLoading ? <MoviePageSkeleton /> : null}
+      {movieQuery.isLoading ? <MoviePageSkeleton posterUrl={pendingPosterUrl} /> : null}
 
       {movieQuery.error && !movieQuery.data ? (
         <Alert variant="destructive">
@@ -201,7 +203,7 @@ export function MoviePage({
               ]}
               synopsis={movie.overview}
               dimmed={!playable}
-              action={<TitlePrimaryAction action={action} />}
+              action={showPicker && action.kind === "downloading" ? undefined : <TitlePrimaryAction action={action} />}
               menu={<TitleMenu items={menuItems} />}
               attribution={
                 addedBy
@@ -214,8 +216,10 @@ export function MoviePage({
               <VersionPicker
                 scope="movie"
                 movieId={radarrId}
+                downloadStatus={action.kind === "downloading" ? action : undefined}
                 onClose={playable ? () => setPickerOpen(false) : undefined}
                 onGrabbed={() => {
+                  setStartedInPicker(true);
                   setPickerOpen(false);
                   setCancelReady(false);
                   setAwaitingDownload(true);
@@ -297,6 +301,8 @@ function movieAction({
       ...(download?.status === "importing" ? { label: "Importing" } : {}),
       ...(eta === undefined ? {} : { eta }),
       progress: download?.progress ?? 0,
+      starting: awaitingDownload && !download,
+      status: download?.status,
       ...(download === undefined ? {} : { download }),
     };
   }
@@ -317,10 +323,14 @@ function movieAction({
   };
 }
 
-function MoviePageSkeleton() {
+function MoviePageSkeleton({ posterUrl }: { posterUrl?: string }) {
   return (
     <div className="flex flex-wrap items-end gap-x-10 gap-y-6">
-      <Skeleton className="aspect-[2/3] w-35 shrink-0 rounded-lg sm:w-55" />
+      {posterUrl ? (
+        <img data-detail-poster src={posterUrl} alt="" className="aspect-[2/3] w-35 shrink-0 rounded-lg object-cover sm:w-55" />
+      ) : (
+        <Skeleton className="aspect-[2/3] w-35 shrink-0 rounded-lg sm:w-55" />
+      )}
       <div className="flex min-w-0 flex-[999_1_480px] flex-col gap-4.5">
         <Skeleton className="h-3.5 w-20" />
         <Skeleton className="h-10 w-2/3 max-w-md" />

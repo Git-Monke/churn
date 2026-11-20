@@ -1,5 +1,5 @@
-import type { ReactNode } from "react";
-import { CheckIcon, EllipsisIcon } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { CheckIcon, EllipsisIcon, PlayIcon } from "lucide-react";
 
 import type { ShowDownload, ShowEpisode } from "@/api/types";
 import { Button } from "@/components/ui/button";
@@ -35,10 +35,21 @@ export function EpisodeRow({
   onChooseRelease?: () => void;
   onCancelDownload?: () => void;
 }) {
+  const previous = useRef(playHref);
+  const [justPlayable, setJustPlayable] = useState(false);
+  useEffect(() => {
+    const changed = !previous.current && !!playHref;
+    previous.current = playHref;
+    if (!changed) return;
+    setJustPlayable(true);
+    const timeout = window.setTimeout(() => setJustPlayable(false), 5_000);
+    return () => window.clearTimeout(timeout);
+  }, [playHref]);
+
   return (
     <li className="border-b border-border">
       {playHref ? (
-        <PlayableEpisodeRow episode={episode} playHref={playHref} />
+        <PlayableEpisodeRow episode={episode} playHref={playHref} justPlayable={justPlayable} />
       ) : (
         <MissingEpisodeRow
           episode={episode}
@@ -54,9 +65,11 @@ export function EpisodeRow({
 function PlayableEpisodeRow({
   episode,
   playHref,
+  justPlayable,
 }: {
   episode: ShowEpisode;
   playHref: string;
+  justPlayable: boolean;
 }) {
   return (
     <a
@@ -82,7 +95,11 @@ function PlayableEpisodeRow({
       {/* A finished episode is marked at the top-right of the row, level with
           the thumbnail's top edge. */}
       <div className="flex w-full shrink-0 items-start justify-start gap-1.5 pl-37 text-[13px] text-muted-foreground sm:w-auto sm:min-w-27.5 sm:justify-end sm:self-start sm:pl-0">
-        {episode.played === true ? <WatchedLabel /> : null}
+        {justPlayable ? (
+          <span role="status" className="motion-ready inline-flex items-center gap-1.5 text-primary">
+            <PlayIcon className="size-4" aria-hidden="true" /> Ready to play
+          </span>
+        ) : episode.played === true ? <WatchedLabel /> : null}
       </div>
     </a>
   );
@@ -179,7 +196,7 @@ function MissingEpisodeRow({
         </div>
         {downloading && !compact ? (
           <Progress
-            value={download.progress}
+            value={download.progress} smooth={download.status === "downloading"}
             className="h-1.5 w-40"
             aria-label={`Download progress for episode ${episode.episodeNumber}`}
           />

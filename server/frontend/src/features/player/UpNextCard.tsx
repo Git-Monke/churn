@@ -42,7 +42,7 @@ export function UpNextCard({
     <div
       role="region"
       aria-label="Up next"
-      className="absolute right-5 bottom-19 flex w-[360px] max-w-[calc(100%-40px)] flex-col gap-3.5 rounded-xl bg-background/90 p-4 shadow-lg max-sm:inset-x-3 max-sm:right-3 max-sm:bottom-19 max-sm:left-3 max-sm:w-auto max-sm:max-w-none"
+      className="motion-up-next absolute right-5 bottom-19 flex w-[360px] max-w-[calc(100%-40px)] flex-col gap-3.5 rounded-xl bg-background/90 p-4 shadow-lg max-sm:inset-x-3 max-sm:right-3 max-sm:bottom-19 max-sm:left-3 max-sm:w-auto max-sm:max-w-none"
     >
       <div className="flex items-center gap-3">
         <div className="aspect-video w-28 shrink-0 overflow-hidden rounded-md bg-muted">
@@ -73,7 +73,7 @@ export function UpNextCard({
 
       {counting ? (
         <Progress
-          value={elapsedPercent}
+          value={elapsedPercent} smooth
           aria-label="Time until the next episode"
           className="h-1 bg-muted"
         />
