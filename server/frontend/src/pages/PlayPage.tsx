@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type Hls from "hls.js";
 import { toast } from "sonner";
-import { ChevronLeftIcon, CircleAlertIcon } from "lucide-react";
+import { ChevronLeftIcon, CircleAlertIcon, MaximizeIcon, MinimizeIcon } from "lucide-react";
 
 import {
   fetchPlayback,
@@ -108,7 +108,6 @@ export function PlayPage({
     placeholderData: (previous) => previous,
   });
 
-  const item = playbackQuery.data?.item;
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const frameRef = useRef<HTMLDivElement | null>(null);
   const hlsRef = useRef<Hls | null>(null);
@@ -128,11 +127,36 @@ export function PlayPage({
     paused: boolean;
     previous?: PlaybackItem;
   } | null>(null);
+  const qualityFailure = !playbackQuery.isFetching && !playbackQuery.isPlaceholderData &&
+    (playbackQuery.isError || (playbackQuery.data && playbackQuery.data.state !== "ok"));
+  const item = playbackQuery.data?.state === "ok"
+    ? playbackQuery.data.item
+    : qualitySwitchRef.current?.previous;
+  const [qualityError, setQualityError] = useState<{ quality: PlaybackQuality; message: string } | null>(null);
   const [switchingQuality, setSwitchingQuality] = useState(false);
   const [showSkipIntro, setShowSkipIntro] = useState(false);
   const [nextPrompt, setNextPrompt] = useState<NextPromptState | null>(null);
   const [mediaIssue, setMediaIssue] = useState<MediaIssue | null>(null);
   const [recovering, setRecovering] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+  const canFullscreenFrame = document.fullscreenEnabled === true;
+  useEffect(() => {
+    const onFullscreenChange = () => setFullscreen(document.fullscreenElement === frameRef.current);
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
+  }, []);
+
+  const [waiting, setWaiting] = useState(false);
+  const [showBuffering, setShowBuffering] = useState(false);
+  useEffect(() => {
+    if ((!waiting && !switchingQuality && !recovering) || mediaIssue) {
+      setShowBuffering(false);
+      return;
+    }
+    const timeout = window.setTimeout(() => setShowBuffering(true), 300);
+    return () => window.clearTimeout(timeout);
+  }, [mediaIssue, recovering, switchingQuality, waiting]);
+
   const [ended, setEnded] = useState(false);
   const [recovery, setRecovery] = useState<{
     itemId: string;
@@ -204,19 +228,19 @@ export function PlayPage({
     setSwitchingQuality(false);
   }, [item?.streamUrl, item?.quality]);
 
-  // A failed quality switch keeps the current stream and reverts the picker.
+  // Fall back to the previous stream for both transport errors and a refused quality.
   useEffect(() => {
-    if (!playbackQuery.error || !item || !qualitySwitchRef.current) {
-      return;
-    }
+    const pending = qualitySwitchRef.current;
+    if (!qualityFailure || !pending?.previous) return;
     qualitySwitchRef.current = null;
     setSwitchingQuality(false);
-    setQuality(item.quality);
-    writePlaybackQuality(item.quality);
-    toast.error("Could not switch quality", {
-      description: playbackQuery.error.message,
+    setQuality(pending.previous.quality);
+    writePlaybackQuality(pending.previous.quality);
+    setQualityError({
+      quality: pending.quality,
+      message: playbackQuery.error?.message ?? playbackQuery.data?.detail ?? "Could not switch quality.",
     });
-  }, [playbackQuery.error, item?.quality]);
+  }, [playbackQuery.data?.detail, playbackQuery.error, qualityFailure]);
 
   // A remembered tier may not be available for this file. Keep the preference,
   // but show the tier the backend actually applied.
@@ -364,6 +388,7 @@ export function PlayPage({
     setRecovering(false);
     setMediaIssue(null);
     setShowSkipIntro(false);
+    setWaiting(false);
     setNextPrompt(null);
     setEnded(false);
     setSubtitle(null);
@@ -735,6 +760,7 @@ export function PlayPage({
       previous: item,
     };
     setMediaIssue(null);
+    setQualityError(null);
     setSwitchingQuality(true);
     setQuality(next);
     writePlaybackQuality(next);
@@ -760,6 +786,9 @@ export function PlayPage({
   }
 
   function handleSeeking() {
+    setWaiting(false);
+    setShowSkipIntro(false);
+    setNextPrompt(null);
     seekingRef.current = true;
     seekedRef.current = false;
     lastSeekAtRef.current = Date.now();
@@ -772,12 +801,16 @@ export function PlayPage({
   function handleSeeked() {
     seekingRef.current = false;
     seekedRef.current = true;
+    const video = videoRef.current;
+    setWaiting(!!video && !video.paused && video.readyState < 3);
+    handleTimeUpdate();
     // Persist the jump as soon as the user stops dragging, instead of waiting
     // for the next tick or for the page to close.
     scheduleSeekReport();
   }
 
   function handlePlay() {
+    if ((videoRef.current?.readyState ?? 0) < 3) setWaiting(true);
     if (!item || startedRef.current) {
       return;
     }
@@ -873,6 +906,7 @@ export function PlayPage({
   }
 
   function handlePause() {
+    setWaiting(false);
     const video = videoRef.current;
     if (video && !video.ended) {
       positionRef.current = Math.round(video.currentTime * TICKS_PER_SECOND);
@@ -978,6 +1012,7 @@ export function PlayPage({
   }
 
   function handlePlaying() {
+    setWaiting(false);
     recoveringRef.current = false;
     recoveryStartedAtRef.current = 0;
     clearRecoveryTimer();
@@ -1015,6 +1050,7 @@ export function PlayPage({
   }
 
   function handleEnded() {
+    setWaiting(false);
     const video = videoRef.current;
     const duration = video?.duration;
     const durationTicks =
@@ -1084,15 +1120,13 @@ export function PlayPage({
 
   function toggleFullscreen() {
     const frame = frameRef.current;
-    if (!frame) {
-      return;
-    }
+    if (!frame || !canFullscreenFrame) return;
     if (document.fullscreenElement) {
       void document.exitFullscreen().catch(() => {});
       return;
     }
     void frame.requestFullscreen().catch(() => {
-      // Fullscreen can be blocked by browser policy; the native control works.
+      toast.error("Fullscreen is unavailable in this browser window.");
     });
   }
 
@@ -1125,11 +1159,11 @@ export function PlayPage({
         : "Back to show"
       : "Back to Library";
 
-  if (playbackQuery.isLoading) {
+  if (playbackQuery.isLoading && !item) {
     return <PlaybackLoading />;
   }
 
-  if (playbackQuery.error && !playbackQuery.data) {
+  if (playbackQuery.error && !item) {
     return (
       <PlaybackMessage
         title="Could not load this video"
@@ -1140,7 +1174,7 @@ export function PlayPage({
     );
   }
 
-  if (!item || playbackQuery.data?.state !== "ok") {
+  if (!item) {
     const state = playbackQuery.data?.state;
     return (
       <PlaybackMessage
@@ -1158,6 +1192,25 @@ export function PlayPage({
   }
 
   const showUpNext = nextPrompt !== null && item.nextEpisode !== undefined;
+  const showWait = !mediaIssue && !ended && showBuffering;
+  const showPlaybackPrompt = !mediaIssue && !ended && !waiting && !recovering &&
+    !switchingQuality && !seekingRef.current;
+  const waitLabel = switchingQuality ? "Changing quality…" : recovering ? "Reconnecting…" : "Buffering…";
+  const settings = (
+    <PlaybackSettingsMenu
+      qualities={item.qualities}
+      quality={quality}
+      onQualityChange={handleQualityChange}
+      subtitles={item.subtitles}
+      subtitle={subtitle}
+      onSubtitleChange={setSubtitle}
+      autoplay={item.type === "Episode" ? autoplay : undefined}
+      onAutoplayChange={item.type === "Episode" ? handleAutoplayChange : undefined}
+      onStartOver={startFromBeginning}
+      switchingQuality={switchingQuality}
+      portalContainer={fullscreen ? frameRef.current : undefined}
+    />
+  );
 
   return (
     <div className="flex flex-col gap-5">
@@ -1170,12 +1223,13 @@ export function PlayPage({
       </a>
       <div
         ref={frameRef}
-        className="relative mx-auto aspect-video w-full max-w-[calc((100dvh_-_19rem)*16/9)] overflow-hidden bg-black"
+        className="churn-player-frame relative mx-auto aspect-video w-full max-w-[calc((100dvh_-_19rem)*16/9)] overflow-hidden bg-black"
       >
         <video
           ref={videoRef}
           className="size-full bg-black"
           controls
+          controlsList={canFullscreenFrame ? "nofullscreen" : undefined}
           playsInline
           preload="metadata"
           poster={item.imageUrl}
@@ -1188,6 +1242,10 @@ export function PlayPage({
           onTimeUpdate={handleTimeUpdate}
           onEnded={handleEnded}
           onPlaying={handlePlaying}
+          onWaiting={(event) => {
+            if (!event.currentTarget.paused) setWaiting(true);
+          }}
+          onEmptied={() => setWaiting(false)}
           onCanPlay={handleCanPlay}
           onError={handleVideoError}
         >
@@ -1201,6 +1259,38 @@ export function PlayPage({
             />
           ))}
         </video>
+        {canFullscreenFrame ? (
+          <div className="absolute top-3 right-3 z-10 flex gap-2">
+            {fullscreen ? settings : null}
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              aria-label={fullscreen ? "Exit fullscreen" : "Fullscreen"}
+              onClick={toggleFullscreen}
+            >
+              {fullscreen ? <MinimizeIcon /> : <MaximizeIcon />}
+            </Button>
+          </div>
+        ) : null}
+        <div
+          data-visible={showWait}
+          className="motion-buffering pointer-events-none absolute inset-0 flex items-center justify-center"
+        >
+          <span aria-hidden="true" className="rounded bg-background/90 px-3 py-2 text-sm">
+            {waitLabel}
+          </span>
+          <span role="status" className="sr-only">{showWait ? waitLabel : ""}</span>
+        </div>
+        {qualityError && !mediaIssue ? (
+          <div className="absolute top-3 left-3 z-10 max-w-[calc(100%-9rem)] rounded bg-background/95 p-3 text-sm">
+            <p role="alert">{qualityError.message}</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <Button variant="outline" size="sm" onClick={() => handleQualityChange(qualityError.quality)}>Retry quality change</Button>
+              <Button variant="ghost" size="sm" onClick={() => setQualityError(null)}>Dismiss</Button>
+            </div>
+          </div>
+        ) : null}
         {mediaIssue ? <PlaybackErrorOverlay onRetry={retryPlayback} /> : null}
         {!mediaIssue && ended ? (
           <EndedOverlay
@@ -1209,10 +1299,10 @@ export function PlayPage({
             backLabel={backLabel}
           />
         ) : null}
-        {!mediaIssue && !ended && !showUpNext && showSkipIntro ? (
+        {showPlaybackPrompt && !showUpNext && showSkipIntro ? (
           <SkipIntroButton onClick={skipIntro} />
         ) : null}
-        {!mediaIssue && !ended && nextPrompt && item.nextEpisode ? (
+        {showPlaybackPrompt && nextPrompt && item.nextEpisode ? (
           <UpNextCard
             episode={item.nextEpisode}
             thumbnailUrl={`/api/library/images/${encodeURIComponent(item.nextEpisode.id)}`}
@@ -1230,22 +1320,7 @@ export function PlayPage({
         item={item}
         from={from}
         onNext={item.nextEpisode ? () => advanceToNext(false) : undefined}
-        settings={
-          <PlaybackSettingsMenu
-            qualities={item.qualities}
-            quality={quality}
-            onQualityChange={handleQualityChange}
-            subtitles={item.subtitles}
-            subtitle={subtitle}
-            onSubtitleChange={setSubtitle}
-            autoplay={item.type === "Episode" ? autoplay : undefined}
-            onAutoplayChange={
-              item.type === "Episode" ? handleAutoplayChange : undefined
-            }
-            onStartOver={startFromBeginning}
-            switchingQuality={switchingQuality}
-          />
-        }
+        settings={fullscreen ? undefined : settings}
       />
     </div>
   );

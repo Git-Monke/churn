@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { SearchIcon } from "lucide-react";
 
 import type { SearchResult } from "@/api/types";
@@ -25,6 +25,9 @@ interface SearchResultsProps {
   results: SearchResult[];
   showNiche: boolean;
   onShowNicheChange: (showNiche: boolean) => void;
+  pending: boolean;
+  requestLinks: Record<string, string>;
+  requestErrors: Record<string, string>;
   onRequest: (result: SearchResult) => void;
   requestingKey: string | null;
   requestDisabled: boolean;
@@ -35,10 +38,21 @@ export function SearchResults({
   results,
   showNiche,
   onShowNicheChange,
+  pending,
+  requestLinks,
+  requestErrors,
   onRequest,
   requestingKey,
   requestDisabled,
 }: SearchResultsProps) {
+  const grid = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const fade = grid.current?.animate([{ opacity: 0.65 }, { opacity: 1 }], {
+      duration: 130,
+      easing: "cubic-bezier(0.23, 1, 0.32, 1)",
+    });
+    return () => fade?.cancel();
+  }, [query]);
   const [filter, setFilter] = useState<Filter>("all");
   const visible = useMemo(
     () =>
@@ -65,6 +79,15 @@ export function SearchResults({
           <TabsTrigger value="movie">{`Movies (${countKind(visible, "movie")})`}</TabsTrigger>
           <TabsTrigger value="series">{`Series (${countKind(visible, "series")})`}</TabsTrigger>
         </TabsList>
+        <span role="status" className="text-xs text-muted-foreground">
+          {pending ? (
+            "Updating results…"
+          ) : (
+            <span className="sr-only">
+              {visible.length} results for {query}
+            </span>
+          )}
+        </span>
         {hiddenCount > 0 || showNiche ? (
           <div className="flex items-center gap-2">
             <Switch
@@ -85,12 +108,17 @@ export function SearchResults({
       </div>
       <TabsContent value={filter}>
         {filtered.length > 0 ? (
-          <div className="grid grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6">
+          <div
+            ref={grid}
+            className="grid grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6"
+          >
             {filtered.map((result) => (
               <SearchResultCard
                 key={result.key}
                 result={result}
                 onRequest={onRequest}
+                requestHref={requestLinks[result.key]}
+                requestError={requestErrors[result.key]}
                 requesting={requestingKey === result.key}
                 requestDisabled={requestDisabled}
               />

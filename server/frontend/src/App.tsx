@@ -6,7 +6,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AppHeader } from "@/components/AppHeader";
 import { AuthProvider, useAuth } from "@/features/auth/AuthProvider";
-import { useHashRoute } from "@/hooks/use-hash-route";
+import { useLibraryPosterNavigation } from "@/features/library/use-library-poster-navigation";
 import { LibraryPage } from "@/pages/LibraryPage";
 import { LoginPage } from "@/pages/LoginPage";
 import { MoviePage } from "@/pages/MoviePage";
@@ -40,7 +40,7 @@ function AppShell() {
 }
 
 function Dashboard() {
-  const route = useHashRoute();
+  const { route, poster, keepLibrary, main, onLibraryClick } = useLibraryPosterNavigation();
   const { session } = useAuth();
   const isAdmin = session?.user?.isAdmin === true;
 
@@ -63,7 +63,7 @@ function Dashboard() {
   return (
     <div className="flex min-h-dvh w-full flex-col">
       <AppHeader route={route} />
-      <main className="mx-auto flex w-full max-w-content flex-1 flex-col gap-8 px-4 py-6 sm:px-6 lg:px-10">
+      <main ref={main} tabIndex={-1} data-title-from-library={poster ? "" : undefined} className="mx-auto flex w-full max-w-content flex-1 flex-col gap-8 px-4 py-6 sm:px-6 lg:px-10">
         {route.page === "services" ? (
           <ServicesPage
             status={statusQuery.data}
@@ -71,17 +71,22 @@ function Dashboard() {
             error={statusQuery.error}
           />
         ) : null}
-        {route.page === "library" ? <LibraryPage jellyfinUrl={jellyfinUrl} /> : null}
+        {keepLibrary ? (
+          <div hidden={route.page !== "library"} onClick={onLibraryClick}>
+            <LibraryPage jellyfinUrl={jellyfinUrl} />
+          </div>
+        ) : null}
         {route.page === "show" ? (
           <ShowPage
             key={`${route.source}:${route.id}`}
             source={route.source}
             id={route.id}
             season={route.season}
+            pendingPosterUrl={poster?.imageUrl}
           />
         ) : null}
         {route.page === "movie" ? (
-          <MoviePage key={`${route.source}:${route.id}`} source={route.source} id={route.id} />
+          <MoviePage key={`${route.source}:${route.id}`} source={route.source} id={route.id} pendingPosterUrl={poster?.imageUrl} />
         ) : null}
         {route.page === "search" ? <SearchPage /> : null}
         {route.page === "people" && isAdmin ? <PeoplePage /> : null}

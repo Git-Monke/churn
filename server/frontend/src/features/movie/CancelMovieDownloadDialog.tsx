@@ -82,6 +82,7 @@ export function CancelMovieDownloadDialog({
           </Button>
           <Button
             variant="destructive"
+            className="min-w-40"
             onClick={() => cancelMutation.mutate()}
             disabled={cancelMutation.isPending}
           >

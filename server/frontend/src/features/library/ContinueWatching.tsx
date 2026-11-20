@@ -1,5 +1,6 @@
 import { PlayIcon } from "lucide-react";
 
+import { MotionImage } from "@/components/MotionImage";
 import { Progress } from "@/components/ui/progress";
 import {
   toContinueWatchingCards,
@@ -43,11 +44,11 @@ function ResumeCard({ item }: { item: ContinueWatchingCard }) {
   return (
     <a
       href={item.href}
-      className="group flex h-full flex-col gap-3 rounded-lg transition-transform hover:-translate-y-0.5 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+      className="group flex h-full flex-col gap-3 rounded-lg motion-poster-card focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
     >
       <div className="relative aspect-video overflow-hidden rounded-lg bg-secondary">
         {item.imageUrl ? (
-          <img
+          <MotionImage
             src={item.imageUrl}
             alt=""
             loading="lazy"
@@ -63,7 +64,7 @@ function ResumeCard({ item }: { item: ContinueWatchingCard }) {
         </span>
         {item.upNext ? null : (
           <Progress
-            value={item.progress}
+            value={item.progress} smooth
             aria-label={`${item.title} playback progress`}
             className="absolute inset-x-0 bottom-0 h-1 rounded-none bg-foreground/20"
           />

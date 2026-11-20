@@ -34,6 +34,7 @@ export interface PlaybackSettingsMenuProps {
   onStartOver: () => void;
   /** A quality switch is in flight; radios stay usable but show the wait. */
   switchingQuality?: boolean;
+  portalContainer?: HTMLElement | null;
 }
 
 /**
@@ -51,6 +52,7 @@ export function PlaybackSettingsMenu({
   onAutoplayChange,
   onStartOver,
   switchingQuality = false,
+  portalContainer,
 }: PlaybackSettingsMenuProps) {
   const tiers = qualities.filter((option) => option.id !== "max");
   const showAutoplay = autoplay !== undefined && onAutoplayChange !== undefined;
@@ -68,7 +70,7 @@ export function PlaybackSettingsMenu({
           <MoreHorizontalIcon className="size-5" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-56">
+      <DropdownMenuContent align="end" className="w-56" portalContainer={portalContainer}>
         {tiers.length > 0 ? (
           <>
             <DropdownMenuLabel>

@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties } from "react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -20,6 +20,7 @@ export function Synopsis({
 }) {
   const id = useId();
   const ref = useRef<HTMLParagraphElement | null>(null);
+  const [collapsedHeight, setCollapsedHeight] = useState(0);
   const [expanded, setExpanded] = useState(false);
   const [overflowing, setOverflowing] = useState(false);
 
@@ -29,6 +30,7 @@ export function Synopsis({
       return;
     }
     const measure = () => {
+      setCollapsedHeight(element.clientHeight);
       setOverflowing(element.scrollHeight > element.clientHeight + 1);
     };
     measure();
@@ -42,10 +44,10 @@ export function Synopsis({
       <p
         id={id}
         ref={ref}
-        className="text-sm leading-relaxed text-pretty text-muted-foreground"
+        className={cn("text-sm leading-relaxed text-pretty text-muted-foreground", expanded && "motion-synopsis")}
         style={
           expanded
-            ? undefined
+            ? { "--synopsis-visible-height": `${collapsedHeight}px` } as CSSProperties
             : {
                 display: "-webkit-box",
                 WebkitBoxOrient: "vertical",

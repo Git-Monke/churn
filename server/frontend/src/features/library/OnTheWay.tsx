@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ArrowRightIcon, FilmIcon, TvIcon, XIcon } from "lucide-react";
 
+import { MotionImage } from "@/components/MotionImage";
 import type { ActivityItem } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -77,7 +78,7 @@ function OnTheWayCard({ entry }: { entry: LibraryEntry }) {
         "relative gap-0 p-3.5",
         pickHref && "ring-primary/40",
         href &&
-          "transition-transform hover:-translate-y-0.5 focus-within:ring-2 focus-within:ring-ring/50",
+          "motion-poster-card focus-within:ring-2 focus-within:ring-ring/50",
       )}
     >
       {href ? (
@@ -86,7 +87,7 @@ function OnTheWayCard({ entry }: { entry: LibraryEntry }) {
       <div className="pointer-events-none relative flex gap-3">
         <div className="flex h-21 w-14 shrink-0 items-center justify-center overflow-hidden rounded-sm bg-muted">
           {imageUrl ? (
-            <img src={imageUrl} alt="" loading="lazy" className="size-full object-cover" />
+            <MotionImage src={imageUrl} alt="" loading="lazy" className="size-full object-cover" />
           ) : isSeries ? (
             <TvIcon className="text-muted-foreground" />
           ) : (
@@ -110,7 +111,7 @@ function OnTheWayCard({ entry }: { entry: LibraryEntry }) {
           {activity ? (
             <div className="flex flex-col gap-1">
               <Progress
-                value={activity.progress}
+                value={activity.progress} smooth={entry.status === "downloading"}
                 aria-label={`${title} download progress`}
               />
               {downloadDetail(activity) ? (

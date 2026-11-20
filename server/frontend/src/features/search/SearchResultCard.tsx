@@ -1,3 +1,5 @@
+import { useCallback, useId, useRef } from "react";
+import type { ReactNode } from "react";
 import {
   CheckIcon,
   ClockIcon,
@@ -6,8 +8,8 @@ import {
   PlusIcon,
   TvIcon,
 } from "lucide-react";
-import type { ReactNode } from "react";
 
+import { MotionImage } from "@/components/MotionImage";
 import type { SearchResult } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
@@ -16,6 +18,8 @@ interface SearchResultCardProps {
   result: SearchResult;
   onRequest: (result: SearchResult) => void;
   requesting: boolean;
+  requestHref?: string;
+  requestError?: string;
   requestDisabled: boolean;
 }
 
@@ -23,8 +27,22 @@ export function SearchResultCard({
   result,
   onRequest,
   requesting,
+  requestHref,
+  requestError,
   requestDisabled,
 }: SearchResultCardProps) {
+  const errorId = useId();
+  const restoreFocus = useRef(false);
+  const trackAction = useCallback((node: HTMLButtonElement | HTMLAnchorElement | null) => {
+    if (!node) return;
+    if (restoreFocus.current) {
+      restoreFocus.current = false;
+      node.focus({ preventScroll: true });
+    }
+    return () => {
+      restoreFocus.current = document.activeElement === node;
+    };
+  }, []);
   const available = result.available === true;
   const requested = !available && result.inLibrary === true;
 
@@ -38,7 +56,7 @@ export function SearchResultCard({
     <Card className="gap-0 py-0">
       <div className="aspect-[2/3] bg-muted">
         {result.imageUrl ? (
-          <img
+          <MotionImage
             src={result.imageUrl}
             alt={`${result.title} poster`}
             loading="lazy"
@@ -73,23 +91,38 @@ export function SearchResultCard({
           {result.inLibrary === null ? (
             <p className="text-xs text-muted-foreground">Status unknown</p>
           ) : null}
+          {requestError ? (
+            <p id={errorId} role="alert" className="text-xs text-destructive">
+              {requestError}
+            </p>
+          ) : null}
           {available ? (
             <StatusState icon={<CheckIcon />} label="Available" />
+          ) : requestHref && requested ? (
+            <Button asChild size="sm" className="motion-action-swap w-full">
+              <a href={requestHref} ref={trackAction}>
+                Pick a version
+              </a>
+            </Button>
           ) : requested ? (
             <StatusState icon={<ClockIcon />} label="Requested" />
           ) : (
             <Button
               size="sm"
-              className="w-full"
-              disabled={requestDisabled || requesting}
-              onClick={() => onRequest(result)}
+              ref={trackAction}
+              className="w-full aria-disabled:opacity-50"
+              aria-disabled={requestDisabled || requesting}
+              aria-describedby={requestError ? errorId : undefined}
+              onClick={() => {
+                if (!requestDisabled && !requesting) onRequest(result);
+              }}
             >
               {requesting ? (
                 <Loader2Icon data-icon="inline-start" className="animate-spin" />
               ) : (
                 <PlusIcon data-icon="inline-start" />
               )}
-              {requesting ? "Requesting…" : "Request"}
+              {requesting ? "Requesting…" : requestError ? "Retry request" : "Request"}
             </Button>
           )}
         </div>

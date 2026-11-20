@@ -72,7 +72,7 @@ export function SkipIntroButton({ onClick }: { onClick: () => void }) {
     <Button
       type="button"
       variant="outline"
-      className={`absolute right-5 ${CONTROL_BAR_INSET} h-11 px-4 shadow-lg`}
+      className={`motion-overlay-fade absolute right-5 ${CONTROL_BAR_INSET} h-11 px-4 shadow-lg`}
       onClick={onClick}
     >
       <SkipForwardIcon className="size-4" />

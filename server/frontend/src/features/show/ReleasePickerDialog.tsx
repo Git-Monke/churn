@@ -1,3 +1,5 @@
+import { useState } from "react";
+import type { ShowDownload } from "@/api/types";
 import {
   Dialog,
   DialogContent,
@@ -14,6 +16,9 @@ interface ReleasePickerDialogProps {
   seasonNumber?: number;
   episodeNumber?: number;
   showTitle?: string;
+  download?: ShowDownload;
+  ready?: boolean;
+  onGrabbed?: () => void;
 }
 
 /**
@@ -27,7 +32,11 @@ export function ReleasePickerDialog({
   seasonNumber,
   episodeNumber,
   showTitle,
+  download,
+  ready,
+  onGrabbed,
 }: ReleasePickerDialogProps) {
+  const [requested, setRequested] = useState(false);
   if (seriesId === undefined || seasonNumber === undefined || episodeNumber === undefined) {
     return null;
   }
@@ -50,7 +59,16 @@ export function ReleasePickerDialog({
           seasonNumber={seasonNumber}
           episodeNumber={episodeNumber}
           primaryLabel="Download episode"
-          onGrabbed={() => onOpenChange(false)}
+          downloadStatus={requested ? {
+            kind: "downloading",
+            progress: download?.progress ?? 0,
+            ready,
+            status: download?.status ?? "queued",
+          } : undefined}
+          onGrabbed={() => {
+            setRequested(true);
+            onGrabbed?.();
+          }}
         />
       </DialogContent>
     </Dialog>
