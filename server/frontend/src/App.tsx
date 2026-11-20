@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { fetchStatus } from "@/api/client";
@@ -6,6 +6,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AppHeader } from "@/components/AppHeader";
 import { AuthProvider, useAuth } from "@/features/auth/AuthProvider";
+import { PasskeySettings } from "@/features/auth/PasskeySettings";
 import { useLibraryPosterNavigation } from "@/features/library/use-library-poster-navigation";
 import { LibraryPage } from "@/pages/LibraryPage";
 import { LoginPage } from "@/pages/LoginPage";
@@ -29,17 +30,28 @@ export default function App() {
 
 function AppShell() {
   const { session, isLoading } = useAuth();
+  const [showPasskeys, setShowPasskeys] = useState(false);
+  const authenticated = session?.authenticated === true && !!session.user;
+
+  useEffect(() => {
+    if (!authenticated) setShowPasskeys(false);
+  }, [authenticated]);
 
   if (isLoading) {
     return <AppLoading />;
   }
-  if (!session?.authenticated || !session.user) {
-    return <LoginPage />;
+  if (!authenticated) {
+    return <LoginPage onPasskeySetup={() => setShowPasskeys(true)} />;
   }
-  return <Dashboard />;
+  return (
+    <>
+      <Dashboard onManagePasskeys={() => setShowPasskeys(true)} />
+      {showPasskeys && <PasskeySettings onClose={() => setShowPasskeys(false)} />}
+    </>
+  );
 }
 
-function Dashboard() {
+function Dashboard({ onManagePasskeys }: { onManagePasskeys: () => void }) {
   const { route, poster, keepLibrary, main, onLibraryClick } = useLibraryPosterNavigation();
   const { session } = useAuth();
   const isAdmin = session?.user?.isAdmin === true;
@@ -62,7 +74,7 @@ function Dashboard() {
 
   return (
     <div className="flex min-h-dvh w-full flex-col">
-      <AppHeader route={route} />
+      <AppHeader route={route} onManagePasskeys={onManagePasskeys} />
       <main ref={main} tabIndex={-1} data-title-from-library={poster ? "" : undefined} className="mx-auto flex w-full max-w-content flex-1 flex-col gap-8 px-4 py-6 sm:px-6 lg:px-10">
         {route.page === "services" ? (
           <ServicesPage

@@ -1,4 +1,4 @@
-import { ChevronDownIcon, LogOutIcon, UsersIcon } from "lucide-react";
+import { ChevronDownIcon, FingerprintIcon, LogOutIcon, UsersIcon } from "lucide-react";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -12,12 +12,14 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/features/auth/AuthProvider";
+import { usePasskeyAvailability } from "@/features/auth/passkeys";
 import type { AppRoute } from "@/hooks/use-hash-route";
 import { useSelectionUnderline } from "@/hooks/use-selection-underline";
 import { cn } from "@/lib/utils";
 
 interface AppHeaderProps {
   route: AppRoute;
+  onManagePasskeys: () => void;
 }
 
 const NAV_ITEMS = [
@@ -26,8 +28,9 @@ const NAV_ITEMS = [
   { page: "services", label: "Status", href: "#/services" },
 ] as const;
 
-export function AppHeader({ route }: AppHeaderProps) {
+export function AppHeader({ route, onManagePasskeys }: AppHeaderProps) {
   const { session, logout, isPending } = useAuth();
+  const passkeysAvailable = usePasskeyAvailability();
   const activePage = route.page === "show" || route.page === "movie" || route.page === "play" ? "library" : route.page;
   const { track, indicator, onClick } = useSelectionUnderline<HTMLElement>(activePage);
   const user = session?.user;
@@ -87,6 +90,12 @@ export function AppHeader({ route }: AppHeaderProps) {
                 <DropdownMenuLabel className="truncate">{user.name}</DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuGroup>
+                  {passkeysAvailable ? (
+                    <DropdownMenuItem onSelect={onManagePasskeys}>
+                      <FingerprintIcon />
+                      Passkeys
+                    </DropdownMenuItem>
+                  ) : null}
                   <DropdownMenuItem
                     disabled={isPending}
                     onSelect={() => void logout()}

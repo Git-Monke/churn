@@ -70,6 +70,7 @@ export interface AppConfig {
   releaseTimeoutMs: number;
   sessionTtlMs: number;
   cookieSecure: CookieSecureSetting;
+  passkeyOrigin?: string;
   /** Writable directory for persisted profiles and sessions. */
   stateDir: string;
   /**
@@ -266,6 +267,7 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
     releaseTimeoutMs: parseReleaseTimeout(values.RELEASE_TIMEOUT_MS),
     sessionTtlMs: parseSessionTtl(values.CHURN_SESSION_TTL_MS),
     cookieSecure: parseCookieSecure(values.CHURN_COOKIE_SECURE),
+    passkeyOrigin: parsePasskeyOrigin(values.CHURN_PASSKEY_ORIGIN),
     stateDir: resolveStateDir(values.CHURN_STATE_DIR, serverDir),
     jellyfinPublicUrl: resolveJellyfinPublicUrl(
       explicitPublicUrl,
@@ -588,4 +590,21 @@ function parseCookieSecure(value: string | undefined): CookieSecureSetting {
     return false;
   }
   throw new Error(`invalid CHURN_COOKIE_SECURE: ${value}`);
+}
+
+function parsePasskeyOrigin(value: string | undefined): string | undefined {
+  const configured = nonEmpty(value);
+  if (!configured) return undefined;
+  let origin: URL;
+  try {
+    origin = new URL(configured);
+  } catch {
+    throw new Error("CHURN_PASSKEY_ORIGIN must be an HTTPS origin or http://localhost for development");
+  }
+  const secure = origin.protocol === "https:" ||
+    (origin.protocol === "http:" && origin.hostname === "localhost");
+  if (!secure || origin.pathname !== "/" || origin.search || origin.hash || origin.username || origin.password) {
+    throw new Error("CHURN_PASSKEY_ORIGIN must be an HTTPS origin or http://localhost for development");
+  }
+  return origin.origin;
 }
