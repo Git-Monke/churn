@@ -222,6 +222,13 @@ export function createJellyfinClient(
       );
     },
 
+    async currentUser(): Promise<JellyfinUser> {
+      return fetchJson<JellyfinUser>("jellyfin", `${config.url}/Users/Me`, {
+        timeoutMs,
+        headers: authHeaders(),
+      });
+    },
+
     async logout(accessToken: string): Promise<void> {
       await fetchWithTimeout(
         "jellyfin",

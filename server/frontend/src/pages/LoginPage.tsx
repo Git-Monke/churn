@@ -1,9 +1,11 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { browserSupportsWebAuthnAutofill } from "@simplewebauthn/browser";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowLeftIcon,
   CircleAlertIcon,
   LogInIcon,
+  FingerprintIcon,
   ShieldIcon,
 } from "lucide-react";
 
@@ -22,6 +24,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/features/auth/AuthProvider";
+import { canUsePasskeys, passkeyErrorMessage, signInWithPasskey, usePasskeyAvailability } from "@/features/auth/passkeys";
 
 type ProfileStep = "password" | "newPassword";
 
@@ -55,9 +58,13 @@ function profileInitials(profiles: ProfileSummary[]) {
   return initials;
 }
 
-export function LoginPage() {
-  const { login, profileLogin, isPending } = useAuth();
-  const [showAdmin, setShowAdmin] = useState(false);
+export function LoginPage({ onPasskeySetup }: { onPasskeySetup: () => void }) {
+  const { login, profileLogin, isPending, applySession } = useAuth();
+  const passkeys = usePasskeyAvailability() && canUsePasskeys();
+  const [passkeyPending, setPasskeyPending] = useState(false);
+  const prompt = useRef<AbortController | null>(null);
+  useEffect(() => () => prompt.current?.abort(), []);
+  const [passwordMode, setPasswordMode] = useState<"sign-in" | "setup" | null>(null);
   const [selected, setSelected] = useState<ProfileSummary | null>(null);
   const [stage, setStage] = useState<"pick" | "password">("pick");
   const [pin, setPin] = useState("");
@@ -72,6 +79,21 @@ export function LoginPage() {
   });
   const people = useMemo(() => profilesQuery.data ?? [], [profilesQuery.data]);
   const initialsById = useMemo(() => profileInitials(people), [people]);
+
+  async function usePasskey() {
+    const controller = new AbortController();
+    prompt.current = controller;
+    setError(null);
+    setPasskeyPending(true);
+    try {
+      const session = await signInWithPasskey(controller.signal);
+      if (session) applySession(session);
+    } catch (caught) {
+      if (!controller.signal.aborted) setError(passkeyErrorMessage(caught, "Could not sign in with a passkey."));
+    } finally {
+      if (!controller.signal.aborted) setPasskeyPending(false);
+    }
+  }
 
   function resetProfileFlow() {
     setSelected(null);
@@ -151,23 +173,26 @@ export function LoginPage() {
         <div className="flex flex-col gap-1 text-center">
           <h1 className="font-heading text-3xl font-semibold tracking-tight">Churn</h1>
           <p className="text-sm text-muted-foreground">
-            {showAdmin
-              ? "Sign in with a Jellyfin account to manage people."
+            {passwordMode
+              ? "Sign in with a Jellyfin account."
               : "Who's watching?"}
           </p>
         </div>
 
-        {showAdmin ? (
+        {passwordMode ? (
           <AdminSignIn
+            passkeys={passkeys && passwordMode === "sign-in"}
+            setupPasskey={passwordMode === "setup"}
             isPending={isPending}
             onCancel={() => {
-              setShowAdmin(false);
+              setPasswordMode(null);
               setError(null);
             }}
             onSubmit={async (username, password) => {
               setError(null);
               try {
                 await login({ username, password });
+                if (passwordMode === "setup") onPasskeySetup();
               } catch (caught) {
                 setError(
                   caught instanceof ApiClientError
@@ -284,8 +309,9 @@ export function LoginPage() {
                         <button
                           type="button"
                           aria-label={`Sign in as ${profile.name}`}
+                          disabled={passkeyPending}
                           onClick={() => void selectProfile(profile)}
-                          className="flex size-24 items-center justify-center border border-border bg-muted font-heading font-semibold tracking-tight text-foreground transition-colors hover:border-primary hover:bg-primary/10 focus-visible:outline-2 focus-visible:outline-offset-3 focus-visible:outline-primary sm:size-26"
+                          className="flex size-24 items-center justify-center border border-border bg-muted font-heading font-semibold tracking-tight text-foreground transition-colors hover:border-primary hover:bg-primary/10 disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-3 focus-visible:outline-primary sm:size-26"
                         >
                           <span
                             className={
@@ -316,11 +342,12 @@ export function LoginPage() {
                     <button
                       type="button"
                       aria-label="Admin sign in"
+                      disabled={passkeyPending}
                       onClick={() => {
-                        setShowAdmin(true);
+                        setPasswordMode("sign-in");
                         setError(null);
                       }}
-                      className="flex size-24 items-center justify-center border border-input text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-3 focus-visible:outline-primary sm:size-26"
+                      className="flex size-24 items-center justify-center border border-input text-muted-foreground transition-colors hover:border-primary hover:text-primary disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-3 focus-visible:outline-primary sm:size-26"
                     >
                       <ShieldIcon className="size-8" strokeWidth={1.5} />
                     </button>
@@ -329,6 +356,27 @@ export function LoginPage() {
                     </span>
                   </li>
                 </ul>
+
+                {passkeys ? (
+                  <div className="flex w-full max-w-xs flex-col gap-2">
+                    <Button type="button" onClick={() => void usePasskey()} disabled={passkeyPending}>
+                      <FingerprintIcon data-icon="inline-start" />
+                      {passkeyPending ? "Waiting for your passkey…" : "Sign in with a passkey"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="link"
+                      className="self-center"
+                      disabled={passkeyPending}
+                      onClick={() => {
+                        setPasswordMode("setup");
+                        setError(null);
+                      }}
+                    >
+                      Set up a passkey
+                    </Button>
+                  </div>
+                ) : null}
               </>
             )}
           </div>
@@ -339,11 +387,15 @@ export function LoginPage() {
 }
 
 function AdminSignIn({
+  passkeys,
+  setupPasskey,
   isPending,
   error,
   onCancel,
   onSubmit,
 }: {
+  passkeys: boolean;
+  setupPasskey: boolean;
   isPending: boolean;
   error: string | null;
   onCancel: () => void;
@@ -351,22 +403,40 @@ function AdminSignIn({
 }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [useAutofill, setUseAutofill] = useState(passkeys);
+  const { applySession } = useAuth();
+
+  useEffect(() => {
+    if (!useAutofill) return;
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        if (await browserSupportsWebAuthnAutofill() && !controller.signal.aborted) {
+          const session = await signInWithPasskey(controller.signal, true);
+          if (session) applySession(session);
+        }
+      } catch {
+        // Password entry remains available when autofill is dismissed or unsupported.
+      }
+    })();
+    return () => controller.abort();
+  }, [applySession, useAutofill]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!username.trim() || !password) {
       return;
     }
+    setUseAutofill(false);
     await onSubmit(username.trim(), password);
   }
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Admin sign in</CardTitle>
+        <CardTitle>{setupPasskey ? "Set up a passkey" : "Sign in with a password"}</CardTitle>
         <CardDescription>
-          Use a Jellyfin administrator account to add and manage people. Other
-          Jellyfin accounts can still sign in here too.
+          {setupPasskey ? "Sign in with your Jellyfin account to create a passkey." : "Use your Jellyfin account."}
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -376,7 +446,7 @@ function AdminSignIn({
             <Input
               id="username"
               name="username"
-              autoComplete="username"
+              autoComplete={passkeys ? "username webauthn" : "username"}
               autoFocus
               value={username}
               onChange={(event) => setUsername(event.target.value)}
@@ -410,7 +480,7 @@ function AdminSignIn({
             </Button>
             <Button type="submit" className="sm:flex-1" disabled={isPending}>
               <LogInIcon data-icon="inline-start" />
-              {isPending ? "Signing in…" : "Sign in"}
+              {isPending ? "Signing in…" : setupPasskey ? "Continue" : "Sign in"}
             </Button>
           </div>
         </form>
