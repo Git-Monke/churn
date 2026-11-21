@@ -106,6 +106,7 @@ jobs:
           docker run -d --name churn-dashboard-smoke \
             --network host \
             -e PORT=4100 \
+            -e CHURN_STATE_DIR=/tmp/churn-state \
             --read-only --tmpfs /tmp \
             --init --cap-drop ALL \
             --security-opt no-new-privileges \
