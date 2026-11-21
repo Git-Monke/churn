@@ -30,7 +30,7 @@ export default function App() {
 
 function AppShell() {
   const { session, isLoading } = useAuth();
-  const [showPasskeys, setShowPasskeys] = useState(false);
+  const [showPasskeys, setShowPasskeys] = useState<false | "manage" | "setup">(false);
   const authenticated = session?.authenticated === true && !!session.user;
 
   useEffect(() => {
@@ -41,12 +41,17 @@ function AppShell() {
     return <AppLoading />;
   }
   if (!authenticated) {
-    return <LoginPage onPasskeySetup={() => setShowPasskeys(true)} />;
+    return <LoginPage onPasskeySetup={() => setShowPasskeys("setup")} />;
   }
   return (
     <>
-      <Dashboard onManagePasskeys={() => setShowPasskeys(true)} />
-      {showPasskeys && <PasskeySettings onClose={() => setShowPasskeys(false)} />}
+      <Dashboard onManagePasskeys={() => setShowPasskeys("manage")} />
+      {showPasskeys && (
+        <PasskeySettings
+          startAdding={showPasskeys === "setup"}
+          onClose={() => setShowPasskeys(false)}
+        />
+      )}
     </>
   );
 }

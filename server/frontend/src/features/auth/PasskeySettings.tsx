@@ -1,7 +1,8 @@
 import { useState, type FormEvent } from "react";
 import { startRegistration } from "@simplewebauthn/browser";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { FingerprintIcon } from "lucide-react";
+import { FingerprintIcon, PlusIcon } from "lucide-react";
+import { toast } from "sonner";
 
 import {
   beginPasskeyRegistration,
@@ -15,11 +16,19 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
+import { passkeyDialogAddArea } from "./passkey-dialog";
 import { canUsePasskeys, passkeyErrorMessage } from "./passkeys";
 
 const QUERY_KEY = ["passkeys"];
 
-export function PasskeySettings({ onClose }: { onClose: () => void }) {
+export function PasskeySettings({
+  onClose,
+  startAdding = false,
+}: {
+  onClose: () => void;
+  /** Opened from "Set up a passkey": show the add form even when passkeys exist. */
+  startAdding?: boolean;
+}) {
   const queryClient = useQueryClient();
   const saved = useQuery({ queryKey: QUERY_KEY, queryFn: fetchPasskeys, retry: false });
   const [label, setLabel] = useState("");
@@ -27,7 +36,14 @@ export function PasskeySettings({ onClose }: { onClose: () => void }) {
   const [pending, setPending] = useState(false);
   const [removing, setRemoving] = useState<string>();
   const [error, setError] = useState<string>();
+  /** With passkeys already saved, the add form stays behind a button so the list leads. */
+  const [adding, setAdding] = useState(startAdding);
   const busy = pending || !!removing;
+  const addArea = passkeyDialogAddArea({
+    adding,
+    loaded: saved.isSuccess,
+    hasPasskeys: !!saved.data?.length,
+  });
 
   async function register(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -42,6 +58,10 @@ export function PasskeySettings({ onClose }: { onClose: () => void }) {
       await finishPasskeyRegistration(credential);
       setLabel("");
       await queryClient.invalidateQueries({ queryKey: QUERY_KEY });
+      toast.success("Passkey added", {
+        description: "Next time, choose Sign in with a passkey.",
+      });
+      onClose();
     } catch (caught) {
       if (started) await cancelPasskeyRegistration().catch(() => undefined);
       setError(passkeyErrorMessage(caught, "Could not add the passkey."));
@@ -95,7 +115,14 @@ export function PasskeySettings({ onClose }: { onClose: () => void }) {
           </ul>
         ) : null}
         {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-        {canUsePasskeys() ? (
+        {!canUsePasskeys() ? (
+          <p className="text-sm text-muted-foreground">This browser can manage your passkeys. Use a browser with passkey support to add one.</p>
+        ) : addArea === "button" ? (
+          <Button type="button" variant="outline" disabled={busy} onClick={() => setAdding(true)}>
+            <PlusIcon data-icon="inline-start" />
+            Add another passkey
+          </Button>
+        ) : addArea === "none" ? null : (
           <form className="grid gap-3" onSubmit={(event) => void register(event)}>
             <div className="grid gap-1.5">
               <Label htmlFor="passkey-name">Passkey name</Label>
@@ -112,8 +139,6 @@ export function PasskeySettings({ onClose }: { onClose: () => void }) {
               {pending ? "Adding passkey…" : "Add passkey"}
             </Button>
           </form>
-        ) : (
-          <p className="text-sm text-muted-foreground">This browser can manage your passkeys. Use a browser with passkey support to add one.</p>
         )}
       </DialogContent>
     </Dialog>
