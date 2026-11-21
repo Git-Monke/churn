@@ -1,4 +1,11 @@
 import type {
+  AuthenticationResponseJSON,
+  PublicKeyCredentialCreationOptionsJSON,
+  PublicKeyCredentialRequestOptionsJSON,
+  RegistrationResponseJSON,
+} from "@simplewebauthn/browser";
+
+import type {
   ActivityResponse,
   AuthSessionResponse,
   CancelJellyfinItemResponse,
@@ -104,6 +111,38 @@ export function fetchProfiles(): Promise<ProfileSummary[]> {
 export function profileLogin(input: ProfileLoginInput): Promise<ProfileLoginResponse> {
   return postJson<ProfileLoginResponse>("/api/auth/profile-login", input);
 }
+
+const PASSKEYS_PATH = "/api/auth/passkeys";
+
+export interface SavedPasskey {
+  id: string;
+  label: string;
+  createdAt: string;
+  lastUsedAt?: string;
+}
+
+export const fetchPasskeyAvailability = () =>
+  getJson<{ origin: string | null }>(`${PASSKEYS_PATH}/available`);
+
+export const fetchPasskeys = () => getJson<SavedPasskey[]>(PASSKEYS_PATH);
+
+export const beginPasskeyLogin = () =>
+  postJson<PublicKeyCredentialRequestOptionsJSON>(`${PASSKEYS_PATH}/authenticate/options`, {});
+
+export const finishPasskeyLogin = (credential: AuthenticationResponseJSON) =>
+  postJson<LoginResponse>(`${PASSKEYS_PATH}/authenticate/verify`, credential);
+
+export const beginPasskeyRegistration = (label: string, password: string) =>
+  postJson<PublicKeyCredentialCreationOptionsJSON>(`${PASSKEYS_PATH}/register/options`, { label, password });
+
+export const finishPasskeyRegistration = (credential: RegistrationResponseJSON) =>
+  postJson<SavedPasskey>(`${PASSKEYS_PATH}/register/verify`, credential);
+
+export const cancelPasskeyRegistration = () =>
+  postJson<null>(`${PASSKEYS_PATH}/register/cancel`, {});
+
+export const removePasskey = (id: string) =>
+  deleteJson<null>(`${PASSKEYS_PATH}/${encodeURIComponent(id)}`);
 
 export function fetchManagedProfiles(): Promise<ManagedProfile[]> {
   return getJson<ManagedProfile[]>("/api/profiles");

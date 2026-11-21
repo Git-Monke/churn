@@ -216,6 +216,30 @@ state-changing requests are rejected in addition to `SameSite=Lax`. Playback
 uses the signed-in user's session token, so resume positions and watched state
 are per Jellyfin user; no static playback token is stored in `.env`.
 
+### Passkeys
+
+To enable passkey sign-in, set `CHURN_PASSKEY_ORIGIN` in `server/.env` to the
+exact HTTPS address you use in your browser, such as
+`https://churn.example.com`. Include the port if it appears in the address and
+omit the trailing slash. Restart the dashboard with the updated environment.
+Use the same address on all devices where you want to use the passkey. The
+short plain HTTP hostname and LAN IP do not support passkeys. Plain HTTP
+`localhost` works for local development.
+
+Choose **Set up a passkey** on the sign-in screen and sign in with your
+Jellyfin account. If you are already signed in, choose **Passkeys** from your
+account menu. Give the passkey a name and confirm your Jellyfin password. After
+enrollment, choose **Sign in with a passkey** on the sign-in screen. Supported
+browsers also offer passkeys in the username field. Password and profile sign-in
+remain available. Profiles can enroll after setting a password.
+
+Churn stores each passkey’s public key and a separate, user-scoped Jellyfin
+device token in `passkeys.json` in its state directory. Treat this file like
+`auth-state.json` when backing up Churn. Removing a passkey ends the Churn
+sessions created with it and attempts to revoke its Jellyfin device token.
+If you change the configured address or revoke the corresponding device in
+Jellyfin, sign in with your password and enroll again.
+
 ## API
 
 | Route | Purpose |
