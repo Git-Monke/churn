@@ -58,7 +58,7 @@ function profileInitials(profiles: ProfileSummary[]) {
   return initials;
 }
 
-export function LoginPage({ onPasskeySetup }: { onPasskeySetup: () => void }) {
+export function LoginPage({ onPasskeySetup }: { onPasskeySetup: (password: string) => void }) {
   const { login, profileLogin, isPending, applySession } = useAuth();
   const passkeys = usePasskeyAvailability() && canUsePasskeys();
   const [passkeyPending, setPasskeyPending] = useState(false);
@@ -159,6 +159,30 @@ export function LoginPage({ onPasskeySetup }: { onPasskeySetup: () => void }) {
     }
   }
 
+  async function addPasskey() {
+    if (!selected) {
+      return;
+    }
+    setError(null);
+    try {
+      const response = await profileLogin({
+        profileId: selected.id,
+        password: pin,
+      });
+      if (response.authenticated) {
+        onPasskeySetup(pin);
+        return;
+      }
+      setError("Set a password for this profile before adding a passkey.");
+    } catch (caught) {
+      setError(
+        caught instanceof ApiClientError
+          ? caught.message
+          : "Could not sign in. Check that Jellyfin is running.",
+      );
+    }
+  }
+
   function setPasswordSetup(profile: ProfileSummary) {
     setSelected({ ...profile, passwordSet: false });
     setStage("password");
@@ -192,7 +216,7 @@ export function LoginPage({ onPasskeySetup }: { onPasskeySetup: () => void }) {
               setError(null);
               try {
                 await login({ username, password });
-                if (passwordMode === "setup") onPasskeySetup();
+                if (passwordMode === "setup") onPasskeySetup(password);
               } catch (caught) {
                 setError(
                   caught instanceof ApiClientError
@@ -269,6 +293,17 @@ export function LoginPage({ onPasskeySetup }: { onPasskeySetup: () => void }) {
                     <ArrowLeftIcon data-icon="inline-start" />
                     Back
                   </Button>
+                  {passkeys && selected.passwordSet && passwordStep === "password" ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={!pin || isPending}
+                      onClick={() => void addPasskey()}
+                    >
+                      <FingerprintIcon data-icon="inline-start" />
+                      Add a passkey
+                    </Button>
+                  ) : null}
                   <Button type="submit" className="sm:flex-1" disabled={isPending}>
                     <LogInIcon data-icon="inline-start" />
                     {isPending

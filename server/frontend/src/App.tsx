@@ -30,23 +30,28 @@ export default function App() {
 
 function AppShell() {
   const { session, isLoading } = useAuth();
-  const [showPasskeys, setShowPasskeys] = useState(false);
+  const [passkeyDialog, setPasskeyDialog] = useState<{ password?: string } | null>(null);
   const authenticated = session?.authenticated === true && !!session.user;
 
   useEffect(() => {
-    if (!authenticated) setShowPasskeys(false);
+    if (!authenticated) setPasskeyDialog(null);
   }, [authenticated]);
 
   if (isLoading) {
     return <AppLoading />;
   }
   if (!authenticated) {
-    return <LoginPage onPasskeySetup={() => setShowPasskeys(true)} />;
+    return <LoginPage onPasskeySetup={(password) => setPasskeyDialog({ password })} />;
   }
   return (
     <>
-      <Dashboard onManagePasskeys={() => setShowPasskeys(true)} />
-      {showPasskeys && <PasskeySettings onClose={() => setShowPasskeys(false)} />}
+      <Dashboard onManagePasskeys={() => setPasskeyDialog({})} />
+      {passkeyDialog ? (
+        <PasskeySettings
+          initialPassword={passkeyDialog.password}
+          onClose={() => setPasskeyDialog(null)}
+        />
+      ) : null}
     </>
   );
 }

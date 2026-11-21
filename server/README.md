@@ -226,12 +226,17 @@ Use the same address on all devices where you want to use the passkey. The
 short plain HTTP hostname and LAN IP do not support passkeys. Plain HTTP
 `localhost` works for local development.
 
-Choose **Set up a passkey** on the sign-in screen and sign in with your
-Jellyfin account. If you are already signed in, choose **Passkeys** from your
-account menu. Give the passkey a name and confirm your Jellyfin password. After
-enrollment, choose **Sign in with a passkey** on the sign-in screen. Supported
-browsers also offer passkeys in the username field. Password and profile sign-in
-remain available. Profiles can enroll after setting a password.
+Any person can create a passkey. On the sign-in screen, choose your profile,
+type your password, and choose **Add a passkey**; Churn signs you in and opens
+the passkey dialog with the password already filled. You can also choose **Set
+up a passkey** and sign in with a Jellyfin account, or, once signed in, choose
+**Passkeys** from your account menu. Give the passkey a name and confirm your
+Jellyfin password. After enrollment, choose **Sign in with a passkey** on the
+sign-in screen. Supported browsers also offer passkeys in the username field.
+Password and profile sign-in remain available.
+
+For local development, run `cd server && CHURN_PASSKEY_ORIGIN=http://localhost:5173 npm run dev`,
+because the Vite dev server serves the dashboard from `http://localhost:5173`.
 
 Churn stores each passkey’s public key and a separate, user-scoped Jellyfin
 device token in `passkeys.json` in its state directory. Treat this file like

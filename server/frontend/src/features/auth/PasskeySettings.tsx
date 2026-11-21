@@ -19,11 +19,17 @@ import { canUsePasskeys, passkeyErrorMessage } from "./passkeys";
 
 const QUERY_KEY = ["passkeys"];
 
-export function PasskeySettings({ onClose }: { onClose: () => void }) {
+export function PasskeySettings({
+  onClose,
+  initialPassword,
+}: {
+  onClose: () => void;
+  initialPassword?: string;
+}) {
   const queryClient = useQueryClient();
   const saved = useQuery({ queryKey: QUERY_KEY, queryFn: fetchPasskeys, retry: false });
   const [label, setLabel] = useState("");
-  const [password, setPassword] = useState("");
+  const [password, setPassword] = useState(initialPassword ?? "");
   const [pending, setPending] = useState(false);
   const [removing, setRemoving] = useState<string>();
   const [error, setError] = useState<string>();
