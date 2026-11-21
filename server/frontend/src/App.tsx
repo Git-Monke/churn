@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { fetchStatus } from "@/api/client";
@@ -8,6 +8,7 @@ import { AppHeader } from "@/components/AppHeader";
 import { AuthProvider, useAuth } from "@/features/auth/AuthProvider";
 import { useLibraryPosterNavigation } from "@/features/library/use-library-poster-navigation";
 import { PasskeySettings } from "@/features/auth/PasskeySettings";
+import { SignInArrival } from "@/features/auth/SignInArrival";
 import { LibraryPage } from "@/pages/LibraryPage";
 import { LoginPage } from "@/pages/LoginPage";
 import { MoviePage } from "@/pages/MoviePage";
@@ -29,13 +30,19 @@ export default function App() {
 }
 
 function AppShell() {
-  const { session, isLoading } = useAuth();
+  const { session, isLoading, signIns } = useAuth();
+  /** The sign-in whose moment is playing; 0 = none (also after a restored session). */
+  const [flourish, setFlourish] = useState(0);
+  const endFlourish = useCallback(() => setFlourish(0), []);
   const [showPasskeys, setShowPasskeys] = useState<false | "manage" | "setup">(false);
   const authenticated = session?.authenticated === true && !!session.user;
 
   useEffect(() => {
     if (!authenticated) setShowPasskeys(false);
   }, [authenticated]);
+  useEffect(() => {
+    if (signIns > 0) setFlourish(signIns);
+  }, [signIns]);
 
   if (isLoading) {
     return <AppLoading />;
@@ -46,6 +53,9 @@ function AppShell() {
   return (
     <>
       <Dashboard onManagePasskeys={() => setShowPasskeys("manage")} />
+      {flourish > 0 && (
+        <SignInArrival key={flourish} onDone={endFlourish} />
+      )}
       {showPasskeys && (
         <PasskeySettings
           startAdding={showPasskeys === "setup"}
@@ -80,7 +90,7 @@ function Dashboard({ onManagePasskeys }: { onManagePasskeys: () => void }) {
   return (
     <div className="flex min-h-dvh w-full flex-col">
       <AppHeader route={route} onManagePasskeys={onManagePasskeys} />
-      <main ref={main} tabIndex={-1} data-title-from-library={poster ? "" : undefined} className="mx-auto flex w-full max-w-content flex-1 flex-col gap-8 px-4 py-6 sm:px-6 lg:px-10">
+      <main ref={main} tabIndex={-1} data-signin-arrive="" data-title-from-library={poster ? "" : undefined} className="mx-auto flex w-full max-w-content flex-1 flex-col gap-8 px-4 py-6 sm:px-6 lg:px-10">
         {route.page === "services" ? (
           <ServicesPage
             status={statusQuery.data}
