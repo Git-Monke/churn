@@ -142,6 +142,9 @@ export async function buildServer(
     if (method === "GET" && pathname === "/api/health") {
       return true;
     }
+    if (method === "GET" && pathname === "/api/meta") {
+      return true;
+    }
     if (method === "POST" && pathname === "/api/auth/login") {
       return true;
     }

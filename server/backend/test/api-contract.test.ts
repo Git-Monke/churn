@@ -1,4 +1,6 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -19,29 +21,7 @@ describe("the API contract", () => {
 
   it("describes every route the server registers, or lists it as not described yet", async () => {
     const registered: string[] = [];
-    const config = {
-      host: "127.0.0.1",
-      port: 0,
-      serverDir: `/tmp/churn-contract-${process.pid}`,
-      frontendDist: "/nonexistent",
-      requestTimeoutMs: 100,
-      releaseTimeoutMs: 100,
-      searchTimeoutMs: 100,
-      sessionTtlMs: 60_000,
-      stateDir: `/tmp/churn-contract-${process.pid}/state`,
-      cookieSecure: "auto",
-      jellyfinPublicUrl: "http://jellyfin.test:8096",
-      jellyfinPublicUrlExplicit: true,
-      services: {
-        jellyfin: { id: "jellyfin", name: "Jellyfin", url: "http://jellyfin.test:8096" },
-        sonarr: { id: "sonarr", name: "Sonarr", url: "http://sonarr.test:8989" },
-        radarr: { id: "radarr", name: "Radarr", url: "http://radarr.test:7878" },
-      },
-      qbittorrent: { url: "http://qbittorrent.test:8080" },
-      prowlarr: { url: "http://prowlarr.test:9696" },
-      introdb: { url: "https://api.introdb.test", timeoutMs: 100 },
-      vpn: { statusUrl: "http://vpn-status.test:8098", timeoutMs: 100 },
-    } as unknown as AppConfig;
+    const config = testConfig();
     const app = await buildServer(config, {
       onRoute: (route) => {
         for (const method of [route.method].flat()) {
@@ -57,6 +37,19 @@ describe("the API contract", () => {
     expect(missing, "Add these routes to API_ROUTES (or UNDESCRIBED_ROUTES) in src/api-contract.ts").toEqual([]);
     const gone = [...known].filter((route) => !served.includes(route));
     expect(gone, "These routes are in src/api-contract.ts but no longer served").toEqual([]);
+  });
+
+  it("lets anyone call the routes it marks public, on both paths", async () => {
+    const app = await buildServer(testConfig());
+    for (const route of API_ROUTES.filter((entry) => entry.auth === "none" && entry.method === "GET")) {
+      for (const url of [route.path, route.path.replace(/^\/api\//, "/api/v1/")]) {
+        const response = await app.inject({ method: "GET", url });
+        expect(response.statusCode, `${url} should not need a sign-in`).not.toBe(401);
+      }
+    }
+    const signedOut = await app.inject({ method: "GET", url: "/api/v1/library" });
+    expect(signedOut.statusCode).toBe(401);
+    await app.close();
   });
 
   it("catches a response that does not match its type", () => {
@@ -87,3 +80,31 @@ describe("the API contract", () => {
     expect(() => checker.assertClean()).not.toThrow();
   });
 });
+
+/** A config whose state lives in a fresh temporary directory per call. */
+function testConfig(): AppConfig {
+  const serverDir = mkdtempSync(path.join(tmpdir(), "churn-contract-"));
+  return {
+    host: "127.0.0.1",
+    port: 0,
+    serverDir,
+    frontendDist: "/nonexistent",
+    requestTimeoutMs: 100,
+    releaseTimeoutMs: 100,
+    searchTimeoutMs: 100,
+    sessionTtlMs: 60_000,
+    stateDir: path.join(serverDir, "state"),
+    cookieSecure: "auto",
+    jellyfinPublicUrl: "http://jellyfin.test:8096",
+    jellyfinPublicUrlExplicit: true,
+    services: {
+      jellyfin: { id: "jellyfin", name: "Jellyfin", url: "http://jellyfin.test:8096" },
+      sonarr: { id: "sonarr", name: "Sonarr", url: "http://sonarr.test:8989" },
+      radarr: { id: "radarr", name: "Radarr", url: "http://radarr.test:7878" },
+    },
+    qbittorrent: { url: "http://qbittorrent.test:8080" },
+    prowlarr: { url: "http://prowlarr.test:9696" },
+    introdb: { url: "https://api.introdb.test", timeoutMs: 100 },
+    vpn: { statusUrl: "http://vpn-status.test:8098", timeoutMs: 100 },
+  } as unknown as AppConfig;
+}
