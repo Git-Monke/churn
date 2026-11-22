@@ -5152,6 +5152,58 @@ describe("playback", () => {
     await app.close();
   });
 
+  it("chooses streams Apple TV can play when the client says it's tvOS", async () => {
+    installFetch((url) => {
+      if (url.includes("/PlaybackInfo?")) {
+        return jsonResponse({
+          PlaySessionId: "session-1",
+          MediaSources: [
+            {
+              Id: "source-1",
+              Container: "mkv",
+              Bitrate: 8_785_944,
+              SupportsDirectPlay: true,
+              MediaStreams: [
+                { Type: "Video", Codec: "hevc", Height: 822 },
+                { Type: "Audio", Codec: "eac3", Channels: 6 },
+                { Type: "Subtitle", Codec: "subrip", Index: 2, Language: "eng" },
+              ],
+            },
+          ],
+        });
+      }
+      if (/\/Items\/item-1\?/.test(url)) {
+        return jsonResponse(playbackItem);
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildAuthedServer(makeConfig());
+    const metadata = await app.inject({ method: "GET", url: "/api/v1/playback/items/item-1?client=tvos" });
+    expect(metadata.json().item).toMatchObject({
+      client: "tvos",
+      playbackMethod: "hls",
+      directPlay: false,
+      streamUrl: "/api/playback/items/item-1/hls.m3u8?mediaSourceId=source-1&playSessionId=session-1&client=tvos",
+    });
+
+    const manifest = await app.inject({ method: "GET", url: metadata.json().item.streamUrl });
+    expect(manifest.statusCode).toBe(302);
+    const params = new URL(String(manifest.headers.location)).searchParams;
+    expect(params.get("VideoCodec")).toBe("hevc,h264");
+    expect(params.get("AudioCodec")).toBe("eac3,ac3,aac");
+    expect(params.get("SegmentContainer")).toBe("mp4");
+    expect(params.get("AllowVideoStreamCopy")).toBe("true");
+    expect(params.get("EnableSubtitlesInManifest")).toBe("true");
+
+    const web = await app.inject({ method: "GET", url: "/api/playback/items/item-1" });
+    expect(web.json().item.client).toBe("web");
+    const unknown = await app.inject({ method: "GET", url: "/api/playback/items/item-1?client=toaster" });
+    expect(unknown.statusCode).toBe(400);
+    expect(unknown.json().error.code).toBe("invalid_client");
+    await app.close();
+  });
+
   it("offers quality presets and forces a transcode for a chosen tier", async () => {
     installFetch((url) => {
       if (url.includes("/PlaybackInfo?")) {

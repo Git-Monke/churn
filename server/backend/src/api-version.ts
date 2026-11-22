@@ -44,6 +44,8 @@ export function unsupportedVersion(url: string): number | undefined {
 export const API_FEATURES: readonly string[] = [
   "device-pairing",
   "playback",
+  // `?client=tvos` on the playback routes.
+  "playback-client-tvos",
   "profiles",
   "release-search",
   "requests",

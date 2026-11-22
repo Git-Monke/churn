@@ -5,6 +5,7 @@ import {
   buildJellyfinHlsUrl,
   buildJellyfinStreamUrl,
   canBrowserDirectPlay,
+  canDirectPlay,
   mapPlaybackItem,
   parsePlaybackQuality,
   parsePlaybackReport,
@@ -14,6 +15,7 @@ import {
   pickMediaSource,
   pickNextEpisode,
 } from "../src/playback.js";
+import { parsePlaybackClient } from "../src/playback-clients.js";
 import { ApiError } from "../src/errors.js";
 import type { JellyfinItem } from "../src/upstream/jellyfin.js";
 
@@ -528,5 +530,84 @@ describe("playback report play method", () => {
       }).start.PlayMethod,
     ).toBe("Transcode");
     expect(playbackReportBodies("item-1", {}).start.PlayMethod).toBe("DirectPlay");
+  });
+});
+
+describe("playback client profiles", () => {
+  const mkvHevc = {
+    Id: "source-1",
+    Container: "mkv",
+    Bitrate: 62_000_000,
+    SupportsDirectPlay: true,
+    MediaStreams: [
+      { Type: "Video", Codec: "hevc", Height: 2160 },
+      { Type: "Audio", Codec: "eac3", Channels: 6 },
+    ],
+  };
+  const mp4Hevc = { ...mkvHevc, Container: "mp4" };
+
+  it("lets Apple TV play MP4 with HEVC and E-AC-3 directly, but not MKV or DTS", () => {
+    expect(canDirectPlay(mp4Hevc, "tvos")).toBe(true);
+    expect(canDirectPlay(mkvHevc, "tvos")).toBe(false);
+    expect(
+      canDirectPlay(
+        { ...mp4Hevc, MediaStreams: [mp4Hevc.MediaStreams[0]!, { Type: "Audio", Codec: "dts", Channels: 6 }] },
+        "tvos",
+      ),
+    ).toBe(false);
+    // A browser can't play the same MP4: HEVC and E-AC-3 aren't in the web profile.
+    expect(canDirectPlay(mp4Hevc, "web")).toBe(false);
+    expect(canBrowserDirectPlay(mp4Hevc)).toBe(false);
+  });
+
+  it("repackages an MKV for Apple TV without re-encoding it, with subtitles in the playlist", () => {
+    const url = new URL(
+      buildJellyfinHlsUrl("https://media.test", "item-1", mkvHevc, "session-1", "token", "max", "tvos"),
+    );
+    const params = url.searchParams;
+    expect(params.get("VideoCodec")).toBe("hevc,h264");
+    expect(params.get("AudioCodec")).toBe("eac3,ac3,aac");
+    expect(params.get("MaxAudioChannels")).toBe("6");
+    expect(params.get("SegmentContainer")).toBe("mp4");
+    expect(params.get("AllowVideoStreamCopy")).toBe("true");
+    expect(params.get("AllowAudioStreamCopy")).toBe("true");
+    expect(params.get("EnableSubtitlesInManifest")).toBe("true");
+    expect(params.get("SubtitleMethod")).toBe("Hls");
+    // No caps that would force a 4K remux to be re-encoded.
+    expect(params.get("VideoBitrate")).toBe("62000000");
+    expect(params.has("MaxHeight")).toBe(false);
+  });
+
+  it("re-encodes for Apple TV only when a lower quality is chosen", () => {
+    const params = new URL(
+      buildJellyfinHlsUrl("https://media.test", "item-1", mkvHevc, "session-1", "token", "high", "tvos"),
+    ).searchParams;
+    expect(params.get("VideoCodec")).toBe("h264");
+    expect(params.has("AllowVideoStreamCopy")).toBe(false);
+    expect(params.get("MaxHeight")).toBe("1080");
+    expect(params.get("VideoBitrate")).toBe("10000000");
+    expect(params.get("SegmentContainer")).toBe("mp4");
+  });
+
+  it("keeps the browser's transcode as it was", () => {
+    const params = new URL(
+      buildJellyfinHlsUrl("https://media.test", "item-1", mkvHevc, "session-1", "token"),
+    ).searchParams;
+    expect(params.get("VideoCodec")).toBe("h264");
+    expect(params.get("AudioCodec")).toBe("aac");
+    expect(params.get("MaxAudioChannels")).toBe("2");
+    expect(params.get("SegmentContainer")).toBe("ts");
+    expect(params.has("AllowVideoStreamCopy")).toBe(false);
+    expect(params.has("EnableSubtitlesInManifest")).toBe(false);
+  });
+
+  it("names the client in the HLS path, and refuses unknown clients", () => {
+    expect(playbackHlsPath("item-1", "source-1", "session-1", "max", "tvos")).toBe(
+      "/api/playback/items/item-1/hls.m3u8?mediaSourceId=source-1&playSessionId=session-1&client=tvos",
+    );
+    expect(playbackHlsPath("item-1", "source-1", "session-1")).not.toContain("client=");
+    expect(parsePlaybackClient(undefined)).toBe("web");
+    expect(parsePlaybackClient("tvos")).toBe("tvos");
+    expect(() => parsePlaybackClient("smart-fridge")).toThrow(/client must be one of/);
   });
 });

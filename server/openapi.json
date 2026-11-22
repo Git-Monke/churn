@@ -1007,9 +1007,19 @@
         ],
         "type": "object"
       },
+      "PlaybackClientId": {
+        "enum": [
+          "web",
+          "tvos"
+        ],
+        "type": "string"
+      },
       "PlaybackItem": {
         "additionalProperties": false,
         "properties": {
+          "client": {
+            "$ref": "#/components/schemas/PlaybackClientId"
+          },
           "directPlay": {
             "type": "boolean"
           },
@@ -1107,6 +1117,7 @@
           "streamUrl",
           "directPlay",
           "playbackMethod",
+          "client",
           "quality",
           "qualities",
           "subtitles"
@@ -3177,6 +3188,19 @@
               ],
               "type": "string"
             }
+          },
+          {
+            "description": "What will play the stream, so the server chooses formats it can decode: `web` (the default) or `tvos` (Apple TV).",
+            "in": "query",
+            "name": "client",
+            "required": false,
+            "schema": {
+              "enum": [
+                "web",
+                "tvos"
+              ],
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -3224,6 +3248,19 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "What will play the stream, so the server chooses formats it can decode: `web` (the default) or `tvos` (Apple TV).",
+            "in": "query",
+            "name": "client",
+            "required": false,
+            "schema": {
+              "enum": [
+                "web",
+                "tvos"
+              ],
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -3256,7 +3293,7 @@
             "device": []
           }
         ],
-        "summary": "Redirect to Jellyfin's HLS transcode, for sources the browser can't play directly."
+        "summary": "Redirect to Jellyfin's HLS stream, for sources the client can't play directly."
       }
     },
     "/api/v1/playback/items/{itemId}/stream": {

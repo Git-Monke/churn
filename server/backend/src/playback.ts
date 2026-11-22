@@ -1,4 +1,5 @@
 import { ApiError } from "./errors.js";
+import { PLAYBACK_CLIENT_PROFILES, type PlaybackClientId } from "./playback-clients.js";
 import type { IntroDbSegments } from "./introdb.js";
 import type {
   JellyfinItem,
@@ -78,6 +79,8 @@ export interface PlaybackItem {
   mediaSourceId?: string;
   directPlay: boolean;
   playbackMethod: "direct" | "hls";
+  /** The client profile the stream was chosen for (`?client=`). */
+  client: PlaybackClientId;
   quality: PlaybackQuality;
   /** Selectable presets for this source; always contains `max`. */
   qualities: PlaybackQualityOption[];
@@ -130,16 +133,6 @@ export interface PlaybackReportBodies {
 }
 
 const ID_PATTERN = /^[A-Za-z0-9._~-]{1,128}$/;
-const DIRECT_CONTAINERS = new Set(["mp4", "m4v", "mov", "webm"]);
-const DIRECT_VIDEO_CODECS = new Set(["h264", "avc1", "vp8", "vp9", "av1"]);
-const DIRECT_AUDIO_CODECS = new Set([
-  "aac",
-  "mp3",
-  "opus",
-  "vorbis",
-  "flac",
-  "pcm",
-]);
 
 /** Build the same-origin URL the browser puts on `<video src>`. */
 export function playbackStreamPath(
@@ -164,6 +157,7 @@ export function playbackHlsPath(
   mediaSourceId?: string,
   playSessionId?: string,
   quality?: PlaybackQuality,
+  client: PlaybackClientId = "web",
 ): string {
   const params = new URLSearchParams();
   if (mediaSourceId) {
@@ -174,6 +168,9 @@ export function playbackHlsPath(
   }
   if (quality && quality !== "max") {
     params.set("quality", quality);
+  }
+  if (client !== "web") {
+    params.set("client", client);
   }
   const suffix = params.size > 0 ? `?${params.toString()}` : "";
   return `/api/playback/items/${encodeURIComponent(itemId)}/hls.m3u8${suffix}`;
@@ -372,16 +369,18 @@ export function pickNextEpisode(
 
 /**
  * Jellyfin's direct-play flag only means the server can serve the original
- * file. It does not mean a browser can decode it (for example HEVC video with
- * AC3 audio inside an MKV). Only use direct play for containers/codecs that
- * browsers reliably support.
+ * file. It does not mean the client can decode it (for example HEVC video
+ * with AC3 audio inside an MKV in a browser). Direct play only when the
+ * client's profile covers the container and every video and audio codec.
  */
-export function canBrowserDirectPlay(
+export function canDirectPlay(
   source: JellyfinMediaSource | undefined,
+  client: PlaybackClientId = "web",
 ): boolean {
   if (!source || source.SupportsDirectPlay !== true) {
     return false;
   }
+  const profile = PLAYBACK_CLIENT_PROFILES[client].directPlay;
 
   const containers = (source.Container ?? "")
     .split(",")
@@ -389,7 +388,7 @@ export function canBrowserDirectPlay(
     .filter(Boolean);
   if (
     containers.length > 0 &&
-    !containers.some((container) => DIRECT_CONTAINERS.has(container))
+    !containers.some((container) => profile.containers.has(container))
   ) {
     return false;
   }
@@ -410,14 +409,19 @@ export function canBrowserDirectPlay(
     video.every(
       (stream) =>
         stream.Codec !== undefined &&
-        DIRECT_VIDEO_CODECS.has(stream.Codec.toLowerCase()),
+        profile.videoCodecs.has(stream.Codec.toLowerCase()),
     ) &&
     audio.every(
       (stream) =>
         stream.Codec !== undefined &&
-        DIRECT_AUDIO_CODECS.has(stream.Codec.toLowerCase()),
+        profile.audioCodecs.has(stream.Codec.toLowerCase()),
     )
   );
+}
+
+/** The dashboard's rule: `canDirectPlay` for the `web` profile. */
+export function canBrowserDirectPlay(source: JellyfinMediaSource | undefined): boolean {
+  return canDirectPlay(source, "web");
 }
 
 /**
@@ -453,21 +457,32 @@ export function buildJellyfinHlsUrl(
   playSessionId: string | undefined,
   token: string,
   quality: PlaybackQuality = "max",
+  client: PlaybackClientId = "web",
 ): string {
-  const { height: maxHeight, bitrate: videoBitrate } = qualityTranscodeCaps(
-    source,
-    quality,
-  );
-
+  const hls = PLAYBACK_CLIENT_PROFILES[client].hls;
+  const copy = hls.copyAtMax && quality === "max";
   const params = new URLSearchParams({
-    VideoCodec: "h264",
-    AudioCodec: "aac",
-    MaxAudioChannels: "2",
-    AudioBitrate: "192000",
-    MaxHeight: String(maxHeight),
-    VideoBitrate: String(videoBitrate),
-    SegmentContainer: "ts",
+    VideoCodec: copy ? hls.videoCodecs : "h264",
+    AudioCodec: hls.audioCodecs,
+    MaxAudioChannels: String(hls.maxAudioChannels),
+    AudioBitrate: String(hls.audioBitrate),
+    SegmentContainer: hls.segmentContainer,
   });
+  if (copy) {
+    // Repackage what the client can decode; caps would force a re-encode of
+    // anything above them, such as a 4K remux at 60 Mbps.
+    params.set("AllowVideoStreamCopy", "true");
+    params.set("AllowAudioStreamCopy", "true");
+    params.set("VideoBitrate", String(Math.max(sourceBitrate(source), MIN_TRANSCODE_BITRATE)));
+  } else {
+    const { height: maxHeight, bitrate: videoBitrate } = qualityTranscodeCaps(source, quality);
+    params.set("MaxHeight", String(maxHeight));
+    params.set("VideoBitrate", String(videoBitrate));
+  }
+  if (hls.subtitlesInManifest) {
+    params.set("EnableSubtitlesInManifest", "true");
+    params.set("SubtitleMethod", "Hls");
+  }
   if (source?.Id) {
     params.set("MediaSourceId", source.Id);
   }
@@ -539,6 +554,7 @@ export function mapPlaybackItem(
   streamUrl: string,
   directPlay = canBrowserDirectPlay(source),
   quality: PlaybackQuality = "max",
+  client: PlaybackClientId = "web",
 ): PlaybackItem | null {
   if (
     !item.Id ||
@@ -557,6 +573,7 @@ export function mapPlaybackItem(
     streamUrl,
     directPlay,
     playbackMethod: directPlay ? "direct" : "hls",
+    client,
     quality,
     qualities: availablePlaybackQualities(source),
     subtitles: mapSubtitles(itemId, source),

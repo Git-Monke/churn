@@ -572,6 +572,20 @@ browser used (so a Tailscale client sees `http://100.x.y.z:8096`, not
 `RADARR_PUBLIC_URL` when those services are reachable at a different public
 address.
 
+
+### Playback for other clients
+
+The playback routes take `?client=` so each kind of player gets streams it can
+decode; the dashboard sends nothing and gets `web`. The rules live in
+`backend/src/playback-clients.ts`:
+
+| Client | Plays directly | Otherwise (HLS) |
+| --- | --- | --- |
+| `web` | MP4/MOV/WebM with H.264, VP8, VP9 or AV1; AAC, MP3, Opus, Vorbis, FLAC or PCM | H.264 and AAC stereo in MPEG-TS |
+| `tvos` | MP4/MOV with H.264 or HEVC; AAC, AC-3, E-AC-3, ALAC, MP3 or FLAC | At Max: video and audio the Apple TV can decode are copied, so an MKV is only repackaged; other audio (DTS, TrueHD) becomes E-AC-3 5.1; fragmented MP4 segments; text subtitles listed in the playlist. Lower qualities re-encode to H.264 |
+
+`GET /api/meta` lists `playback-client-tvos` when the server supports it.
+
 ## Development
 
 ```bash

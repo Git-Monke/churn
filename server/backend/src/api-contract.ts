@@ -70,6 +70,13 @@ const source = (kinds: string[]): ParameterContract => ({
 
 const integer = { type: "string", pattern: "^[0-9]+$" };
 
+const playbackClient: ParameterContract = {
+  name: "client",
+  description:
+    "What will play the stream, so the server chooses formats it can decode: `web` (the default) or `tvos` (Apple TV).",
+  schema: { type: "string", enum: ["web", "tvos"] },
+};
+
 export const API_ROUTES: RouteContract[] = [
   {
     method: "GET",
@@ -327,6 +334,7 @@ export const API_ROUTES: RouteContract[] = [
         description: "Quality preset; `max` may play the file directly.",
         schema: { type: "string", enum: ["max", "high", "medium", "low"] },
       },
+      playbackClient,
     ],
     response: { json: "PlaybackItemResponse" },
   },
@@ -341,9 +349,10 @@ export const API_ROUTES: RouteContract[] = [
   {
     method: "GET",
     path: "/api/playback/items/:itemId/hls.m3u8",
-    summary: "Redirect to Jellyfin's HLS transcode, for sources the browser can't play directly.",
+    summary: "Redirect to Jellyfin's HLS stream, for sources the client can't play directly.",
     auth: "user",
     params: { itemId: id("Jellyfin item id.") },
+    query: [playbackClient],
     response: { redirect: true },
   },
   {

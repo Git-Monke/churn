@@ -283,7 +283,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Redirect to Jellyfin's HLS transcode, for sources the browser can't play directly. */
+        /** Redirect to Jellyfin's HLS stream, for sources the client can't play directly. */
         get: operations["getPlaybackItemsByItemIdHlsM3u8"];
         put?: never;
         post?: never;
@@ -864,7 +864,10 @@ export interface components {
             token?: string;
             user?: components["schemas"]["AuthUser"];
         };
+        /** @enum {string} */
+        PlaybackClientId: "web" | "tvos";
         PlaybackItem: {
+            client: components["schemas"]["PlaybackClientId"];
             directPlay: boolean;
             episodeNumber?: number;
             id: string;
@@ -1721,6 +1724,8 @@ export interface operations {
             query?: {
                 /** @description Quality preset; `max` may play the file directly. */
                 quality?: "max" | "high" | "medium" | "low";
+                /** @description What will play the stream, so the server chooses formats it can decode: `web` (the default) or `tvos` (Apple TV). */
+                client?: "web" | "tvos";
             };
             header?: never;
             path: {
@@ -1753,7 +1758,10 @@ export interface operations {
     };
     getPlaybackItemsByItemIdHlsM3u8: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description What will play the stream, so the server chooses formats it can decode: `web` (the default) or `tvos` (Apple TV). */
+                client?: "web" | "tvos";
+            };
             header?: never;
             path: {
                 /** @description Jellyfin item id. */

@@ -7,7 +7,7 @@ import {
   availablePlaybackQualities,
   buildJellyfinHlsUrl,
   buildJellyfinStreamUrl,
-  canBrowserDirectPlay,
+  canDirectPlay,
   mapPlaybackItem,
   parsePlaybackQuality,
   parsePlaybackReport,
@@ -22,6 +22,7 @@ import type { IntroDbService } from "../introdb-warm.js";
 import { createNextEpisodeLookup } from "../next-episode.js";
 import { createJellyfinClient, providerString } from "../upstream/jellyfin.js";
 import { errorMessage } from "../upstream/states.js";
+import { parsePlaybackClient } from "../playback-clients.js";
 
 type ReportKind = "start" | "progress" | "stop";
 
@@ -33,10 +34,12 @@ interface StreamQuery {
   mediaSourceId?: unknown;
   playSessionId?: unknown;
   quality?: unknown;
+  client?: unknown;
 }
 
 interface ItemQuery {
   quality?: unknown;
+  client?: unknown;
 }
 
 interface SubtitleParams {
@@ -68,6 +71,7 @@ export function registerPlaybackRoutes(
       const auth = requireAuth(request);
       const itemId = parseItemId(request.params.itemId);
       const quality = parsePlaybackQuality(request.query.quality);
+      const playbackClient = parsePlaybackClient(request.query.client);
       const client = createJellyfinClient(
         config.services.jellyfin,
         config.requestTimeoutMs,
@@ -108,7 +112,7 @@ export function registerPlaybackRoutes(
       const directPlay =
         appliedQuality === "max" &&
         picked.directPlay &&
-        canBrowserDirectPlay(picked.source);
+        canDirectPlay(picked.source, playbackClient);
       const streamUrl = directPlay
         ? playbackStreamPath(itemId, picked.source?.Id, picked.playSessionId)
         : playbackHlsPath(
@@ -116,6 +120,7 @@ export function registerPlaybackRoutes(
             picked.source?.Id,
             picked.playSessionId,
             appliedQuality,
+            playbackClient,
           );
       const mapped = mapPlaybackItem(
         item,
@@ -124,6 +129,7 @@ export function registerPlaybackRoutes(
         streamUrl,
         directPlay,
         appliedQuality,
+        playbackClient,
       );
       if (!mapped) {
         throw new ApiError(
@@ -215,6 +221,7 @@ export function registerPlaybackRoutes(
         "playSessionId",
       );
       const quality = parsePlaybackQuality(request.query.quality);
+      const playbackClient = parsePlaybackClient(request.query.client);
 
       let source;
       try {
@@ -250,6 +257,7 @@ export function registerPlaybackRoutes(
         playSessionId,
         auth.accessToken,
         hlsQuality,
+        playbackClient,
       );
       return reply.redirect(hlsUrl, 302);
     },
