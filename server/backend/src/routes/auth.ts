@@ -17,6 +17,7 @@ import {
   type SessionStore,
 } from "../auth.js";
 import { ApiError, isUnauthorized, UpstreamError } from "../errors.js";
+import type { LoginResponse, ProfileSummary } from "../types.js";
 import { createJellyfinClient } from "../upstream/jellyfin.js";
 
 export interface AuthDependencies {
@@ -314,11 +315,7 @@ function parseProfileLoginBody(body: unknown): ProfileLoginBody {
   return { profileId, password, newPassword: record.newPassword };
 }
 
-function publicProfile(profile: ProfileRecord): {
-  id: string;
-  name: string;
-  passwordSet: boolean;
-} {
+function publicProfile(profile: ProfileRecord): ProfileSummary {
   return {
     id: profile.id,
     name: profile.name,
@@ -345,13 +342,7 @@ function sessionPayload(
   kind: AuthSessionKind,
   record: SessionRecord,
   profileId?: string,
-): {
-  authenticated: true;
-  user: AuthUser;
-  kind: AuthSessionKind;
-  profileId?: string;
-  expiresAt: string;
-} {
+): LoginResponse {
   return {
     authenticated: true,
     user,

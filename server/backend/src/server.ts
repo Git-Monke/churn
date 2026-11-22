@@ -36,8 +36,25 @@ import { registerStatsRoutes } from "./routes/stats.js";
 import { registerStatusRoutes } from "./routes/status.js";
 import { registerVpnRoutes } from "./routes/vpn.js";
 
+/** One response, as `BuildServerOptions.onResponse` sees it. */
+export interface ServedResponse {
+  method: string;
+  /** Fastify's route path, with `:params`; undefined when no route matched. */
+  route: string | undefined;
+  statusCode: number;
+  contentType: string;
+  payload: unknown;
+}
+
 interface BuildServerOptions {
   logger?: boolean;
+  /**
+   * Sees every response before it is sent. Tests use it to check JSON
+   * responses against the API contract; production never sets it.
+   */
+  onResponse?: (response: ServedResponse) => void;
+  /** Sees every route as it is registered; tests use it to check the contract covers them. */
+  onRoute?: (route: { method: string | string[]; url: string }) => void;
 }
 
 export async function buildServer(
@@ -45,6 +62,23 @@ export async function buildServer(
   options: BuildServerOptions = {},
 ): Promise<FastifyInstance> {
   const app = Fastify({ logger: options.logger ?? false });
+  if (options.onRoute) {
+    const onRoute = options.onRoute;
+    app.addHook("onRoute", (route) => onRoute({ method: route.method, url: route.url }));
+  }
+  if (options.onResponse) {
+    const onResponse = options.onResponse;
+    app.addHook("onSend", async (request, reply, payload) => {
+      onResponse({
+        method: request.method,
+        route: request.routeOptions.url,
+        statusCode: reply.statusCode,
+        contentType: String(reply.getHeader("content-type") ?? ""),
+        payload,
+      });
+      return payload;
+    });
+  }
   mkdirSync(config.stateDir, { recursive: true });
   const sessionStore = createMemorySessionStore({
     ttlMs: config.sessionTtlMs,

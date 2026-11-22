@@ -6,7 +6,13 @@ import type { FastifyRequest } from "fastify";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AppConfig } from "../src/config.js";
-import { buildServer } from "../src/server.js";
+import { buildServer as buildUncheckedServer } from "../src/server.js";
+import { createContractChecker } from "./support/api-contract-check.js";
+
+const contract = createContractChecker();
+/** Every server in these tests checks its JSON responses against the API contract. */
+const buildServer: typeof buildUncheckedServer = (config, options = {}) =>
+  buildUncheckedServer(config, { ...options, onResponse: contract.check });
 import {
   createLoginThrottle,
   createMemorySessionStore,
@@ -23,6 +29,7 @@ const user: AuthUser = {
 };
 
 afterEach(() => {
+  contract.assertClean();
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
