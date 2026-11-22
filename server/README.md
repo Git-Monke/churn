@@ -263,6 +263,29 @@ Errors use `{ "error": { "code": "...", "message": "..." } }`. Protected API
 routes return `401 unauthenticated` without a session and `401 session_expired`
 when Jellyfin rejects the stored user token.
 
+### API versions
+
+Clients that ship separately from the server, such as TV apps, call
+`/api/v1/...`. The dashboard ships with the server and keeps calling
+`/api/...`, which is always the newest version. Today both paths reach the
+same routes. `GET /api/meta` (no sign-in needed) lists the versions served and
+the optional features this server has; check it before relying on either.
+
+The compatibility policy for a version:
+
+- **Allowed in place:** new routes, new optional request fields, new response
+  fields, new values in `features`, new error codes. Clients ignore what they
+  don't know.
+- **Needs a new version:** removing or renaming a route or a field, changing a
+  field's type or meaning, making an optional request field required, or
+  changing what a status code means.
+- **Old versions stay:** a version keeps being served for at least one release
+  after its successor appears, and `/api/meta` lists it until it's removed.
+- A version the server doesn't serve gets `404 unsupported_api_version`.
+
+URLs the server returns inside responses (posters, streams, subtitles) are
+ready to use as they are.
+
 ### The API contract
 
 `backend/src/api-contract.ts` lists every route with what it takes and returns;

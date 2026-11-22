@@ -1,10 +1,10 @@
-import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { createGenerator, type Schema } from "ts-json-schema-generator";
 
 import { API_ROUTES, type ParameterContract, type RouteContract } from "../src/api-contract.js";
+import { CURRENT_API_VERSION } from "../src/api-version.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const backendDir = path.resolve(here, "..");
@@ -56,18 +56,21 @@ export function buildOpenApi(): JsonObject {
 
   const paths: Record<string, JsonObject> = {};
   for (const route of API_ROUTES) {
-    const openApiPath = route.path.replace(/:([A-Za-z]+)/g, "{$1}");
+    // Documented under the current version: clients that ship separately call /api/v{n}.
+    const openApiPath = route.path
+      .replace(/^\/api\//, `/api/v${CURRENT_API_VERSION}/`)
+      .replace(/:([A-Za-z]+)/g, "{$1}");
     paths[openApiPath] ??= {};
     paths[openApiPath][route.method.toLowerCase()] = operation(route);
   }
 
-  const packageJson = JSON.parse(readFileSync(path.join(backendDir, "package.json"), "utf8")) as { version: string };
   return rewriteRefs(
     sortKeys({
       openapi: "3.1.0",
       info: {
         title: "churn",
-        version: packageJson.version,
+        // The API version, not the server's release.
+        version: String(CURRENT_API_VERSION),
         description:
           "The API behind churn's dashboard. Generated from server/backend/src/api-contract.ts and the types it names; do not edit by hand. Run `npm run api:generate` in server/.",
       },

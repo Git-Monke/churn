@@ -1,4 +1,8 @@
 /**
+ * Paths here are written without a version (`/api/library`); the server also
+ * serves each one under `/api/v1/...`, and openapi.json documents the
+ * versioned paths, which is what separately shipped clients should call.
+ *
  * The API contract: every route churn serves, what it takes and what it
  * returns. Response shapes are the TypeScript types in `types.ts` (and
  * `playback.ts`), named here by type name; `npm run api:generate` turns this
@@ -66,6 +70,13 @@ export const API_ROUTES: RouteContract[] = [
     summary: "Liveness check.",
     auth: "none",
     response: { json: "HealthResponse" },
+  },
+  {
+    method: "GET",
+    path: "/api/meta",
+    summary: "API versions and optional features this server has. Check it before signing in.",
+    auth: "none",
+    response: { json: "MetaResponse" },
   },
   {
     method: "GET",

@@ -35,6 +35,7 @@ import { registerShowRoutes } from "./routes/shows.js";
 import { registerStatsRoutes } from "./routes/stats.js";
 import { registerStatusRoutes } from "./routes/status.js";
 import { registerVpnRoutes } from "./routes/vpn.js";
+import { API_VERSIONS, routeUrlFor, unsupportedVersion } from "./api-version.js";
 
 /** One response, as `BuildServerOptions.onResponse` sees it. */
 export interface ServedResponse {
@@ -61,7 +62,11 @@ export async function buildServer(
   config: AppConfig,
   options: BuildServerOptions = {},
 ): Promise<FastifyInstance> {
-  const app = Fastify({ logger: options.logger ?? false });
+  const app = Fastify({
+    logger: options.logger ?? false,
+    // `/api/v1/...` is served by the same routes as `/api/...`.
+    rewriteUrl: (request) => routeUrlFor(request.url ?? "/"),
+  });
   if (options.onRoute) {
     const onRoute = options.onRoute;
     app.addHook("onRoute", (route) => onRoute({ method: route.method, url: route.url }));
@@ -223,7 +228,16 @@ export async function buildServer(
   }
 
   app.setNotFoundHandler((request, reply) => {
-    if (request.url.startsWith("/api/")) {
+    if (request.url.startsWith("/api/") || request.url === "/api") {
+      const version = unsupportedVersion(request.originalUrl);
+      if (version !== undefined) {
+        return reply.code(404).send({
+          error: {
+            code: "unsupported_api_version",
+            message: `This server doesn't serve API version ${version}. It serves ${API_VERSIONS.map((v) => `v${v}`).join(", ")}; see GET /api/meta.`,
+          },
+        });
+      }
       return reply
         .code(404)
         .send({ error: { code: "not_found", message: "API route not found" } });

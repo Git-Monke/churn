@@ -18,6 +18,18 @@ export interface HealthResponse {
   status: "ok";
 }
 
+/** `GET /api/meta`: what this server's API offers, for clients to check at start. */
+export interface MetaResponse {
+  api: {
+    /** Every API version served, oldest first. Call `/api/v{n}/...`. */
+    versions: number[];
+    /** The newest version, which unversioned `/api/...` also serves. */
+    current: number;
+  };
+  /** Optional parts of the API this server has. Names are only ever added. */
+  features: string[];
+}
+
 /** `GET /api/auth/session`: who is signed in, if anyone. */
 export interface AuthSessionResponse {
   authenticated: boolean;

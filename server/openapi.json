@@ -712,6 +712,41 @@
         ],
         "type": "object"
       },
+      "MetaResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "api": {
+            "additionalProperties": false,
+            "properties": {
+              "current": {
+                "type": "number"
+              },
+              "versions": {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "versions",
+              "current"
+            ],
+            "type": "object"
+          },
+          "features": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "api",
+          "features"
+        ],
+        "type": "object"
+      },
       "MovieDetailResponse": {
         "additionalProperties": false,
         "properties": {
@@ -2223,11 +2258,11 @@
   "info": {
     "description": "The API behind churn's dashboard. Generated from server/backend/src/api-contract.ts and the types it names; do not edit by hand. Run `npm run api:generate` in server/.",
     "title": "churn",
-    "version": "0.1.0"
+    "version": "1"
   },
   "openapi": "3.1.0",
   "paths": {
-    "/api/activity": {
+    "/api/v1/activity": {
       "get": {
         "operationId": "getActivity",
         "responses": {
@@ -2260,7 +2295,7 @@
         "summary": "Downloads in progress, queued or needing attention."
       }
     },
-    "/api/auth/profiles": {
+    "/api/v1/auth/profiles": {
       "get": {
         "operationId": "getAuthProfiles",
         "responses": {
@@ -2292,7 +2327,7 @@
         "summary": "Household members to pick from on the sign-in screen."
       }
     },
-    "/api/auth/session": {
+    "/api/v1/auth/session": {
       "get": {
         "operationId": "getAuthSession",
         "responses": {
@@ -2321,7 +2356,7 @@
         "summary": "Who is signed in, if anyone."
       }
     },
-    "/api/health": {
+    "/api/v1/health": {
       "get": {
         "operationId": "getHealth",
         "responses": {
@@ -2350,7 +2385,7 @@
         "summary": "Liveness check."
       }
     },
-    "/api/library": {
+    "/api/v1/library": {
       "get": {
         "operationId": "getLibrary",
         "responses": {
@@ -2383,7 +2418,7 @@
         "summary": "Every movie and show in Jellyfin that the signed-in person can see."
       }
     },
-    "/api/library/images/{itemId}": {
+    "/api/v1/library/images/{itemId}": {
       "get": {
         "operationId": "getLibraryImagesByItemId",
         "parameters": [
@@ -2465,7 +2500,7 @@
         "summary": "A Jellyfin poster or backdrop, proxied so the token stays on the server."
       }
     },
-    "/api/library/movies/{id}/releases": {
+    "/api/v1/library/movies/{id}/releases": {
       "get": {
         "operationId": "getLibraryMoviesByIdReleases",
         "parameters": [
@@ -2509,7 +2544,7 @@
         "summary": "Cached release search results for a movie."
       }
     },
-    "/api/library/movies/{source}/{id}": {
+    "/api/v1/library/movies/{source}/{id}": {
       "get": {
         "operationId": "getLibraryMoviesBySourceById",
         "parameters": [
@@ -2566,7 +2601,7 @@
         "summary": "A movie: details and download state."
       }
     },
-    "/api/library/movies/{source}/{id}/download": {
+    "/api/v1/library/movies/{source}/{id}/download": {
       "get": {
         "operationId": "getLibraryMoviesBySourceByIdDownload",
         "parameters": [
@@ -2623,7 +2658,7 @@
         "summary": "A movie's download progress."
       }
     },
-    "/api/library/requested": {
+    "/api/v1/library/requested": {
       "get": {
         "operationId": "getLibraryRequested",
         "responses": {
@@ -2656,7 +2691,7 @@
         "summary": "Titles requested in Sonarr and Radarr that are not in Jellyfin yet."
       }
     },
-    "/api/library/resume": {
+    "/api/v1/library/resume": {
       "get": {
         "operationId": "getLibraryResume",
         "responses": {
@@ -2689,7 +2724,7 @@
         "summary": "Continue watching: items in progress and next episodes."
       }
     },
-    "/api/library/shows/{source}/{id}": {
+    "/api/v1/library/shows/{source}/{id}": {
       "get": {
         "operationId": "getLibraryShowsBySourceById",
         "parameters": [
@@ -2746,7 +2781,7 @@
         "summary": "A show: its seasons, episodes and what is downloaded."
       }
     },
-    "/api/library/shows/{source}/{id}/downloads": {
+    "/api/v1/library/shows/{source}/{id}/downloads": {
       "get": {
         "operationId": "getLibraryShowsBySourceByIdDownloads",
         "parameters": [
@@ -2803,7 +2838,7 @@
         "summary": "Episode downloads in progress for a show."
       }
     },
-    "/api/library/shows/{source}/{id}/releases": {
+    "/api/v1/library/shows/{source}/{id}/releases": {
       "get": {
         "operationId": "getLibraryShowsBySourceByIdReleases",
         "parameters": [
@@ -2879,7 +2914,36 @@
         "summary": "Cached release search results for a season or episode."
       }
     },
-    "/api/playback/items/{itemId}": {
+    "/api/v1/meta": {
+      "get": {
+        "operationId": "getMeta",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetaResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [],
+        "summary": "API versions and optional features this server has. Check it before signing in."
+      }
+    },
+    "/api/v1/playback/items/{itemId}": {
       "get": {
         "operationId": "getPlaybackItemsByItemId",
         "parameters": [
@@ -2938,7 +3002,7 @@
         "summary": "How to play an item: stream URL, quality options, subtitles, segments."
       }
     },
-    "/api/playback/items/{itemId}/hls.m3u8": {
+    "/api/v1/playback/items/{itemId}/hls.m3u8": {
       "get": {
         "operationId": "getPlaybackItemsByItemIdHlsM3u8",
         "parameters": [
@@ -2982,7 +3046,7 @@
         "summary": "Redirect to Jellyfin's HLS transcode, for sources the browser can't play directly."
       }
     },
-    "/api/playback/items/{itemId}/stream": {
+    "/api/v1/playback/items/{itemId}/stream": {
       "get": {
         "operationId": "getPlaybackItemsByItemIdStream",
         "parameters": [
@@ -3026,7 +3090,7 @@
         "summary": "Redirect to the direct-play stream."
       }
     },
-    "/api/playback/items/{itemId}/subtitles/{index}": {
+    "/api/v1/playback/items/{itemId}/subtitles/{index}": {
       "get": {
         "operationId": "getPlaybackItemsByItemIdSubtitlesByIndex",
         "parameters": [
@@ -3076,7 +3140,7 @@
         "summary": "A text subtitle track as WebVTT."
       }
     },
-    "/api/profiles": {
+    "/api/v1/profiles": {
       "get": {
         "description": "Administrators only.",
         "operationId": "getProfiles",
@@ -3113,7 +3177,7 @@
         "summary": "Household members, for an administrator to manage."
       }
     },
-    "/api/requests/options": {
+    "/api/v1/requests/options": {
       "get": {
         "operationId": "getRequestsOptions",
         "responses": {
@@ -3146,7 +3210,7 @@
         "summary": "Quality profiles, root folders and defaults for a new request."
       }
     },
-    "/api/search": {
+    "/api/v1/search": {
       "get": {
         "operationId": "getSearch",
         "parameters": [
@@ -3192,7 +3256,7 @@
         "summary": "Search Sonarr and Radarr for titles to request."
       }
     },
-    "/api/search/images/{service}": {
+    "/api/v1/search/images/{service}": {
       "get": {
         "operationId": "getSearchImagesByService",
         "parameters": [
@@ -3245,7 +3309,7 @@
         "summary": "A Sonarr or Radarr poster from an allowed artwork host, proxied."
       }
     },
-    "/api/services/{id}/open": {
+    "/api/v1/services/{id}/open": {
       "get": {
         "operationId": "getServicesByIdOpen",
         "parameters": [
@@ -3294,7 +3358,7 @@
         "summary": "Redirect to a service's own web page."
       }
     },
-    "/api/stats": {
+    "/api/v1/stats": {
       "get": {
         "operationId": "getStats",
         "responses": {
@@ -3327,7 +3391,7 @@
         "summary": "Torrent, disk and library statistics."
       }
     },
-    "/api/status": {
+    "/api/v1/status": {
       "get": {
         "operationId": "getStatus",
         "responses": {
@@ -3360,7 +3424,7 @@
         "summary": "Health of Jellyfin, Sonarr and Radarr."
       }
     },
-    "/api/vpn": {
+    "/api/v1/vpn": {
       "get": {
         "operationId": "getVpn",
         "responses": {

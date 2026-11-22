@@ -4,7 +4,7 @@
  */
 
 export interface paths {
-    "/api/activity": {
+    "/api/v1/activity": {
         parameters: {
             query?: never;
             header?: never;
@@ -21,7 +21,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/auth/profiles": {
+    "/api/v1/auth/profiles": {
         parameters: {
             query?: never;
             header?: never;
@@ -38,7 +38,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/auth/session": {
+    "/api/v1/auth/session": {
         parameters: {
             query?: never;
             header?: never;
@@ -55,7 +55,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/health": {
+    "/api/v1/health": {
         parameters: {
             query?: never;
             header?: never;
@@ -72,7 +72,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/library": {
+    "/api/v1/library": {
         parameters: {
             query?: never;
             header?: never;
@@ -89,7 +89,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/library/images/{itemId}": {
+    "/api/v1/library/images/{itemId}": {
         parameters: {
             query?: never;
             header?: never;
@@ -106,7 +106,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/library/movies/{id}/releases": {
+    "/api/v1/library/movies/{id}/releases": {
         parameters: {
             query?: never;
             header?: never;
@@ -123,7 +123,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/library/movies/{source}/{id}": {
+    "/api/v1/library/movies/{source}/{id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -140,7 +140,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/library/movies/{source}/{id}/download": {
+    "/api/v1/library/movies/{source}/{id}/download": {
         parameters: {
             query?: never;
             header?: never;
@@ -157,7 +157,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/library/requested": {
+    "/api/v1/library/requested": {
         parameters: {
             query?: never;
             header?: never;
@@ -174,7 +174,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/library/resume": {
+    "/api/v1/library/resume": {
         parameters: {
             query?: never;
             header?: never;
@@ -191,7 +191,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/library/shows/{source}/{id}": {
+    "/api/v1/library/shows/{source}/{id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -208,7 +208,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/library/shows/{source}/{id}/downloads": {
+    "/api/v1/library/shows/{source}/{id}/downloads": {
         parameters: {
             query?: never;
             header?: never;
@@ -225,7 +225,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/library/shows/{source}/{id}/releases": {
+    "/api/v1/library/shows/{source}/{id}/releases": {
         parameters: {
             query?: never;
             header?: never;
@@ -242,7 +242,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/playback/items/{itemId}": {
+    "/api/v1/meta": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** API versions and optional features this server has. Check it before signing in. */
+        get: operations["getMeta"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/playback/items/{itemId}": {
         parameters: {
             query?: never;
             header?: never;
@@ -259,7 +276,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/playback/items/{itemId}/hls.m3u8": {
+    "/api/v1/playback/items/{itemId}/hls.m3u8": {
         parameters: {
             query?: never;
             header?: never;
@@ -276,7 +293,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/playback/items/{itemId}/stream": {
+    "/api/v1/playback/items/{itemId}/stream": {
         parameters: {
             query?: never;
             header?: never;
@@ -293,7 +310,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/playback/items/{itemId}/subtitles/{index}": {
+    "/api/v1/playback/items/{itemId}/subtitles/{index}": {
         parameters: {
             query?: never;
             header?: never;
@@ -310,7 +327,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/profiles": {
+    "/api/v1/profiles": {
         parameters: {
             query?: never;
             header?: never;
@@ -330,7 +347,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/requests/options": {
+    "/api/v1/requests/options": {
         parameters: {
             query?: never;
             header?: never;
@@ -347,7 +364,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/search": {
+    "/api/v1/search": {
         parameters: {
             query?: never;
             header?: never;
@@ -364,7 +381,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/search/images/{service}": {
+    "/api/v1/search/images/{service}": {
         parameters: {
             query?: never;
             header?: never;
@@ -381,7 +398,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/services/{id}/open": {
+    "/api/v1/services/{id}/open": {
         parameters: {
             query?: never;
             header?: never;
@@ -398,7 +415,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/stats": {
+    "/api/v1/stats": {
         parameters: {
             query?: never;
             header?: never;
@@ -415,7 +432,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/status": {
+    "/api/v1/status": {
         parameters: {
             query?: never;
             header?: never;
@@ -432,7 +449,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/vpn": {
+    "/api/v1/vpn": {
         parameters: {
             query?: never;
             header?: never;
@@ -637,6 +654,13 @@ export interface components {
         MediaAddedBy: {
             id: string;
             name: string;
+        };
+        MetaResponse: {
+            api: {
+                current: number;
+                versions: number[];
+            };
+            features: string[];
         };
         MovieDetailResponse: {
             detail?: string;
@@ -1474,6 +1498,35 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CachedReleasesResponse"];
+                };
+            };
+            /** @description An error, as `{ error: { code, message } }`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getMeta: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetaResponse"];
                 };
             };
             /** @description An error, as `{ error: { code, message } }`. */
