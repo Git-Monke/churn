@@ -1,4 +1,6 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -19,16 +21,18 @@ describe("the API contract", () => {
 
   it("describes every route the server registers, or lists it as not described yet", async () => {
     const registered: string[] = [];
+    // State lives in a temporary directory of this test's own.
+    const serverDir = mkdtempSync(path.join(tmpdir(), "churn-contract-"));
     const config = {
       host: "127.0.0.1",
       port: 0,
-      serverDir: `/tmp/churn-contract-${process.pid}`,
+      serverDir,
       frontendDist: "/nonexistent",
       requestTimeoutMs: 100,
       releaseTimeoutMs: 100,
       searchTimeoutMs: 100,
       sessionTtlMs: 60_000,
-      stateDir: `/tmp/churn-contract-${process.pid}/state`,
+      stateDir: path.join(serverDir, "state"),
       cookieSecure: "auto",
       jellyfinPublicUrl: "http://jellyfin.test:8096",
       jellyfinPublicUrlExplicit: true,
