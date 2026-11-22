@@ -8,6 +8,7 @@ import type { AppConfig } from "../config.js";
 import {
   SESSION_COOKIE_NAME,
   sessionCookieOptions,
+  sessionCredential,
   sessionExpiresAt,
   type AuthSessionKind,
   type AuthUser,
@@ -89,7 +90,7 @@ export function registerAuthRoutes(
       deviceId,
     });
     setSessionCookie(reply, request, config, cookieValue);
-    return sessionPayload(config, user, kind, record);
+    return sessionPayload(deps.store.ttlFor(record), user, kind, record);
   });
 
   app.get("/api/auth/profiles", async (_request, reply) => {
@@ -221,13 +222,14 @@ export function registerAuthRoutes(
       deviceId,
     });
     setSessionCookie(reply, request, config, session.cookieValue);
-    return sessionPayload(config, user, "profile", session.record, profile.id);
+    return sessionPayload(deps.store.ttlFor(session.record), user, "profile", session.record, profile.id);
   });
 
   app.post("/api/auth/logout", async (request, reply) => {
     reply.header("cache-control", "no-store");
-    const cookieValue = request.cookies[SESSION_COOKIE_NAME];
-    const record = cookieValue ? deps.store.destroy(cookieValue) : undefined;
+    // A paired device signs out with its bearer token, which revokes only that device.
+    const credential = sessionCredential(request);
+    const record = credential ? deps.store.destroy(credential.value) : undefined;
     reply.clearCookie(SESSION_COOKIE_NAME, {
       path: "/",
       httpOnly: true,
@@ -253,13 +255,13 @@ export function registerAuthRoutes(
 
   app.get("/api/auth/session", async (request, reply) => {
     reply.header("cache-control", "no-store");
-    const cookieValue = request.cookies[SESSION_COOKIE_NAME];
-    const record = cookieValue ? deps.store.get(cookieValue) : undefined;
+    const credential = sessionCredential(request);
+    const record = credential ? deps.store.get(credential.value) : undefined;
     if (!record) {
       return { authenticated: false };
     }
     return sessionPayload(
-      config,
+      deps.store.ttlFor(record),
       record.user,
       record.kind,
       record,
@@ -337,7 +339,7 @@ function setSessionCookie(
 }
 
 function sessionPayload(
-  config: AppConfig,
+  ttlMs: number,
   user: AuthUser,
   kind: AuthSessionKind,
   record: SessionRecord,
@@ -348,7 +350,7 @@ function sessionPayload(
     user,
     kind,
     ...(profileId ? { profileId } : {}),
-    expiresAt: new Date(sessionExpiresAt(record, config.sessionTtlMs)).toISOString(),
+    expiresAt: new Date(sessionExpiresAt(record, ttlMs)).toISOString(),
   };
 }
 

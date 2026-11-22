@@ -272,3 +272,8 @@ export interface PlaybackReport {
   isPaused?: boolean;
   playbackMethod?: "direct" | "hls";
 }
+
+export type PairingDetailsResponse = Schemas["PairingDetailsResponse"];
+export type PairingApproveResponse = Schemas["PairingApproveResponse"];
+export type PairedDevice = Schemas["PairedDevice"];
+export type PairedDevicesResponse = Schemas["PairedDevicesResponse"];

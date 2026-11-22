@@ -719,3 +719,63 @@ export interface ShowDownloadsResponse {
   /** Keyed by ShowEpisode.key. */
   downloads: Record<string, ShowDownload>;
 }
+
+/** `POST /api/tv/pair/start`: a device asks to be paired. */
+export interface PairingStartRequest {
+  /** What to call the device in the dashboard, such as "Living Room TV". */
+  deviceName: string;
+}
+
+export interface PairingStartResponse {
+  /** Six characters to show on the TV; someone signed in approves it. */
+  code: string;
+  /** Keep private: only the device polls with it, in `x-churn-pair-token`. */
+  pollToken: string;
+  /** ISO time the code stops working. */
+  expiresAt: string;
+  /** Where to approve it, relative to the server: put it in a QR code. */
+  approvePath: string;
+  /** How often to poll `GET /api/tv/pair/{code}`. */
+  pollIntervalSeconds: number;
+}
+
+/**
+ * `GET /api/tv/pair/{code}`, polled by the device. `approved` comes exactly
+ * once, with the device's token; after that, or after `denied`, the code is
+ * gone and polling it returns 404.
+ */
+export interface PairingStatusResponse {
+  status: "pending" | "approved" | "denied";
+  /** Send as `Authorization: Bearer <token>` on every request. */
+  token?: string;
+  user?: AuthUser;
+  /** ISO time the token stops working if the device goes unused. */
+  expiresAt?: string;
+}
+
+/** `GET /api/tv/pair/{code}/details`: what a person is about to approve. */
+export interface PairingDetailsResponse {
+  code: string;
+  deviceName: string;
+  status: "pending" | "approved" | "denied";
+  expiresAt: string;
+}
+
+/** A paired device, as listed in the dashboard. */
+export interface PairedDevice {
+  id: string;
+  name: string;
+  user: { id: string; name: string };
+  /** ISO times. */
+  pairedAt: string;
+  lastSeenAt: string;
+}
+
+export interface PairingApproveResponse {
+  status: "approved";
+  device: PairedDevice;
+}
+
+export interface PairedDevicesResponse {
+  devices: PairedDevice[];
+}

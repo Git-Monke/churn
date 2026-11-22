@@ -1,4 +1,4 @@
-import { ChevronDownIcon, LogOutIcon, UsersIcon } from "lucide-react";
+import { ChevronDownIcon, LogOutIcon, TvIcon, UsersIcon } from "lucide-react";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -87,6 +87,12 @@ export function AppHeader({ route }: AppHeaderProps) {
                 <DropdownMenuLabel className="truncate">{user.name}</DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuGroup>
+                  <DropdownMenuItem asChild>
+                    <a href="#/pair">
+                      <TvIcon />
+                      Pair a TV
+                    </a>
+                  </DropdownMenuItem>
                   <DropdownMenuItem
                     disabled={isPending}
                     onSelect={() => void logout()}

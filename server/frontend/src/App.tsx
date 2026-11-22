@@ -10,6 +10,7 @@ import { useLibraryPosterNavigation } from "@/features/library/use-library-poste
 import { LibraryPage } from "@/pages/LibraryPage";
 import { LoginPage } from "@/pages/LoginPage";
 import { MoviePage } from "@/pages/MoviePage";
+import { PairPage } from "@/pages/PairPage";
 import { PeoplePage } from "@/pages/PeoplePage";
 import { PlayPage } from "@/pages/PlayPage";
 import { SearchPage } from "@/pages/SearchPage";
@@ -90,6 +91,7 @@ function Dashboard() {
         ) : null}
         {route.page === "search" ? <SearchPage /> : null}
         {route.page === "people" && isAdmin ? <PeoplePage /> : null}
+        {route.page === "pair" ? <PairPage key={route.code ?? ""} code={route.code} /> : null}
         {route.page === "play" ? (
           <PlayPage
             key={route.id}

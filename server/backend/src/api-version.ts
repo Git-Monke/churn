@@ -42,6 +42,7 @@ export function unsupportedVersion(url: string): number | undefined {
  * does so in a new API version.
  */
 export const API_FEATURES: readonly string[] = [
+  "device-pairing",
   "playback",
   "profiles",
   "release-search",

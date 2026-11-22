@@ -17,7 +17,8 @@ export type AppRoute =
   | { page: "movie"; source: MovieSource; id: string }
   | { page: "play"; id: string; from?: ShowReturnContext; restart?: boolean }
   | { page: "search" }
-  | { page: "people" };
+  | { page: "people" }
+  | { page: "pair"; code?: string };
 
 export function useHashRoute(
   onNavigate?: (previous: AppRoute, next: AppRoute, commit: () => void) => void,
@@ -126,6 +127,10 @@ export function parseHash(hash: string): AppRoute {
   }
   if (parts.length === 1 && parts[0] === "people") {
     return { page: "people" };
+  }
+  if (parts.length === 1 && parts[0] === "pair") {
+    const code = query.get("code")?.trim();
+    return code ? { page: "pair", code } : { page: "pair" };
   }
   if (parts.length === 2 && parts[0] === "play" && parts[1]) {
     const from = parseReturnContext(query);

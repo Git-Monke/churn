@@ -216,6 +216,32 @@ state-changing requests are rejected in addition to `SameSite=Lax`. Playback
 uses the signed-in user's session token, so resume positions and watched state
 are per Jellyfin user; no static playback token is stored in `.env`.
 
+### Paired devices
+
+A TV signs in by pairing instead of typing a password:
+
+1. The TV calls `POST /api/v1/tv/pair/start` with a name, shows the six-character
+   code it gets back (and a QR code of `approvePath`), and polls
+   `GET /api/v1/tv/pair/{code}` with its `x-churn-pair-token`.
+2. Someone signed in to the dashboard opens **Pair a TV** (`#/pair`) from the
+   account menu, checks the code and approves it.
+3. The TV's next poll returns its token, once. It sends
+   `Authorization: Bearer <token>` on every request from then on.
+
+The TV's Jellyfin session comes from Jellyfin's Quick Connect, authorized as the
+person who approved it, so it is separate from their browser session: signing
+out in the browser leaves the TV signed in, and revoking the TV leaves the
+browser alone. Quick Connect must be on in Jellyfin (Dashboard → General); it is
+by default.
+
+Paired devices stay signed in while used at least every 180 days, survive
+restarts, and are listed on the same page, where they can be revoked. A paired
+device can watch and request but never does admin work, and can't pair or
+manage devices. Codes last 10 minutes; starting pairing is limited to 20 times
+per 15 minutes per address. A revoked or expired device gets
+`401 device_not_paired`, so it can show its pairing screen instead of a login
+form.
+
 ## API
 
 | Route | Purpose |
@@ -258,6 +284,13 @@ are per Jellyfin user; no static playback token is stored in `.env`.
 | `GET /api/requests/options` | Quality profiles, root folders and request defaults |
 | `POST /api/requests` | Add a movie or series, cache its TMDB/TVDB metadata and start its Prowlarr release search in the background |
 | `GET /api/services/:id/open` | Redirect to a service's native UI |
+| `POST /api/tv/pair/start` | A device asks to be paired: returns a code and a poll token |
+| `GET /api/tv/pair/:code` | The device polls; the approval carries its token, once |
+| `GET /api/tv/pair/:code/details` | What a person is about to approve |
+| `POST /api/tv/pair/:code/approve` | Pair the device as the person approving |
+| `POST /api/tv/pair/:code/deny` | Refuse to pair the device |
+| `GET /api/tv/devices` | Paired devices: your own, or everyone's for an administrator |
+| `DELETE /api/tv/devices/:id` | Revoke a paired device |
 
 Errors use `{ "error": { "code": "...", "message": "..." } }`. Protected API
 routes return `401 unauthenticated` without a session and `401 session_expired`

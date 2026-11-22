@@ -39,9 +39,16 @@ export interface RouteContract {
   /** Fastify path, with `:params`. */
   path: string;
   summary: string;
-  /** Who may call it. */
-  auth: "none" | "user" | "admin";
+  /**
+   * Who may call it: anyone; anyone signed in, with the dashboard's cookie or
+   * a paired device's bearer token; a person signed in to the dashboard (not
+   * a paired device); or an administrator.
+   */
+  auth: "none" | "user" | "person" | "admin";
   query?: ParameterContract[];
+  headers?: ParameterContract[];
+  /** The JSON request body, by type name. */
+  body?: string;
   /** Descriptions for path parameters, by name. */
   params?: Record<string, ParameterContract>;
   response: ResponseContract;
@@ -77,6 +84,69 @@ export const API_ROUTES: RouteContract[] = [
     summary: "API versions and optional features this server has. Check it before signing in.",
     auth: "none",
     response: { json: "MetaResponse" },
+  },
+  {
+    method: "POST",
+    path: "/api/tv/pair/start",
+    summary: "A device asks to be paired: returns a code to show and a token to poll with.",
+    auth: "none",
+    body: "PairingStartRequest",
+    response: { json: "PairingStartResponse" },
+  },
+  {
+    method: "GET",
+    path: "/api/tv/pair/:code",
+    summary: "The device polls until the code is approved or denied; approval carries its token, once.",
+    auth: "none",
+    params: { code: { ...id("The pairing code."), name: "code" } },
+    headers: [
+      {
+        name: "x-churn-pair-token",
+        required: true,
+        description: "The pollToken from starting the pairing.",
+        schema: { type: "string" },
+      },
+    ],
+    response: { json: "PairingStatusResponse" },
+  },
+  {
+    method: "GET",
+    path: "/api/tv/pair/:code/details",
+    summary: "What a person is about to approve: the device's name and the code's state.",
+    auth: "person",
+    params: { code: { ...id("The pairing code."), name: "code" } },
+    response: { json: "PairingDetailsResponse" },
+  },
+  {
+    method: "POST",
+    path: "/api/tv/pair/:code/approve",
+    summary: "Pair the device as the person approving it.",
+    auth: "person",
+    params: { code: { ...id("The pairing code."), name: "code" } },
+    response: { json: "PairingApproveResponse" },
+  },
+  {
+    method: "POST",
+    path: "/api/tv/pair/:code/deny",
+    summary: "Refuse to pair the device.",
+    auth: "person",
+    params: { code: { ...id("The pairing code."), name: "code" } },
+    response: { empty: true, status: 204 },
+  },
+  {
+    method: "GET",
+    path: "/api/tv/devices",
+    summary: "Paired devices: your own, or everyone's for an administrator.",
+    auth: "person",
+    response: { json: "PairedDevicesResponse" },
+  },
+  {
+    method: "DELETE",
+    path: "/api/tv/devices/:id",
+    summary: "Revoke a paired device. It has to be paired again to sign in.",
+    auth: "person",
+    params: { id: id("The device id from the device list.") },
+    response: { empty: true, status: 204 },
   },
   {
     method: "GET",

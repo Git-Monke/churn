@@ -10,6 +10,7 @@ import {
   createLoginThrottle,
   createMemorySessionStore,
   SESSION_COOKIE_NAME,
+  sessionCredential,
 } from "./auth.js";
 import type { AppConfig } from "./config.js";
 import { ApiError, UpstreamError } from "./errors.js";
@@ -36,6 +37,8 @@ import { registerStatsRoutes } from "./routes/stats.js";
 import { registerStatusRoutes } from "./routes/status.js";
 import { registerVpnRoutes } from "./routes/vpn.js";
 import { API_VERSIONS, routeUrlFor, unsupportedVersion } from "./api-version.js";
+import { createPairingStore } from "./device-pairing.js";
+import { registerPairingRoutes } from "./routes/pairing.js";
 
 /** One response, as `BuildServerOptions.onResponse` sees it. */
 export interface ServedResponse {
@@ -145,6 +148,13 @@ export async function buildServer(
     if (method === "GET" && pathname === "/api/meta") {
       return true;
     }
+    // A device that isn't paired yet starts pairing and polls with its own token.
+    if (method === "POST" && pathname === "/api/tv/pair/start") {
+      return true;
+    }
+    if (method === "GET" && /^\/api\/tv\/pair\/[^/]+$/.test(pathname)) {
+      return true;
+    }
     if (method === "POST" && pathname === "/api/auth/login") {
       return true;
     }
@@ -185,14 +195,19 @@ export async function buildServer(
       return;
     }
 
-    const cookieValue = request.cookies[SESSION_COOKIE_NAME];
-    const record = cookieValue ? sessionStore.get(cookieValue) : undefined;
-    if (!record || !cookieValue) {
+    const credential = sessionCredential(request);
+    const record = credential ? sessionStore.get(credential.value) : undefined;
+    if (!record || !credential) {
       reply.header("cache-control", "no-store");
+      // A device whose token was revoked or expired needs pairing again, not a password.
       return reply.code(401).send({
-        error: { code: "unauthenticated", message: "Sign in to continue" },
+        error:
+          credential?.via === "bearer"
+            ? { code: "device_not_paired", message: "This device isn't paired any more. Pair it again." }
+            : { code: "unauthenticated", message: "Sign in to continue" },
       });
     }
+    const cookieValue = credential.value;
     request.auth = {
       user: record.user,
       accessToken: record.accessToken,
@@ -219,6 +234,7 @@ export async function buildServer(
   registerActivityRoutes(app, config, releaseEvents);
   registerShowRoutes(app, config, releaseSearch, introDb);
   registerServiceRoutes(app, config);
+  registerPairingRoutes(app, config, { store: sessionStore, pairings: createPairingStore() });
 
   const hasFrontend = existsSync(path.join(config.frontendDist, "index.html"));
   if (hasFrontend) {

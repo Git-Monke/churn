@@ -300,7 +300,8 @@
         "enum": [
           "admin",
           "profile",
-          "direct"
+          "direct",
+          "device"
         ],
         "type": "string"
       },
@@ -835,6 +836,174 @@
         "required": [
           "checkedAt",
           "ready"
+        ],
+        "type": "object"
+      },
+      "PairedDevice": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "lastSeenAt": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "pairedAt": {
+            "type": "string"
+          },
+          "user": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "user",
+          "pairedAt",
+          "lastSeenAt"
+        ],
+        "type": "object"
+      },
+      "PairedDevicesResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "devices": {
+            "items": {
+              "$ref": "#/components/schemas/PairedDevice"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "devices"
+        ],
+        "type": "object"
+      },
+      "PairingApproveResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "device": {
+            "$ref": "#/components/schemas/PairedDevice"
+          },
+          "status": {
+            "const": "approved",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "device"
+        ],
+        "type": "object"
+      },
+      "PairingDetailsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "deviceName": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "approved",
+              "denied"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "deviceName",
+          "status",
+          "expiresAt"
+        ],
+        "type": "object"
+      },
+      "PairingStartRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "deviceName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "deviceName"
+        ],
+        "type": "object"
+      },
+      "PairingStartResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "approvePath": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string"
+          },
+          "pollIntervalSeconds": {
+            "type": "number"
+          },
+          "pollToken": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "pollToken",
+          "expiresAt",
+          "approvePath",
+          "pollIntervalSeconds"
+        ],
+        "type": "object"
+      },
+      "PairingStatusResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "expiresAt": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "approved",
+              "denied"
+            ],
+            "type": "string"
+          },
+          "token": {
+            "type": "string"
+          },
+          "user": {
+            "$ref": "#/components/schemas/AuthUser"
+          }
+        },
+        "required": [
+          "status"
         ],
         "type": "object"
       },
@@ -2248,6 +2417,11 @@
       }
     },
     "securitySchemes": {
+      "device": {
+        "description": "A paired device's token, from pairing (POST /api/tv/pair/start).",
+        "scheme": "bearer",
+        "type": "http"
+      },
       "session": {
         "in": "cookie",
         "name": "churn_session",
@@ -2290,6 +2464,9 @@
         "security": [
           {
             "session": []
+          },
+          {
+            "device": []
           }
         ],
         "summary": "Downloads in progress, queued or needing attention."
@@ -2413,6 +2590,9 @@
         "security": [
           {
             "session": []
+          },
+          {
+            "device": []
           }
         ],
         "summary": "Every movie and show in Jellyfin that the signed-in person can see."
@@ -2495,6 +2675,9 @@
         "security": [
           {
             "session": []
+          },
+          {
+            "device": []
           }
         ],
         "summary": "A Jellyfin poster or backdrop, proxied so the token stays on the server."
@@ -2539,6 +2722,9 @@
         "security": [
           {
             "session": []
+          },
+          {
+            "device": []
           }
         ],
         "summary": "Cached release search results for a movie."
@@ -2596,6 +2782,9 @@
         "security": [
           {
             "session": []
+          },
+          {
+            "device": []
           }
         ],
         "summary": "A movie: details and download state."
@@ -2653,6 +2842,9 @@
         "security": [
           {
             "session": []
+          },
+          {
+            "device": []
           }
         ],
         "summary": "A movie's download progress."
@@ -2686,6 +2878,9 @@
         "security": [
           {
             "session": []
+          },
+          {
+            "device": []
           }
         ],
         "summary": "Titles requested in Sonarr and Radarr that are not in Jellyfin yet."
@@ -2719,6 +2914,9 @@
         "security": [
           {
             "session": []
+          },
+          {
+            "device": []
           }
         ],
         "summary": "Continue watching: items in progress and next episodes."
@@ -2776,6 +2974,9 @@
         "security": [
           {
             "session": []
+          },
+          {
+            "device": []
           }
         ],
         "summary": "A show: its seasons, episodes and what is downloaded."
@@ -2833,6 +3034,9 @@
         "security": [
           {
             "session": []
+          },
+          {
+            "device": []
           }
         ],
         "summary": "Episode downloads in progress for a show."
@@ -2909,6 +3113,9 @@
         "security": [
           {
             "session": []
+          },
+          {
+            "device": []
           }
         ],
         "summary": "Cached release search results for a season or episode."
@@ -2997,6 +3204,9 @@
         "security": [
           {
             "session": []
+          },
+          {
+            "device": []
           }
         ],
         "summary": "How to play an item: stream URL, quality options, subtitles, segments."
@@ -3041,6 +3251,9 @@
         "security": [
           {
             "session": []
+          },
+          {
+            "device": []
           }
         ],
         "summary": "Redirect to Jellyfin's HLS transcode, for sources the browser can't play directly."
@@ -3085,6 +3298,9 @@
         "security": [
           {
             "session": []
+          },
+          {
+            "device": []
           }
         ],
         "summary": "Redirect to the direct-play stream."
@@ -3135,6 +3351,9 @@
         "security": [
           {
             "session": []
+          },
+          {
+            "device": []
           }
         ],
         "summary": "A text subtitle track as WebVTT."
@@ -3205,6 +3424,9 @@
         "security": [
           {
             "session": []
+          },
+          {
+            "device": []
           }
         ],
         "summary": "Quality profiles, root folders and defaults for a new request."
@@ -3251,6 +3473,9 @@
         "security": [
           {
             "session": []
+          },
+          {
+            "device": []
           }
         ],
         "summary": "Search Sonarr and Radarr for titles to request."
@@ -3304,6 +3529,9 @@
         "security": [
           {
             "session": []
+          },
+          {
+            "device": []
           }
         ],
         "summary": "A Sonarr or Radarr poster from an allowed artwork host, proxied."
@@ -3353,6 +3581,9 @@
         "security": [
           {
             "session": []
+          },
+          {
+            "device": []
           }
         ],
         "summary": "Redirect to a service's own web page."
@@ -3386,6 +3617,9 @@
         "security": [
           {
             "session": []
+          },
+          {
+            "device": []
           }
         ],
         "summary": "Torrent, disk and library statistics."
@@ -3419,9 +3653,300 @@
         "security": [
           {
             "session": []
+          },
+          {
+            "device": []
           }
         ],
         "summary": "Health of Jellyfin, Sonarr and Radarr."
+      }
+    },
+    "/api/v1/tv/devices": {
+      "get": {
+        "description": "From the dashboard; a paired device can't call it.",
+        "operationId": "getTvDevices",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PairedDevicesResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Paired devices: your own, or everyone's for an administrator."
+      }
+    },
+    "/api/v1/tv/devices/{id}": {
+      "delete": {
+        "description": "From the dashboard; a paired device can't call it.",
+        "operationId": "deleteTvDevicesById",
+        "parameters": [
+          {
+            "description": "The device id from the device list.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Revoke a paired device. It has to be paired again to sign in."
+      }
+    },
+    "/api/v1/tv/pair/start": {
+      "post": {
+        "operationId": "postTvPairStart",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PairingStartRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PairingStartResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [],
+        "summary": "A device asks to be paired: returns a code to show and a token to poll with."
+      }
+    },
+    "/api/v1/tv/pair/{code}": {
+      "get": {
+        "operationId": "getTvPairByCode",
+        "parameters": [
+          {
+            "description": "The pairing code.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The pollToken from starting the pairing.",
+            "in": "header",
+            "name": "x-churn-pair-token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PairingStatusResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [],
+        "summary": "The device polls until the code is approved or denied; approval carries its token, once."
+      }
+    },
+    "/api/v1/tv/pair/{code}/approve": {
+      "post": {
+        "description": "From the dashboard; a paired device can't call it.",
+        "operationId": "postTvPairByCodeApprove",
+        "parameters": [
+          {
+            "description": "The pairing code.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PairingApproveResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Pair the device as the person approving it."
+      }
+    },
+    "/api/v1/tv/pair/{code}/deny": {
+      "post": {
+        "description": "From the dashboard; a paired device can't call it.",
+        "operationId": "postTvPairByCodeDeny",
+        "parameters": [
+          {
+            "description": "The pairing code.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Refuse to pair the device."
+      }
+    },
+    "/api/v1/tv/pair/{code}/details": {
+      "get": {
+        "description": "From the dashboard; a paired device can't call it.",
+        "operationId": "getTvPairByCodeDetails",
+        "parameters": [
+          {
+            "description": "The pairing code.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PairingDetailsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "What a person is about to approve: the device's name and the code's state."
       }
     },
     "/api/v1/vpn": {
@@ -3452,6 +3977,9 @@
         "security": [
           {
             "session": []
+          },
+          {
+            "device": []
           }
         ],
         "summary": "The VPN check: whether downloads leave through the VPN."

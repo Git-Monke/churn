@@ -23,6 +23,7 @@ export function buildOpenApi(): JsonObject {
   const typeNames = new Set<string>(["ErrorResponse"]);
   for (const route of API_ROUTES) {
     if ("json" in route.response) typeNames.add(route.response.json);
+    if (route.body) typeNames.add(route.body);
   }
 
   const schemas: Record<string, Schema> = {};
@@ -79,6 +80,11 @@ export function buildOpenApi(): JsonObject {
         schemas,
         securitySchemes: {
           session: { type: "apiKey", in: "cookie", name: "churn_session" },
+          device: {
+            type: "http",
+            scheme: "bearer",
+            description: "A paired device's token, from pairing (POST /api/tv/pair/start).",
+          },
         },
       },
     }),
@@ -93,13 +99,23 @@ function operation(route: RouteContract): JsonObject {
       return parameter("path", { name, required: true, description: described?.description ?? "", schema: described?.schema ?? { type: "string" } });
     }),
     ...(route.query ?? []).map((query) => parameter("query", query)),
+    ...(route.headers ?? []).map((header) => parameter("header", header)),
   ];
   return {
     operationId: operationId(route),
     summary: route.summary,
-    ...(route.auth === "none" ? { security: [] } : { security: [{ session: [] }] }),
+    security: SECURITY[route.auth],
     ...(route.auth === "admin" ? { description: "Administrators only." } : {}),
+    ...(route.auth === "person" ? { description: "From the dashboard; a paired device can't call it." } : {}),
     ...(parameters.length > 0 ? { parameters } : {}),
+    ...(route.body
+      ? {
+          requestBody: {
+            required: true,
+            content: { "application/json": { schema: { $ref: `#/definitions/${route.body}` } } },
+          },
+        }
+      : {}),
     responses: {
       [String(("status" in route.response && route.response.status) || successStatus(route))]: success(route),
       default: {
@@ -109,6 +125,13 @@ function operation(route: RouteContract): JsonObject {
     },
   };
 }
+
+const SECURITY: Record<RouteContract["auth"], JsonObject[]> = {
+  none: [],
+  user: [{ session: [] }, { device: [] }],
+  person: [{ session: [] }],
+  admin: [{ session: [] }],
+};
 
 function successStatus(route: RouteContract): number {
   return "redirect" in route.response ? 302 : 200;
@@ -132,7 +155,7 @@ function success(route: RouteContract): JsonObject {
   return { description: "No content" };
 }
 
-function parameter(where: "path" | "query", contract: ParameterContract): JsonObject {
+function parameter(where: "path" | "query" | "header", contract: ParameterContract): JsonObject {
   return {
     name: contract.name,
     in: where,

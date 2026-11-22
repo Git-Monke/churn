@@ -449,6 +449,140 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tv/devices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Paired devices: your own, or everyone's for an administrator.
+         * @description From the dashboard; a paired device can't call it.
+         */
+        get: operations["getTvDevices"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tv/devices/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revoke a paired device. It has to be paired again to sign in.
+         * @description From the dashboard; a paired device can't call it.
+         */
+        delete: operations["deleteTvDevicesById"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tv/pair/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A device asks to be paired: returns a code to show and a token to poll with. */
+        post: operations["postTvPairStart"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tv/pair/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The device polls until the code is approved or denied; approval carries its token, once. */
+        get: operations["getTvPairByCode"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tv/pair/{code}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pair the device as the person approving it.
+         * @description From the dashboard; a paired device can't call it.
+         */
+        post: operations["postTvPairByCodeApprove"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tv/pair/{code}/deny": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refuse to pair the device.
+         * @description From the dashboard; a paired device can't call it.
+         */
+        post: operations["postTvPairByCodeDeny"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tv/pair/{code}/details": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What a person is about to approve: the device's name and the code's state.
+         * @description From the dashboard; a paired device can't call it.
+         */
+        get: operations["getTvPairByCodeDetails"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/vpn": {
         parameters: {
             query?: never;
@@ -545,7 +679,7 @@ export interface components {
         /** @enum {string} */
         ArrServiceState: "ok" | "unconfigured" | "unauthorized" | "unreachable";
         /** @enum {string} */
-        AuthSessionKind: "admin" | "profile" | "direct";
+        AuthSessionKind: "admin" | "profile" | "direct" | "device";
         AuthSessionResponse: {
             authenticated: boolean;
             expiresAt?: string;
@@ -687,6 +821,48 @@ export interface components {
             checkedAt: string;
             download?: components["schemas"]["ActivityItem"];
             ready: boolean;
+        };
+        PairedDevice: {
+            id: string;
+            lastSeenAt: string;
+            name: string;
+            pairedAt: string;
+            user: {
+                id: string;
+                name: string;
+            };
+        };
+        PairedDevicesResponse: {
+            devices: components["schemas"]["PairedDevice"][];
+        };
+        PairingApproveResponse: {
+            device: components["schemas"]["PairedDevice"];
+            /** @constant */
+            status: "approved";
+        };
+        PairingDetailsResponse: {
+            code: string;
+            deviceName: string;
+            expiresAt: string;
+            /** @enum {string} */
+            status: "pending" | "approved" | "denied";
+        };
+        PairingStartRequest: {
+            deviceName: string;
+        };
+        PairingStartResponse: {
+            approvePath: string;
+            code: string;
+            expiresAt: string;
+            pollIntervalSeconds: number;
+            pollToken: string;
+        };
+        PairingStatusResponse: {
+            expiresAt?: string;
+            /** @enum {string} */
+            status: "pending" | "approved" | "denied";
+            token?: string;
+            user?: components["schemas"]["AuthUser"];
         };
         PlaybackItem: {
             directPlay: boolean;
@@ -1872,6 +2048,227 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StatusResponse"];
+                };
+            };
+            /** @description An error, as `{ error: { code, message } }`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getTvDevices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PairedDevicesResponse"];
+                };
+            };
+            /** @description An error, as `{ error: { code, message } }`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    deleteTvDevicesById: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The device id from the device list. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description An error, as `{ error: { code, message } }`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    postTvPairStart: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PairingStartRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PairingStartResponse"];
+                };
+            };
+            /** @description An error, as `{ error: { code, message } }`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getTvPairByCode: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The pollToken from starting the pairing. */
+                "x-churn-pair-token": string;
+            };
+            path: {
+                /** @description The pairing code. */
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PairingStatusResponse"];
+                };
+            };
+            /** @description An error, as `{ error: { code, message } }`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    postTvPairByCodeApprove: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The pairing code. */
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PairingApproveResponse"];
+                };
+            };
+            /** @description An error, as `{ error: { code, message } }`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    postTvPairByCodeDeny: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The pairing code. */
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description An error, as `{ error: { code, message } }`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getTvPairByCodeDetails: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The pairing code. */
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PairingDetailsResponse"];
                 };
             };
             /** @description An error, as `{ error: { code, message } }`. */

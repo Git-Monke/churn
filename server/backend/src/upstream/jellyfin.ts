@@ -32,6 +32,16 @@ export interface JellyfinAuthenticationResult {
   ServerId?: string;
 }
 
+/** Jellyfin's Quick Connect state for one sign-in attempt. */
+export interface JellyfinQuickConnectResult {
+  Authenticated?: boolean;
+  /** Proves the attempt is ours when exchanging it for a token. Keep private. */
+  Secret?: string;
+  /** What a signed-in user authorizes. */
+  Code?: string;
+  DeviceId?: string;
+}
+
 export interface JellyfinItem {
   Id?: string;
   Name?: string;
@@ -218,6 +228,53 @@ export function createJellyfinClient(
           method: "POST",
           headers: { Authorization: authorizationHeader, ...deviceHeaders() },
           body: { Username: username, Pw: password },
+        },
+      );
+    },
+
+    /** Whether Jellyfin's Quick Connect is turned on. Public in Jellyfin. */
+    async isQuickConnectEnabled(): Promise<boolean> {
+      return fetchJson<boolean>("jellyfin", `${config.url}/QuickConnect/Enabled`, {
+        timeoutMs,
+        headers: deviceHeaders(),
+      });
+    },
+
+    /**
+     * Start a Quick Connect sign-in for this client's device. The device id and
+     * name given to `createJellyfinClient` become the new session's.
+     */
+    async initiateQuickConnect(): Promise<JellyfinQuickConnectResult> {
+      return fetchJson<JellyfinQuickConnectResult>("jellyfin", `${config.url}/QuickConnect/Initiate`, {
+        timeoutMs,
+        method: "POST",
+        headers: { Authorization: authorizationHeader, ...deviceHeaders() },
+      });
+    },
+
+    /** Authorize a Quick Connect code as the user this client's token belongs to. */
+    async authorizeQuickConnect(code: string, userId: string): Promise<boolean> {
+      if (!token) {
+        throw new UpstreamError("jellyfin", "unauthorized", "A Jellyfin user token is required");
+      }
+      const query = new URLSearchParams({ code, userId });
+      return fetchJson<boolean>("jellyfin", `${config.url}/QuickConnect/Authorize?${query.toString()}`, {
+        timeoutMs,
+        method: "POST",
+        headers: authHeaders(),
+      });
+    },
+
+    /** Exchange an authorized Quick Connect secret for the device's own Jellyfin session. */
+    async authenticateWithQuickConnect(secret: string): Promise<JellyfinAuthenticationResult> {
+      return fetchJson<JellyfinAuthenticationResult>(
+        "jellyfin",
+        `${config.url}/Users/AuthenticateWithQuickConnect`,
+        {
+          timeoutMs,
+          method: "POST",
+          headers: { Authorization: authorizationHeader, ...deviceHeaders() },
+          body: { Secret: secret },
         },
       );
     },
