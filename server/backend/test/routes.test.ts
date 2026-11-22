@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AppConfig } from "../src/config.js";
 import { buildServer } from "../src/server.js";
+import { clearServiceIconCache } from "../src/service-icons.js";
 
 let testServerCounter = 0;
 
@@ -1854,6 +1855,67 @@ describe("service links and unknown routes", () => {
 
     expect(response.statusCode).toBe(302);
     expect(response.headers.location).toBe("http://100.90.93.111:8989");
+    await app.close();
+  });
+
+  it("serves each service's own logo, locked down as an image", async () => {
+    clearServiceIconCache();
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg"><circle r="4"/></svg>';
+    installFetch((url) => {
+      if (url === "http://sonarr.test:8989/Content/Images/logo.svg") {
+        return new Response(svg, { headers: { "content-type": "image/svg+xml" } });
+      }
+      return jsonResponse({}, 404);
+    });
+    const app = await buildAuthedServer(makeConfig());
+    const response = await app.inject({ method: "GET", url: "/api/services/sonarr/icon" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-type"]).toBe("image/svg+xml");
+    expect(response.headers["x-content-type-options"]).toBe("nosniff");
+    expect(response.headers["content-security-policy"]).toContain("sandbox");
+    expect(response.body).toBe(svg);
+    await app.close();
+  });
+
+  it("finds Jellyfin's content-hashed touch icon through its web client", async () => {
+    clearServiceIconCache();
+    installFetch((url) => {
+      if (url === "http://jellyfin.test:8096/web/index.html") {
+        return new Response('<link rel="apple-touch-icon" href="touchicon.f5bb.png">', {
+          headers: { "content-type": "text/html" },
+        });
+      }
+      if (url === "http://jellyfin.test:8096/web/touchicon.f5bb.png") {
+        return new Response(new Uint8Array([137, 80, 78, 71]), {
+          headers: { "content-type": "image/png" },
+        });
+      }
+      return jsonResponse({}, 404);
+    });
+    const app = await buildAuthedServer(makeConfig());
+    const response = await app.inject({ method: "GET", url: "/api/services/jellyfin/icon" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-type"]).toBe("image/png");
+    await app.close();
+  });
+
+  it("answers 404 when a service has no usable icon, and for unknown services", async () => {
+    clearServiceIconCache();
+    installFetch((url) =>
+      url.endsWith("/Content/Images/logo.svg")
+        ? new Response("<html>login</html>", { headers: { "content-type": "text/html" } })
+        : jsonResponse({}, 404),
+    );
+    const app = await buildAuthedServer(makeConfig());
+    const notImage = await app.inject({ method: "GET", url: "/api/services/radarr/icon" });
+    expect(notImage.statusCode).toBe(404);
+    expect(notImage.json().error.code).toBe("icon_unavailable");
+
+    const unknown = await app.inject({ method: "GET", url: "/api/services/nope/icon" });
+    expect(unknown.statusCode).toBe(404);
+    expect(unknown.json().error.code).toBe("unknown_service");
     await app.close();
   });
 
