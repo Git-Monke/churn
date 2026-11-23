@@ -21,6 +21,9 @@ export default defineConfig({
     // tailnet). Override with `--host 127.0.0.1` for a loopback-only session.
     host: true,
     port: 5173,
+    // Passkeys need a secure origin with a real hostname, so remote sessions
+    // reach this server through `tailscale serve` (https://<machine>.ts.net).
+    allowedHosts: [".ts.net"],
     proxy: {
       // Preserve the browser's Host header so the backend's same-origin CSRF
       // check sees the Vite dev origin instead of the API target.

@@ -216,6 +216,51 @@ state-changing requests are rejected in addition to `SameSite=Lax`. Playback
 uses the signed-in user's session token, so resume positions and watched state
 are per Jellyfin user; no static playback token is stored in `.env`.
 
+### Passkeys
+
+To enable passkey sign-in, set `CHURN_PASSKEY_ORIGIN` in `server/.env` to the
+exact HTTPS address you use in your browser, such as
+`https://churn.example.com`. Include the port if it appears in the address and
+omit the trailing slash. Restart the dashboard with the updated environment.
+Use the same address on all devices where you want to use the passkey. The
+short plain HTTP hostname and LAN IP do not support passkeys. Plain HTTP
+`localhost` works for local development.
+
+Any person can create a passkey. On the sign-in screen, choose **Set up a
+passkey**, pick the person, and name the passkey — the field starts as
+*Name's Passkey* — then enter their password and confirm the browser prompt.
+Churn creates the passkey and signs them in. The **Admin** tile does the same
+for a Jellyfin account; its name field follows the username you type.
+**Passkeys** in the account menu lists the passkeys that sign you in and
+removes the ones you no longer want. After enrollment, choose **Sign in with a
+passkey** on the sign-in screen. Supported browsers also offer passkeys in the username field.
+Each passkey belongs to the person who created it, so the browser prompt signs
+you in as that person — a profile stays a profile — even when several people
+share one Jellyfin account. Password and profile sign-in remain available.
+
+`npm run dev` already points passkeys at the Vite dev server
+(`http://localhost:5173`); set `CHURN_PASSKEY_ORIGIN` to override it, and stop
+any other dev server on 5173 so the address matches.
+
+For remote development, passkeys need an HTTPS origin with a real hostname, so
+serve the dev server through Tailscale and use the MagicDNS name everywhere:
+
+```sh
+sudo tailscale serve --bg 5173        # prints the HTTPS address to use
+CHURN_PASSKEY_ORIGIN=https://<machine>.<tailnet>.ts.net npm run dev
+```
+
+Use the address `tailscale serve status` prints, and open it from any device on
+the tailnet. The plain `http://100.x.y.z:5173` or LAN address is not a secure
+origin, cannot match the configured one, and cannot create or use passkeys.
+
+Churn stores each passkey’s public key and a separate, user-scoped Jellyfin
+device token in `passkeys.json` in its state directory. Treat this file like
+`auth-state.json` when backing up Churn. Removing a passkey ends the Churn
+sessions created with it and attempts to revoke its Jellyfin device token.
+If you change the configured address or revoke the corresponding device in
+Jellyfin, sign in with your password and enroll again.
+
 ## API
 
 | Route | Purpose |
