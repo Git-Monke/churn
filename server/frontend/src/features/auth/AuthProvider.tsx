@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useState,
   type ReactNode,
 } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -29,6 +30,8 @@ interface AuthContextValue {
   profileLogin: (input: ProfileLoginInput) => Promise<ProfileLoginResponse>;
   logout: () => Promise<void>;
   applySession: (data: LoginResponse) => void;
+  /** True after an active sign-in this page load; a restored session leaves it false. */
+  signedIn: boolean;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -61,8 +64,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     queryClient.setQueryData<AuthSessionResponse>(SESSION_QUERY_KEY, { authenticated: false });
   }, [queryClient]);
 
+  const [signedIn, setSignedIn] = useState(false);
+
   const applySession = useCallback(
     (data: LoginResponse) => {
+      setSignedIn(true);
       replaceSession({
         authenticated: true,
         user: data.user,
@@ -138,6 +144,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         profileLogin,
         applySession,
         logout,
+        signedIn,
       }}
     >
       {children}

@@ -53,7 +53,7 @@ function AppShell() {
 
 function Dashboard({ onManagePasskeys }: { onManagePasskeys: () => void }) {
   const { route, poster, keepLibrary, main, onLibraryClick } = useLibraryPosterNavigation();
-  const { session } = useAuth();
+  const { session, signedIn } = useAuth();
   const isAdmin = session?.user?.isAdmin === true;
 
   useEffect(() => {
@@ -73,7 +73,7 @@ function Dashboard({ onManagePasskeys }: { onManagePasskeys: () => void }) {
   );
 
   return (
-    <div className="flex min-h-dvh w-full flex-col">
+    <div className={`flex min-h-dvh w-full flex-col${signedIn ? " motion-signin-arrive" : ""}`}>
       <AppHeader route={route} onManagePasskeys={onManagePasskeys} />
       <main ref={main} tabIndex={-1} data-title-from-library={poster ? "" : undefined} className="mx-auto flex w-full max-w-content flex-1 flex-col gap-8 px-4 py-6 sm:px-6 lg:px-10">
         {route.page === "services" ? (
