@@ -10,7 +10,14 @@ import {
   type RegistrationResponseJSON,
 } from "@simplewebauthn/server";
 
-import { requireAuth, type AuthContext, type LoginThrottle, type SessionStore } from "../auth.js";
+import {
+  requireAuth,
+  type AuthContext,
+  type AuthSessionKind,
+  type AuthUser,
+  type LoginThrottle,
+  type SessionStore,
+} from "../auth.js";
 import type { AppConfig } from "../config.js";
 import { ApiError, isUnauthorized } from "../errors.js";
 import type { PasskeyRecord, PasskeyStore } from "../passkey-store.js";
@@ -22,9 +29,8 @@ const MAX_CHALLENGES = 256;
 const MAX_KEYS = 20;
 
 interface PendingRegistration {
-  sessionId: string;
   label: string;
-  userId: string;
+  user: AuthUser;
   profileId?: string;
   deviceId: string;
   accessToken: string;
@@ -43,8 +49,13 @@ function jsonObject(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function handle(origin: string, userId: string) {
-  return createHash("sha256").update(origin).update("\0").update(userId).digest();
+/**
+ * WebAuthn user handle. Profile passkeys get their own handle so two people
+ * sharing a Jellyfin account stay separate credentials on the authenticator.
+ */
+export function passkeyHandle(origin: string, userId: string, profileId?: string) {
+  const scope = profileId ? `${userId}\0${profileId}` : userId;
+  return createHash("sha256").update(origin).update("\0").update(scope).digest();
 }
 
 function publicKey(record: PasskeyRecord) {
@@ -147,11 +158,25 @@ export function registerPasskeyRoutes(
   }
 
   function checkProfile(auth: Pick<AuthContext, "profileId">, userId: string) {
-    if (!auth.profileId) return;
+    if (!auth.profileId) return undefined;
     const profile = sessions.getProfile(auth.profileId);
     if (!profile || profile.initialPin !== null || profile.jellyfinUserId !== userId) {
       throw new ApiError(403, "passkey_profile", "Sign in with your password to continue.");
     }
+    return profile;
+  }
+
+  function enrollableProfile(profileId: string) {
+    const profile = sessions.getProfile(profileId);
+    if (!profile) throw new ApiError(404, "profile_not_found", "Person not found");
+    if (profile.initialPin !== null) {
+      throw new ApiError(
+        403,
+        "passkey_profile",
+        "Set a password for this person before adding a passkey.",
+      );
+    }
+    return profile;
   }
 
   async function remove(records: PasskeyRecord[]) {
@@ -168,51 +193,64 @@ export function registerPasskeyRoutes(
 
   app.get("/api/auth/passkeys", async (request, reply) => {
     reply.header("cache-control", "no-store");
-    return store.list(requireAuth(request).user.id).filter((record) => record.origin === origin).map(publicKey);
+    const auth = requireAuth(request);
+    return store
+      .list(auth.user.id)
+      .filter((record) => record.origin === origin && record.profileId === auth.profileId)
+      .map(publicKey);
   });
 
   app.post("/api/auth/passkeys/register/options", async (request, reply) => {
     const expectedOrigin = requireOrigin(request, reply);
-    const auth = requireAuth(request);
-    const key = `passkey-register:${request.ip}|${auth.user.id}`;
+    const { profileId, username, password, label } = jsonObject(request.body);
+    if (typeof password !== "string" || !password || password.length > 1024 ||
+        typeof label !== "string" || !label.trim() || label.trim().length > 50 ||
+        (typeof profileId === "string") === (typeof username === "string")) {
+      throw new ApiError(400, "invalid_request", "Enter your password and a name for the passkey.");
+    }
+    const accountName = typeof profileId === "string" ? "" : (username as string).trim();
+    if (!accountName && typeof profileId !== "string") {
+      throw new ApiError(400, "invalid_request", "Enter your username.");
+    }
+    const key = `passkey-register:${request.ip}|${typeof profileId === "string" ? profileId : accountName.toLowerCase()}`;
     limit(key, reply);
-    checkProfile(auth, auth.user.id);
+    const profile = typeof profileId === "string" ? enrollableProfile(profileId) : undefined;
     ensureRoom();
     const previous = take(request, reply, true);
     if (previous?.registration) void revoke(previous.registration);
-    const { password, label } = jsonObject(request.body);
-    if (typeof password !== "string" || !password || password.length > 1024 ||
-        typeof label !== "string" || !label.trim() || label.trim().length > 50) {
-      throw new ApiError(400, "invalid_request", "Enter your Jellyfin password and a name for the passkey.");
-    }
-    const registered = store.list(auth.user.id);
-    if (registered.length >= MAX_KEYS) {
-      throw new ApiError(409, "passkey_limit", "Remove an existing passkey before adding another.");
-    }
 
     const deviceId = randomUUID();
     let accessToken: string | undefined;
     try {
-      const authenticated = await client(undefined, deviceId).authenticate(auth.user.name, password);
+      const authenticated = await client(undefined, deviceId).authenticate(
+        profile ? profile.name : accountName,
+        password,
+      );
       accessToken = authenticated.AccessToken;
-      if (!accessToken || authenticated.User?.Id !== auth.user.id || authenticated.User.Policy?.IsDisabled) {
+      const user = mapAuthUser(authenticated.User);
+      if (!accessToken || !user || authenticated.User?.Policy?.IsDisabled ||
+          (profile && user.id !== profile.jellyfinUserId)) {
         throw rejected();
       }
-      checkProfile(auth, auth.user.id);
-      if (!sessions.get(auth.sessionId)) throw rejected();
+      const registered = store.list(user.id);
+      if (registered.length >= MAX_KEYS) {
+        throw new ApiError(409, "passkey_limit", "Remove an existing passkey before adding another.");
+      }
       const options = await generateRegistrationOptions({
         rpName: "Churn",
         rpID: new URL(expectedOrigin).hostname,
-        userName: auth.user.name,
-        userID: handle(expectedOrigin, auth.user.id),
+        userName: profile ? `${user.name} / ${profile.name}` : user.name,
+        userDisplayName: profile ? profile.name : user.name,
+        userID: passkeyHandle(expectedOrigin, user.id, profile?.id),
         timeout: TTL,
         attestationType: "none",
         authenticatorSelection: { residentKey: "required", userVerification: "required" },
-        excludeCredentials: registered.filter((record) => record.origin === origin).map(({ id }) => ({ id })),
+        excludeCredentials: registered
+          .filter((record) => record.origin === origin && record.profileId === profile?.id)
+          .map(({ id }) => ({ id })),
       });
       issue(reply, options.challenge, {
-        sessionId: auth.sessionId, label: label.trim(), userId: auth.user.id,
-        profileId: auth.profileId, deviceId, accessToken,
+        label: label.trim(), user, profileId: profile?.id, deviceId, accessToken,
       });
       throttle.reset(key);
       return options;
@@ -228,7 +266,6 @@ export function registerPasskeyRoutes(
 
   app.post("/api/auth/passkeys/register/cancel", async (request, reply) => {
     requireOrigin(request, reply);
-    requireAuth(request);
     const challenge = take(request, reply, true);
     if (challenge?.registration) void revoke(challenge.registration);
     return reply.code(204).send();
@@ -236,13 +273,11 @@ export function registerPasskeyRoutes(
 
   app.post("/api/auth/passkeys/register/verify", async (request, reply) => {
     const expectedOrigin = requireOrigin(request, reply);
-    const auth = requireAuth(request);
     const challenge = take(request, reply, true);
     const pending = challenge?.registration;
     if (!challenge || !pending) throw rejected();
     let saved = false;
     try {
-      if (pending.sessionId !== auth.sessionId) throw rejected();
       let result;
       try {
         result = await verifyRegistrationResponse({
@@ -255,20 +290,27 @@ export function registerPasskeyRoutes(
       } catch {
         throw rejected();
       }
-      if (!result.verified || !sessions.get(auth.sessionId)) throw rejected();
-      checkProfile(auth, auth.user.id);
-      if (store.list(auth.user.id).length >= MAX_KEYS) throw rejected();
+      if (!result.verified) throw rejected();
+      if (pending.profileId) enrollableProfile(pending.profileId);
+      if (store.list(pending.user.id).length >= MAX_KEYS) throw rejected();
       const credential = result.registrationInfo.credential;
       const record: PasskeyRecord = {
         id: credential.id, origin: expectedOrigin,
         publicKey: Buffer.from(credential.publicKey).toString("base64url"),
-        counter: credential.counter, userId: pending.userId, profileId: pending.profileId,
+        counter: credential.counter, userId: pending.user.id, profileId: pending.profileId,
         accessToken: pending.accessToken, deviceId: pending.deviceId, label: pending.label,
         createdAt: new Date().toISOString(),
       };
       saved = store.add(record);
       if (!saved) throw rejected();
-      return publicKey(record);
+      const kind: AuthSessionKind = pending.profileId
+        ? "profile"
+        : pending.user.isAdmin ? "admin" : "direct";
+      const session = sessions.create(pending.user, pending.accessToken, {
+        kind, profileId: pending.profileId, deviceId: pending.deviceId, passkeyId: record.id,
+      });
+      setSessionCookie(reply, request, config, session.cookieValue);
+      return sessionPayload(config, pending.user, kind, session.record, pending.profileId);
     } finally {
       if (!saved) void revoke(pending);
     }
@@ -293,7 +335,7 @@ export function registerPasskeyRoutes(
     const response = jsonObject(request.body) as unknown as AuthenticationResponseJSON;
     const record = store.get(response.id);
     if (!challenge || !record || record.origin !== expectedOrigin ||
-        response.response?.userHandle !== handle(expectedOrigin, record.userId).toString("base64url")) {
+        response.response?.userHandle !== passkeyHandle(expectedOrigin, record.userId, record.profileId).toString("base64url")) {
       throttle.recordFailure(key);
       throw rejected();
     }
@@ -347,7 +389,8 @@ export function registerPasskeyRoutes(
     const expectedOrigin = requireOrigin(request, reply);
     const auth = requireAuth(request);
     const record = store.get(request.params.id);
-    if (!record || record.userId !== auth.user.id || record.origin !== expectedOrigin) {
+    if (!record || record.userId !== auth.user.id || record.profileId !== auth.profileId ||
+        record.origin !== expectedOrigin) {
       throw new ApiError(404, "passkey_not_found", "Passkey not found.");
     }
     await remove([record]);

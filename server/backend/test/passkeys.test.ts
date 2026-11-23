@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { loadConfig } from "../src/config.js";
 import { createPasskeyStore, type PasskeyRecord } from "../src/passkey-store.js";
+import { passkeyHandle } from "../src/routes/passkeys.js";
 import { buildServer } from "../src/server.js";
 
 const origin = "https://churn.example.com";
@@ -43,7 +44,7 @@ describe("passkey persistence", () => {
 });
 
 describe("passkey routes", () => {
-  it("allows only the configured origin and keeps enrollment behind a session", async () => {
+  it("allows only the configured origin and identifies the person before enrolling", async () => {
     const dir = temporaryDir();
     const app = await buildServer(loadConfig({
       serverDir: dir, readDotEnv: false,
@@ -66,11 +67,30 @@ describe("passkey routes", () => {
       expect(options.cookies.find(({ value }) => value)?.httpOnly).toBe(true);
       expect(options.cookies.find(({ value }) => value)?.secure).toBe(true);
       expect(options.cookies.find(({ value }) => value)?.sameSite).toBe("Strict");
-      expect((await app.inject({
-        ...request, url: "/api/auth/passkeys/register/options", headers,
-      })).statusCode).toBe(401);
+      const unnamed = await app.inject({
+        ...request, url: "/api/auth/passkeys/register/options", headers, payload: {},
+      });
+      expect(unnamed.statusCode).toBe(400);
+      expect(unnamed.json()).toMatchObject({ error: { code: "invalid_request" } });
+      const unknownPerson = await app.inject({
+        ...request,
+        url: "/api/auth/passkeys/register/options",
+        headers,
+        payload: { profileId: "missing", password: "secret", label: "Key" },
+      });
+      expect(unknownPerson.statusCode).toBe(404);
     } finally {
       await app.close();
     }
+  });
+  it("keeps each person's passkey a separate credential", () => {
+    const shared = "jellyfin-user";
+    const jacob = passkeyHandle(origin, shared, "profile-jacob").toString("base64url");
+    const marcus = passkeyHandle(origin, shared, "profile-marcus").toString("base64url");
+    expect(jacob).not.toBe(marcus);
+    expect(passkeyHandle(origin, shared)).toEqual(passkeyHandle(origin, shared, undefined));
+    expect(passkeyHandle(origin, shared, "profile-jacob")).not.toEqual(
+      passkeyHandle("https://other.example.com", shared, "profile-jacob"),
+    );
   });
 });

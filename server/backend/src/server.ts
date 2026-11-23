@@ -121,7 +121,10 @@ export async function buildServer(
     }
     if (method === "POST" && (
       pathname === "/api/auth/passkeys/authenticate/options" ||
-      pathname === "/api/auth/passkeys/authenticate/verify"
+      pathname === "/api/auth/passkeys/authenticate/verify" ||
+      pathname === "/api/auth/passkeys/register/options" ||
+      pathname === "/api/auth/passkeys/register/verify" ||
+      pathname === "/api/auth/passkeys/register/cancel"
     )) {
       return true;
     }
