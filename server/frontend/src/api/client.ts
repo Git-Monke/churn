@@ -132,11 +132,18 @@ export const beginPasskeyLogin = () =>
 export const finishPasskeyLogin = (credential: AuthenticationResponseJSON) =>
   postJson<LoginResponse>(`${PASSKEYS_PATH}/authenticate/verify`, credential);
 
-export const beginPasskeyRegistration = (label: string, password: string) =>
-  postJson<PublicKeyCredentialCreationOptionsJSON>(`${PASSKEYS_PATH}/register/options`, { label, password });
+export interface PasskeyEnrollInput {
+  profileId?: string;
+  username?: string;
+  password: string;
+  label: string;
+}
+
+export const beginPasskeyRegistration = (input: PasskeyEnrollInput) =>
+  postJson<PublicKeyCredentialCreationOptionsJSON>(`${PASSKEYS_PATH}/register/options`, input);
 
 export const finishPasskeyRegistration = (credential: RegistrationResponseJSON) =>
-  postJson<SavedPasskey>(`${PASSKEYS_PATH}/register/verify`, credential);
+  postJson<LoginResponse>(`${PASSKEYS_PATH}/register/verify`, credential);
 
 export const cancelPasskeyRegistration = () =>
   postJson<null>(`${PASSKEYS_PATH}/register/cancel`, {});

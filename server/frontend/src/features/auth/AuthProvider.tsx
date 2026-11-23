@@ -53,6 +53,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [queryClient],
   );
 
+  // A 401 arrives after the next screen has mounted; wiping the cache here would
+  // cancel its in-flight queries, and React Query silently leaves those observers
+  // pending, so the login screen never finishes loading.
+  const clearSession = useCallback(() => {
+    void queryClient.cancelQueries({ queryKey: SESSION_QUERY_KEY });
+    queryClient.setQueryData<AuthSessionResponse>(SESSION_QUERY_KEY, { authenticated: false });
+  }, [queryClient]);
+
   const applySession = useCallback(
     (data: LoginResponse) => {
       replaceSession({
@@ -95,11 +103,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const handleUnauthorized = () => {
-      replaceSession({ authenticated: false });
+      clearSession();
     };
     window.addEventListener("churn:unauthorized", handleUnauthorized);
     return () => window.removeEventListener("churn:unauthorized", handleUnauthorized);
-  }, [replaceSession]);
+  }, [clearSession]);
 
   const login = useCallback(
     (input: LoginInput) => loginMutation.mutateAsync(input),

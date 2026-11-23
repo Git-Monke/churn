@@ -30,7 +30,7 @@ const NAV_ITEMS = [
 
 export function AppHeader({ route, onManagePasskeys }: AppHeaderProps) {
   const { session, logout, isPending } = useAuth();
-  const passkeysAvailable = usePasskeyAvailability();
+  const { available: passkeysAvailable } = usePasskeyAvailability();
   const activePage = route.page === "show" || route.page === "movie" || route.page === "play" ? "library" : route.page;
   const { track, indicator, onClick } = useSelectionUnderline<HTMLElement>(activePage);
   const user = session?.user;

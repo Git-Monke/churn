@@ -24,7 +24,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { canUsePasskeys, passkeyErrorMessage, signInWithPasskey, usePasskeyAvailability } from "@/features/auth/passkeys";
+import {
+  canUsePasskeys,
+  createPasskey,
+  passkeyErrorMessage,
+  signInWithPasskey,
+  usePasskeyAvailability,
+} from "@/features/auth/passkeys";
 
 type ProfileStep = "password" | "newPassword";
 
@@ -58,19 +64,23 @@ function profileInitials(profiles: ProfileSummary[]) {
   return initials;
 }
 
-export function LoginPage({ onPasskeySetup }: { onPasskeySetup: (password: string) => void }) {
+export function LoginPage() {
   const { login, profileLogin, isPending, applySession } = useAuth();
-  const passkeys = usePasskeyAvailability() && canUsePasskeys();
+  const { available: passkeysAvailable, configured: passkeyOrigin } = usePasskeyAvailability();
+  const passkeys = passkeysAvailable && canUsePasskeys();
   const [passkeyPending, setPasskeyPending] = useState(false);
   const prompt = useRef<AbortController | null>(null);
   useEffect(() => () => prompt.current?.abort(), []);
   const [passwordMode, setPasswordMode] = useState<"sign-in" | "setup" | null>(null);
+  const [passkeySetup, setPasskeySetup] = useState(false);
+  const [passkeyName, setPasskeyName] = useState("");
   const [selected, setSelected] = useState<ProfileSummary | null>(null);
   const [stage, setStage] = useState<"pick" | "password">("pick");
   const [pin, setPin] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [passwordStep, setPasswordStep] = useState<ProfileStep>("password");
   const [error, setError] = useState<string | null>(null);
+  const busy = isPending || passkeyPending;
 
   const profilesQuery = useQuery({
     queryKey: ["auth-profiles"],
@@ -101,6 +111,7 @@ export function LoginPage({ onPasskeySetup }: { onPasskeySetup: (password: strin
     setPin("");
     setNewPassword("");
     setPasswordStep("password");
+    setPasskeyName("");
     setError(null);
   }
 
@@ -110,6 +121,7 @@ export function LoginPage({ onPasskeySetup }: { onPasskeySetup: (password: strin
     setPin("");
     setNewPassword("");
     setPasswordStep("password");
+    setPasskeyName(passkeySetup ? `${profile.name}'s Passkey` : "");
     setError(null);
   }
 
@@ -125,6 +137,11 @@ export function LoginPage({ onPasskeySetup }: { onPasskeySetup: (password: strin
           ? "Enter your password."
           : "Enter the PIN your admin gave you.",
       );
+      return;
+    }
+
+    if (passkeySetup) {
+      await addPasskey();
       return;
     }
 
@@ -163,23 +180,19 @@ export function LoginPage({ onPasskeySetup }: { onPasskeySetup: (password: strin
     if (!selected) {
       return;
     }
+    const label = passkeyName.trim();
+    if (!label) {
+      setError("Name the passkey so you can recognize it later.");
+      return;
+    }
     setError(null);
+    setPasskeyPending(true);
     try {
-      const response = await profileLogin({
-        profileId: selected.id,
-        password: pin,
-      });
-      if (response.authenticated) {
-        onPasskeySetup(pin);
-        return;
-      }
-      setError("Set a password for this profile before adding a passkey.");
+      applySession(await createPasskey({ profileId: selected.id, password: pin, label }));
     } catch (caught) {
-      setError(
-        caught instanceof ApiClientError
-          ? caught.message
-          : "Could not sign in. Check that Jellyfin is running.",
-      );
+      setError(passkeyErrorMessage(caught, "Could not add the passkey."));
+    } finally {
+      setPasskeyPending(false);
     }
   }
 
@@ -199,7 +212,9 @@ export function LoginPage({ onPasskeySetup }: { onPasskeySetup: (password: strin
           <p className="text-sm text-muted-foreground">
             {passwordMode
               ? "Sign in with a Jellyfin account."
-              : "Who's watching?"}
+              : passkeySetup
+                ? "Choose a person to set up a passkey for."
+                : "Who's watching?"}
           </p>
         </div>
 
@@ -207,21 +222,26 @@ export function LoginPage({ onPasskeySetup }: { onPasskeySetup: (password: strin
           <AdminSignIn
             passkeys={passkeys && passwordMode === "sign-in"}
             setupPasskey={passwordMode === "setup"}
-            isPending={isPending}
+            isPending={busy}
             onCancel={() => {
               setPasswordMode(null);
               setError(null);
             }}
-            onSubmit={async (username, password) => {
+            onSubmit={async (username, password, label) => {
               setError(null);
               try {
+                if (passwordMode === "setup") {
+                  applySession(await createPasskey({ username, password, label }));
+                  return;
+                }
                 await login({ username, password });
-                if (passwordMode === "setup") onPasskeySetup(password);
               } catch (caught) {
                 setError(
-                  caught instanceof ApiClientError
-                    ? caught.message
-                    : "Could not sign in. Check that Jellyfin is running.",
+                  passwordMode === "setup"
+                    ? passkeyErrorMessage(caught, "Could not add the passkey.")
+                    : caught instanceof ApiClientError
+                      ? caught.message
+                      : "Could not sign in. Check that Jellyfin is running.",
                 );
               }
             }}
@@ -231,16 +251,20 @@ export function LoginPage({ onPasskeySetup }: { onPasskeySetup: (password: strin
           <Card>
             <CardHeader>
               <CardTitle>
-                {passwordStep === "newPassword"
-                  ? `Welcome, ${selected.name}`
-                  : `Sign in as ${selected.name}`}
+                {passkeySetup
+                  ? `Add a passkey for ${selected.name}`
+                  : passwordStep === "newPassword"
+                    ? `Welcome, ${selected.name}`
+                    : `Sign in as ${selected.name}`}
               </CardTitle>
               <CardDescription>
-                {selected.passwordSet
-                  ? "Enter your password to open the dashboard."
-                  : passwordStep === "newPassword"
-                    ? "Choose a password you will use from now on."
-                    : "First sign-in: enter the PIN your admin gave you. You will choose your own password next."}
+                {passkeySetup
+                  ? "Name the passkey and enter this person's password. The passkey will sign them in from now on."
+                  : selected.passwordSet
+                    ? "Enter your password to open the dashboard."
+                    : passwordStep === "newPassword"
+                      ? "Choose a password you will use from now on."
+                      : "First sign-in: enter the PIN your admin gave you. You will choose your own password next."}
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -248,6 +272,23 @@ export function LoginPage({ onPasskeySetup }: { onPasskeySetup: (password: strin
                 className="flex flex-col gap-4"
                 onSubmit={(event) => void onProfileSubmit(event)}
               >
+                {passkeySetup ? (
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="passkey-name">Passkey name</Label>
+                    <Input
+                      id="passkey-name"
+                      name="passkey-name"
+                      autoComplete="off"
+                      autoFocus
+                      required
+                      maxLength={50}
+                      value={passkeyName}
+                      onChange={(event) => setPasskeyName(event.target.value)}
+                      disabled={busy}
+                    />
+                  </div>
+                ) : null}
+
                 {passwordStep === "password" ? (
                   <div className="flex flex-col gap-2">
                     <Label htmlFor="profile-password">
@@ -259,7 +300,7 @@ export function LoginPage({ onPasskeySetup }: { onPasskeySetup: (password: strin
                       type="password"
                       inputMode={selected.passwordSet ? undefined : "numeric"}
                       autoComplete="current-password"
-                      autoFocus
+                      autoFocus={!passkeySetup}
                       value={pin}
                       onChange={(event) => setPin(event.target.value)}
                       disabled={isPending}
@@ -288,29 +329,26 @@ export function LoginPage({ onPasskeySetup }: { onPasskeySetup: (password: strin
                     type="button"
                     variant="outline"
                     onClick={resetProfileFlow}
-                    disabled={isPending}
+                    disabled={busy}
                   >
                     <ArrowLeftIcon data-icon="inline-start" />
                     Back
                   </Button>
-                  {passkeys && selected.passwordSet && passwordStep === "password" ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      disabled={!pin || isPending}
-                      onClick={() => void addPasskey()}
-                    >
+                  <Button type="submit" className="sm:flex-1" disabled={busy}>
+                    {passkeySetup ? (
                       <FingerprintIcon data-icon="inline-start" />
-                      Add a passkey
-                    </Button>
-                  ) : null}
-                  <Button type="submit" className="sm:flex-1" disabled={isPending}>
-                    <LogInIcon data-icon="inline-start" />
-                    {isPending
-                      ? "Signing in…"
-                      : passwordStep === "newPassword"
-                        ? "Set password & sign in"
-                        : "Sign in"}
+                    ) : (
+                      <LogInIcon data-icon="inline-start" />
+                    )}
+                    {busy
+                      ? passkeySetup
+                        ? "Adding passkey…"
+                        : "Signing in…"
+                      : passkeySetup
+                        ? "Add passkey"
+                        : passwordStep === "newPassword"
+                          ? "Set password & sign in"
+                          : "Sign in"}
                   </Button>
                 </div>
               </form>
@@ -343,8 +381,15 @@ export function LoginPage({ onPasskeySetup }: { onPasskeySetup: (password: strin
                       >
                         <button
                           type="button"
-                          aria-label={`Sign in as ${profile.name}`}
-                          disabled={passkeyPending}
+                          aria-label={
+                            passkeySetup
+                              ? `Set up a passkey for ${profile.name}`
+                              : `Sign in as ${profile.name}`
+                          }
+                          disabled={
+                            passkeyPending ||
+                            (passkeySetup && !profile.passwordSet)
+                          }
                           onClick={() => void selectProfile(profile)}
                           className="flex size-24 items-center justify-center border border-border bg-muted font-heading font-semibold tracking-tight text-foreground transition-colors hover:border-primary hover:bg-primary/10 disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-3 focus-visible:outline-primary sm:size-26"
                         >
@@ -366,7 +411,7 @@ export function LoginPage({ onPasskeySetup }: { onPasskeySetup: (password: strin
                         </span>
                         {profile.passwordSet ? null : (
                           <span className="-mt-2 text-[10px] uppercase tracking-[0.07em] text-muted-foreground/80">
-                            PIN not set
+                            {passkeySetup ? "No password yet" : "PIN not set"}
                           </span>
                         )}
                       </li>
@@ -376,10 +421,14 @@ export function LoginPage({ onPasskeySetup }: { onPasskeySetup: (password: strin
                   <li className="group flex flex-col items-center gap-3">
                     <button
                       type="button"
-                      aria-label="Admin sign in"
+                      aria-label={
+                        passkeySetup
+                          ? "Set up a passkey for the admin account"
+                          : "Admin sign in"
+                      }
                       disabled={passkeyPending}
                       onClick={() => {
-                        setPasswordMode("sign-in");
+                        setPasswordMode(passkeySetup ? "setup" : "sign-in");
                         setError(null);
                       }}
                       className="flex size-24 items-center justify-center border border-input text-muted-foreground transition-colors hover:border-primary hover:text-primary disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-3 focus-visible:outline-primary sm:size-26"
@@ -392,7 +441,18 @@ export function LoginPage({ onPasskeySetup }: { onPasskeySetup: (password: strin
                   </li>
                 </ul>
 
-                {passkeys ? (
+                {passkeySetup ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      setPasskeySetup(false);
+                      setError(null);
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                ) : passkeys ? (
                   <div className="flex w-full max-w-xs flex-col gap-2">
                     <Button type="button" onClick={() => void usePasskey()} disabled={passkeyPending}>
                       <FingerprintIcon data-icon="inline-start" />
@@ -404,13 +464,20 @@ export function LoginPage({ onPasskeySetup }: { onPasskeySetup: (password: strin
                       className="self-center"
                       disabled={passkeyPending}
                       onClick={() => {
-                        setPasswordMode("setup");
+                        setPasskeySetup(true);
                         setError(null);
                       }}
                     >
                       Set up a passkey
                     </Button>
                   </div>
+                ) : null}
+
+                {passkeyOrigin && passkeyOrigin !== window.location.origin ? (
+                  <p className="w-full max-w-xs text-center text-xs text-muted-foreground">
+                    Passkeys are set up for {passkeyOrigin}. Open that address to
+                    use them.
+                  </p>
                 ) : null}
               </>
             )}
@@ -434,12 +501,14 @@ function AdminSignIn({
   isPending: boolean;
   error: string | null;
   onCancel: () => void;
-  onSubmit: (username: string, password: string) => Promise<void>;
+  onSubmit: (username: string, password: string, label: string) => Promise<void>;
 }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [label, setLabel] = useState<string | null>(null);
   const [useAutofill, setUseAutofill] = useState(passkeys);
   const { applySession } = useAuth();
+  const passkeyName = label ?? (username.trim() ? `${username.trim()}'s Passkey` : "");
 
   useEffect(() => {
     if (!useAutofill) return;
@@ -459,11 +528,11 @@ function AdminSignIn({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!username.trim() || !password) {
+    if (!username.trim() || !password || (setupPasskey && !passkeyName.trim())) {
       return;
     }
     setUseAutofill(false);
-    await onSubmit(username.trim(), password);
+    await onSubmit(username.trim(), password, setupPasskey ? passkeyName.trim() : "");
   }
 
   return (
@@ -471,7 +540,7 @@ function AdminSignIn({
       <CardHeader>
         <CardTitle>{setupPasskey ? "Set up a passkey" : "Sign in with a password"}</CardTitle>
         <CardDescription>
-          {setupPasskey ? "Sign in with your Jellyfin account to create a passkey." : "Use your Jellyfin account."}
+          {setupPasskey ? "Enter your Jellyfin account and name the new passkey." : "Use your Jellyfin account."}
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -500,6 +569,21 @@ function AdminSignIn({
               disabled={isPending}
             />
           </div>
+          {setupPasskey ? (
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="passkey-name">Passkey name</Label>
+              <Input
+                id="passkey-name"
+                name="passkey-name"
+                autoComplete="off"
+                required
+                maxLength={50}
+                value={passkeyName}
+                onChange={(event) => setLabel(event.target.value)}
+                disabled={isPending}
+              />
+            </div>
+          ) : null}
 
           {error ? <SignInError message={error} /> : null}
 
@@ -514,8 +598,18 @@ function AdminSignIn({
               Back
             </Button>
             <Button type="submit" className="sm:flex-1" disabled={isPending}>
-              <LogInIcon data-icon="inline-start" />
-              {isPending ? "Signing in…" : setupPasskey ? "Continue" : "Sign in"}
+              {setupPasskey ? (
+                <FingerprintIcon data-icon="inline-start" />
+              ) : (
+                <LogInIcon data-icon="inline-start" />
+              )}
+              {isPending
+                ? setupPasskey
+                  ? "Adding passkey…"
+                  : "Signing in…"
+                : setupPasskey
+                  ? "Add passkey"
+                  : "Sign in"}
             </Button>
           </div>
         </form>

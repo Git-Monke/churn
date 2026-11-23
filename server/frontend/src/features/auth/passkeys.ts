@@ -1,11 +1,20 @@
 import {
   browserSupportsWebAuthn,
   startAuthentication,
+  startRegistration,
   WebAuthnAbortService,
 } from "@simplewebauthn/browser";
 import { useQuery } from "@tanstack/react-query";
 
-import { beginPasskeyLogin, fetchPasskeyAvailability, finishPasskeyLogin } from "@/api/client";
+import {
+  beginPasskeyLogin,
+  beginPasskeyRegistration,
+  cancelPasskeyRegistration,
+  fetchPasskeyAvailability,
+  finishPasskeyLogin,
+  finishPasskeyRegistration,
+  type PasskeyEnrollInput,
+} from "@/api/client";
 
 export function usePasskeyAvailability() {
   const { data } = useQuery({
@@ -14,7 +23,11 @@ export function usePasskeyAvailability() {
     staleTime: 60_000,
     retry: false,
   });
-  return window.isSecureContext && data?.origin === window.location.origin;
+  const configured = data?.origin ?? null;
+  return {
+    available: window.isSecureContext && configured === window.location.origin,
+    configured,
+  };
 }
 
 export function canUsePasskeys() {
@@ -31,6 +44,24 @@ export async function signInWithPasskey(signal: AbortSignal, autofill = false) {
     if (!signal.aborted) return await finishPasskeyLogin(response);
   } finally {
     signal.removeEventListener("abort", abort);
+  }
+}
+
+/**
+ * Creates a passkey from the sign-in screen: the password identifies the
+ * person, the ceremony proves the authenticator, and the server answers with
+ * a session for the passkey's owner.
+ */
+export async function createPasskey(input: PasskeyEnrollInput) {
+  const optionsJSON = await beginPasskeyRegistration(input);
+  let started = false;
+  try {
+    started = true;
+    const credential = await startRegistration({ optionsJSON });
+    return await finishPasskeyRegistration(credential);
+  } catch (caught) {
+    if (started) await cancelPasskeyRegistration().catch(() => undefined);
+    throw caught;
   }
 }
 
