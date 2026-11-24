@@ -49,6 +49,20 @@ export interface LoginResponse {
   expiresAt: string;
 }
 
+/** `GET /api/auth/passkeys/available`: where passkeys work, or `null` when they are off. */
+export interface PasskeyAvailabilityResponse {
+  origin: string | null;
+}
+
+/** A passkey a person saved, as listed for them to remove. */
+export interface SavedPasskey {
+  id: string;
+  label: string;
+  /** ISO times. */
+  createdAt: string;
+  lastUsedAt?: string;
+}
+
 /** A household member as shown on the sign-in screen. */
 export interface ProfileSummary {
   id: string;

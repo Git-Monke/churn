@@ -279,6 +279,13 @@ export function createJellyfinClient(
       );
     },
 
+    async currentUser(): Promise<JellyfinUser> {
+      return fetchJson<JellyfinUser>("jellyfin", `${config.url}/Users/Me`, {
+        timeoutMs,
+        headers: authHeaders(),
+      });
+    },
+
     async logout(accessToken: string): Promise<void> {
       await fetchWithTimeout(
         "jellyfin",
@@ -623,6 +630,28 @@ export function createJellyfinClient(
       );
       if (!response.ok) {
         throw await upstreamResponseError("jellyfin", response);
+      }
+    },
+
+    /**
+     * Open a media URL without the request timeout: a movie can stream for
+     * hours, so the caller aborts it when the browser goes away instead.
+     */
+    async openStream(
+      url: string,
+      init: { headers?: Record<string, string>; signal?: AbortSignal } = {},
+    ): Promise<Response> {
+      try {
+        return await fetch(url, {
+          method: "GET",
+          signal: init.signal,
+          headers: { ...authHeaders(), ...init.headers },
+        });
+      } catch (error) {
+        if (init.signal?.aborted) {
+          throw error;
+        }
+        throw new UpstreamError("jellyfin", "unreachable", "Jellyfin is unreachable");
       }
     },
 

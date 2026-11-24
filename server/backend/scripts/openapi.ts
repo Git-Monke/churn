@@ -58,9 +58,11 @@ export function buildOpenApi(): JsonObject {
   const paths: Record<string, JsonObject> = {};
   for (const route of API_ROUTES) {
     // Documented under the current version: clients that ship separately call /api/v{n}.
+    // Fastify's trailing wildcard becomes a named `{path}` parameter.
     const openApiPath = route.path
       .replace(/^\/api\//, `/api/v${CURRENT_API_VERSION}/`)
-      .replace(/:([A-Za-z]+)/g, "{$1}");
+      .replace(/:([A-Za-z]+)/g, "{$1}")
+      .replace(/\/\*$/, "/{path}");
     paths[openApiPath] ??= {};
     paths[openApiPath][route.method.toLowerCase()] = operation(route);
   }
@@ -98,6 +100,16 @@ function operation(route: RouteContract): JsonObject {
       const described = route.params?.[name];
       return parameter("path", { name, required: true, description: described?.description ?? "", schema: described?.schema ?? { type: "string" } });
     }),
+    ...(route.path.endsWith("/*")
+      ? [
+          parameter("path", {
+            name: "path",
+            required: true,
+            description: route.params?.["*"]?.description ?? "",
+            schema: { type: "string" },
+          }),
+        ]
+      : []),
     ...(route.query ?? []).map((query) => parameter("query", query)),
     ...(route.headers ?? []).map((header) => parameter("header", header)),
   ];

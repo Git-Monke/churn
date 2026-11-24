@@ -1,4 +1,11 @@
 import type {
+  AuthenticationResponseJSON,
+  PublicKeyCredentialCreationOptionsJSON,
+  PublicKeyCredentialRequestOptionsJSON,
+  RegistrationResponseJSON,
+} from "@simplewebauthn/browser";
+
+import type {
   ActivityResponse,
   PairedDevicesResponse,
   PairingApproveResponse,
@@ -39,6 +46,7 @@ import type {
   StatusResponse,
   VpnStatusResponse,
 } from "./types";
+import type { components } from "./generated/openapi";
 
 export class ApiClientError extends Error {
   readonly status: number;
@@ -107,6 +115,40 @@ export function fetchProfiles(): Promise<ProfileSummary[]> {
 export function profileLogin(input: ProfileLoginInput): Promise<ProfileLoginResponse> {
   return postJson<ProfileLoginResponse>("/api/auth/profile-login", input);
 }
+
+const PASSKEYS_PATH = "/api/auth/passkeys";
+
+export type SavedPasskey = components["schemas"]["SavedPasskey"];
+
+export const fetchPasskeyAvailability = () =>
+  getJson<components["schemas"]["PasskeyAvailabilityResponse"]>(`${PASSKEYS_PATH}/available`);
+
+export const fetchPasskeys = () => getJson<SavedPasskey[]>(PASSKEYS_PATH);
+
+export const beginPasskeyLogin = () =>
+  postJson<PublicKeyCredentialRequestOptionsJSON>(`${PASSKEYS_PATH}/authenticate/options`, {});
+
+export const finishPasskeyLogin = (credential: AuthenticationResponseJSON) =>
+  postJson<LoginResponse>(`${PASSKEYS_PATH}/authenticate/verify`, credential);
+
+export interface PasskeyEnrollInput {
+  profileId?: string;
+  username?: string;
+  password: string;
+  label: string;
+}
+
+export const beginPasskeyRegistration = (input: PasskeyEnrollInput) =>
+  postJson<PublicKeyCredentialCreationOptionsJSON>(`${PASSKEYS_PATH}/register/options`, input);
+
+export const finishPasskeyRegistration = (credential: RegistrationResponseJSON) =>
+  postJson<LoginResponse>(`${PASSKEYS_PATH}/register/verify`, credential);
+
+export const cancelPasskeyRegistration = () =>
+  postJson<null>(`${PASSKEYS_PATH}/register/cancel`, {});
+
+export const removePasskey = (id: string) =>
+  deleteJson<null>(`${PASSKEYS_PATH}/${encodeURIComponent(id)}`);
 
 export function fetchManagedProfiles(): Promise<ManagedProfile[]> {
   return getJson<ManagedProfile[]>("/api/profiles");

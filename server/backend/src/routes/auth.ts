@@ -8,6 +8,7 @@ import type { AppConfig } from "../config.js";
 import {
   SESSION_COOKIE_NAME,
   sessionCookieOptions,
+  DEVICE_SESSION_TTL_MS,
   sessionCredential,
   sessionExpiresAt,
   type AuthSessionKind,
@@ -90,7 +91,7 @@ export function registerAuthRoutes(
       deviceId,
     });
     setSessionCookie(reply, request, config, cookieValue);
-    return sessionPayload(deps.store.ttlFor(record), user, kind, record);
+    return sessionPayload(config, user, kind, record);
   });
 
   app.get("/api/auth/profiles", async (_request, reply) => {
@@ -222,7 +223,7 @@ export function registerAuthRoutes(
       deviceId,
     });
     setSessionCookie(reply, request, config, session.cookieValue);
-    return sessionPayload(deps.store.ttlFor(session.record), user, "profile", session.record, profile.id);
+    return sessionPayload(config, user, "profile", session.record, profile.id);
   });
 
   app.post("/api/auth/logout", async (request, reply) => {
@@ -237,7 +238,7 @@ export function registerAuthRoutes(
       secure: sessionCookieOptions(request, config.cookieSecure).secure,
     });
 
-    if (record) {
+    if (record && !record.passkeyId) {
       const client = createJellyfinClient(
         config.services.jellyfin,
         config.requestTimeoutMs,
@@ -261,7 +262,7 @@ export function registerAuthRoutes(
       return { authenticated: false };
     }
     return sessionPayload(
-      deps.store.ttlFor(record),
+      config,
       record.user,
       record.kind,
       record,
@@ -325,7 +326,7 @@ function publicProfile(profile: ProfileRecord): ProfileSummary {
   };
 }
 
-function setSessionCookie(
+export function setSessionCookie(
   reply: FastifyReply,
   request: FastifyRequest,
   config: AppConfig,
@@ -338,8 +339,8 @@ function setSessionCookie(
   );
 }
 
-function sessionPayload(
-  ttlMs: number,
+export function sessionPayload(
+  config: AppConfig,
   user: AuthUser,
   kind: AuthSessionKind,
   record: SessionRecord,
@@ -350,7 +351,10 @@ function sessionPayload(
     user,
     kind,
     ...(profileId ? { profileId } : {}),
-    expiresAt: new Date(sessionExpiresAt(record, ttlMs)).toISOString(),
+    // Paired devices stay signed in far longer than browsers.
+    expiresAt: new Date(
+      sessionExpiresAt(record, record.kind === "device" ? DEVICE_SESSION_TTL_MS : config.sessionTtlMs),
+    ).toISOString(),
   };
 }
 
@@ -369,7 +373,7 @@ async function bestEffortLogout(
   }
 }
 
-function mapAuthUser(user: { Id?: string; Name?: string; Policy?: { IsAdministrator?: boolean } } | undefined): AuthUser | undefined {
+export function mapAuthUser(user: { Id?: string; Name?: string; Policy?: { IsAdministrator?: boolean } } | undefined): AuthUser | undefined {
   if (!user?.Id || !user.Name) {
     return undefined;
   }
