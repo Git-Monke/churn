@@ -94,4 +94,9 @@ describe("hash routing", () => {
       id: "a b",
     });
   });
+
+  it("routes the pairing page, with the code from a TV's QR code", () => {
+    expect(parseHash("#/pair")).toEqual({ page: "pair" });
+    expect(parseHash("#/pair?code=ABC234")).toEqual({ page: "pair", code: "ABC234" });
+  });
 });

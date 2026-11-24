@@ -10,6 +10,7 @@ import {
   createLoginThrottle,
   createMemorySessionStore,
   SESSION_COOKIE_NAME,
+  sessionCredential,
 } from "./auth.js";
 import type { AppConfig } from "./config.js";
 import { ApiError, UpstreamError } from "./errors.js";
@@ -37,16 +38,57 @@ import { registerShowRoutes } from "./routes/shows.js";
 import { registerStatsRoutes } from "./routes/stats.js";
 import { registerStatusRoutes } from "./routes/status.js";
 import { registerVpnRoutes } from "./routes/vpn.js";
+import { API_VERSIONS, routeUrlFor, unsupportedVersion } from "./api-version.js";
+import { createPairingStore } from "./device-pairing.js";
+import { registerPairingRoutes } from "./routes/pairing.js";
+
+/** One response, as `BuildServerOptions.onResponse` sees it. */
+export interface ServedResponse {
+  method: string;
+  /** Fastify's route path, with `:params`; undefined when no route matched. */
+  route: string | undefined;
+  statusCode: number;
+  contentType: string;
+  payload: unknown;
+}
 
 interface BuildServerOptions {
   logger?: boolean;
+  /**
+   * Sees every response before it is sent. Tests use it to check JSON
+   * responses against the API contract; production never sets it.
+   */
+  onResponse?: (response: ServedResponse) => void;
+  /** Sees every route as it is registered; tests use it to check the contract covers them. */
+  onRoute?: (route: { method: string | string[]; url: string }) => void;
 }
 
 export async function buildServer(
   config: AppConfig,
   options: BuildServerOptions = {},
 ): Promise<FastifyInstance> {
-  const app = Fastify({ logger: options.logger ?? false });
+  const app = Fastify({
+    logger: options.logger ?? false,
+    // `/api/v1/...` is served by the same routes as `/api/...`.
+    rewriteUrl: (request) => routeUrlFor(request.url ?? "/"),
+  });
+  if (options.onRoute) {
+    const onRoute = options.onRoute;
+    app.addHook("onRoute", (route) => onRoute({ method: route.method, url: route.url }));
+  }
+  if (options.onResponse) {
+    const onResponse = options.onResponse;
+    app.addHook("onSend", async (request, reply, payload) => {
+      onResponse({
+        method: request.method,
+        route: request.routeOptions.url,
+        statusCode: reply.statusCode,
+        contentType: String(reply.getHeader("content-type") ?? ""),
+        payload,
+      });
+      return payload;
+    });
+  }
   mkdirSync(config.stateDir, { recursive: true });
   const passkeyStore = createPasskeyStore(config.stateDir);
   const sessionStore = createMemorySessionStore({
@@ -107,6 +149,16 @@ export async function buildServer(
     if (method === "GET" && pathname === "/api/health") {
       return true;
     }
+    if (method === "GET" && pathname === "/api/meta") {
+      return true;
+    }
+    // A device that isn't paired yet starts pairing and polls with its own token.
+    if (method === "POST" && pathname === "/api/tv/pair/start") {
+      return true;
+    }
+    if (method === "GET" && /^\/api\/tv\/pair\/[^/]+$/.test(pathname)) {
+      return true;
+    }
     if (method === "POST" && pathname === "/api/auth/login") {
       return true;
     }
@@ -159,14 +211,19 @@ export async function buildServer(
       return;
     }
 
-    const cookieValue = request.cookies[SESSION_COOKIE_NAME];
-    const record = cookieValue ? sessionStore.get(cookieValue) : undefined;
-    if (!record || !cookieValue) {
+    const credential = sessionCredential(request);
+    const record = credential ? sessionStore.get(credential.value) : undefined;
+    if (!record || !credential) {
       reply.header("cache-control", "no-store");
+      // A device whose token was revoked or expired needs pairing again, not a password.
       return reply.code(401).send({
-        error: { code: "unauthenticated", message: "Sign in to continue" },
+        error:
+          credential?.via === "bearer"
+            ? { code: "device_not_paired", message: "This device isn't paired any more. Pair it again." }
+            : { code: "unauthenticated", message: "Sign in to continue" },
       });
     }
+    const cookieValue = credential.value;
     request.auth = {
       user: record.user,
       accessToken: record.accessToken,
@@ -194,6 +251,7 @@ export async function buildServer(
   registerActivityRoutes(app, config, releaseEvents);
   registerShowRoutes(app, config, releaseSearch, introDb);
   registerServiceRoutes(app, config);
+  registerPairingRoutes(app, config, { store: sessionStore, pairings: createPairingStore() });
 
   const hasFrontend = existsSync(path.join(config.frontendDist, "index.html"));
   if (hasFrontend) {
@@ -206,7 +264,16 @@ export async function buildServer(
   }
 
   app.setNotFoundHandler((request, reply) => {
-    if (request.url.startsWith("/api/")) {
+    if (request.url.startsWith("/api/") || request.url === "/api") {
+      const version = unsupportedVersion(request.originalUrl);
+      if (version !== undefined) {
+        return reply.code(404).send({
+          error: {
+            code: "unsupported_api_version",
+            message: `This server doesn't serve API version ${version}. It serves ${API_VERSIONS.map((v) => `v${v}`).join(", ")}; see GET /api/meta.`,
+          },
+        });
+      }
       return reply
         .code(404)
         .send({ error: { code: "not_found", message: "API route not found" } });

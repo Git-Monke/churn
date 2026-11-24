@@ -8,6 +8,8 @@ import type { AppConfig } from "../config.js";
 import {
   SESSION_COOKIE_NAME,
   sessionCookieOptions,
+  DEVICE_SESSION_TTL_MS,
+  sessionCredential,
   sessionExpiresAt,
   type AuthSessionKind,
   type AuthUser,
@@ -17,6 +19,7 @@ import {
   type SessionStore,
 } from "../auth.js";
 import { ApiError, isUnauthorized, UpstreamError } from "../errors.js";
+import type { LoginResponse, ProfileSummary } from "../types.js";
 import { createJellyfinClient } from "../upstream/jellyfin.js";
 
 export interface AuthDependencies {
@@ -225,8 +228,9 @@ export function registerAuthRoutes(
 
   app.post("/api/auth/logout", async (request, reply) => {
     reply.header("cache-control", "no-store");
-    const cookieValue = request.cookies[SESSION_COOKIE_NAME];
-    const record = cookieValue ? deps.store.destroy(cookieValue) : undefined;
+    // A paired device signs out with its bearer token, which revokes only that device.
+    const credential = sessionCredential(request);
+    const record = credential ? deps.store.destroy(credential.value) : undefined;
     reply.clearCookie(SESSION_COOKIE_NAME, {
       path: "/",
       httpOnly: true,
@@ -252,8 +256,8 @@ export function registerAuthRoutes(
 
   app.get("/api/auth/session", async (request, reply) => {
     reply.header("cache-control", "no-store");
-    const cookieValue = request.cookies[SESSION_COOKIE_NAME];
-    const record = cookieValue ? deps.store.get(cookieValue) : undefined;
+    const credential = sessionCredential(request);
+    const record = credential ? deps.store.get(credential.value) : undefined;
     if (!record) {
       return { authenticated: false };
     }
@@ -314,11 +318,7 @@ function parseProfileLoginBody(body: unknown): ProfileLoginBody {
   return { profileId, password, newPassword: record.newPassword };
 }
 
-function publicProfile(profile: ProfileRecord): {
-  id: string;
-  name: string;
-  passwordSet: boolean;
-} {
+function publicProfile(profile: ProfileRecord): ProfileSummary {
   return {
     id: profile.id,
     name: profile.name,
@@ -345,19 +345,16 @@ export function sessionPayload(
   kind: AuthSessionKind,
   record: SessionRecord,
   profileId?: string,
-): {
-  authenticated: true;
-  user: AuthUser;
-  kind: AuthSessionKind;
-  profileId?: string;
-  expiresAt: string;
-} {
+): LoginResponse {
   return {
     authenticated: true,
     user,
     kind,
     ...(profileId ? { profileId } : {}),
-    expiresAt: new Date(sessionExpiresAt(record, config.sessionTtlMs)).toISOString(),
+    // Paired devices stay signed in far longer than browsers.
+    expiresAt: new Date(
+      sessionExpiresAt(record, record.kind === "device" ? DEVICE_SESSION_TTL_MS : config.sessionTtlMs),
+    ).toISOString(),
   };
 }
 

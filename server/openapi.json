@@ -1,0 +1,4176 @@
+{
+  "components": {
+    "schemas": {
+      "ActivityItem": {
+        "additionalProperties": false,
+        "properties": {
+          "connectedSeeders": {
+            "type": "number"
+          },
+          "downloadClients": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "downloadSpeedBytes": {
+            "type": "number"
+          },
+          "estimatedCompletionTime": {
+            "type": "string"
+          },
+          "imageUrl": {
+            "type": "string"
+          },
+          "imdbId": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/RequestKind"
+          },
+          "movieId": {
+            "type": "number"
+          },
+          "network": {
+            "type": "string"
+          },
+          "overview": {
+            "type": "string"
+          },
+          "progress": {
+            "type": "number"
+          },
+          "protocols": {
+            "items": {
+              "enum": [
+                "torrent",
+                "usenet"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "quality": {
+            "type": "string"
+          },
+          "queueCount": {
+            "type": "number"
+          },
+          "rating": {
+            "type": "number"
+          },
+          "runtimeMinutes": {
+            "type": "number"
+          },
+          "seasons": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "seriesId": {
+            "type": "number"
+          },
+          "service": {
+            "enum": [
+              "sonarr",
+              "radarr"
+            ],
+            "type": "string"
+          },
+          "sizeBytes": {
+            "type": "number"
+          },
+          "sizeLeftBytes": {
+            "type": "number"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ActivityStatus"
+          },
+          "statusMessages": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "swarmSeeders": {
+            "type": "number"
+          },
+          "timeLeft": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "tmdbId": {
+            "type": "number"
+          },
+          "tvdbId": {
+            "type": "number"
+          },
+          "year": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "key",
+          "kind",
+          "title",
+          "queueCount",
+          "status",
+          "progress",
+          "downloadClients",
+          "protocols"
+        ],
+        "type": "object"
+      },
+      "ActivityResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "checkedAt": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ActivityItem"
+            },
+            "type": "array"
+          },
+          "repicks": {
+            "items": {
+              "$ref": "#/components/schemas/ReleaseRepickEvent"
+            },
+            "type": "array"
+          },
+          "services": {
+            "items": {
+              "$ref": "#/components/schemas/ActivityServiceState"
+            },
+            "type": "array"
+          },
+          "total": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "checkedAt",
+          "services",
+          "items",
+          "total"
+        ],
+        "type": "object"
+      },
+      "ActivityServiceState": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "type": "number"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "id": {
+            "const": "qbittorrent",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ArrServiceState"
+          }
+        },
+        "required": [
+          "id",
+          "state",
+          "count"
+        ],
+        "type": "object"
+      },
+      "ActivityStatus": {
+        "enum": [
+          "queued",
+          "downloading",
+          "importing",
+          "warning"
+        ],
+        "type": "string"
+      },
+      "ArrQualityProfile": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "number"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "type": "object"
+      },
+      "ArrRequestDefaults": {
+        "additionalProperties": false,
+        "properties": {
+          "qualityProfileId": {
+            "type": "number"
+          },
+          "rootFolderPath": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ArrRequestOptions": {
+        "additionalProperties": false,
+        "properties": {
+          "defaults": {
+            "$ref": "#/components/schemas/ArrRequestDefaults"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "id": {
+            "enum": [
+              "sonarr",
+              "radarr"
+            ],
+            "type": "string"
+          },
+          "qualityProfiles": {
+            "items": {
+              "$ref": "#/components/schemas/ArrQualityProfile"
+            },
+            "type": "array"
+          },
+          "rootFolders": {
+            "items": {
+              "$ref": "#/components/schemas/ArrRootFolder"
+            },
+            "type": "array"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ArrServiceState"
+          }
+        },
+        "required": [
+          "id",
+          "state",
+          "qualityProfiles",
+          "rootFolders",
+          "defaults"
+        ],
+        "type": "object"
+      },
+      "ArrRootFolder": {
+        "additionalProperties": false,
+        "properties": {
+          "accessible": {
+            "type": "boolean"
+          },
+          "freeSpace": {
+            "type": "number"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "accessible"
+        ],
+        "type": "object"
+      },
+      "ArrServiceState": {
+        "enum": [
+          "ok",
+          "unconfigured",
+          "unauthorized",
+          "unreachable"
+        ],
+        "type": "string"
+      },
+      "AuthSessionKind": {
+        "enum": [
+          "admin",
+          "profile",
+          "direct",
+          "device"
+        ],
+        "type": "string"
+      },
+      "AuthSessionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "authenticated": {
+            "type": "boolean"
+          },
+          "expiresAt": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/AuthSessionKind"
+          },
+          "profileId": {
+            "type": "string"
+          },
+          "user": {
+            "$ref": "#/components/schemas/AuthUser"
+          }
+        },
+        "required": [
+          "authenticated"
+        ],
+        "type": "object"
+      },
+      "AuthUser": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "isAdmin": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "isAdmin"
+        ],
+        "type": "object"
+      },
+      "CachedReleasesResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "detail": {
+            "type": "string"
+          },
+          "episodeNumber": {
+            "type": "number"
+          },
+          "fetchedAt": {
+            "type": "string"
+          },
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/ReleaseGroup"
+            },
+            "type": "array"
+          },
+          "kind": {
+            "enum": [
+              "movie",
+              "series-season"
+            ],
+            "type": "string"
+          },
+          "progress": {
+            "$ref": "#/components/schemas/ReleaseSearchProgress"
+          },
+          "refreshing": {
+            "type": "boolean"
+          },
+          "releaseCount": {
+            "type": "number"
+          },
+          "seasonNumber": {
+            "type": "number"
+          },
+          "service": {
+            "enum": [
+              "radarr",
+              "sonarr"
+            ],
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "ready",
+              "searching",
+              "error"
+            ],
+            "type": "string"
+          },
+          "targetId": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "kind",
+          "service",
+          "targetId",
+          "state",
+          "refreshing",
+          "releaseCount",
+          "groups"
+        ],
+        "type": "object"
+      },
+      "ContinueWatchingItem": {
+        "additionalProperties": false,
+        "properties": {
+          "episodeNumber": {
+            "type": "number"
+          },
+          "episodeTitle": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "imageUrl": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "movie",
+              "episode"
+            ],
+            "type": "string"
+          },
+          "lastPlayedDate": {
+            "type": "string"
+          },
+          "playedPercentage": {
+            "type": "number"
+          },
+          "positionTicks": {
+            "type": "number"
+          },
+          "runtimeTicks": {
+            "type": "number"
+          },
+          "seasonNumber": {
+            "type": "number"
+          },
+          "seriesId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "upNext": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "title",
+          "positionTicks",
+          "playedPercentage"
+        ],
+        "type": "object"
+      },
+      "ContinueWatchingResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "detail": {
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ContinueWatchingItem"
+            },
+            "type": "array"
+          },
+          "source": {
+            "const": "jellyfin",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/LibraryState"
+          }
+        },
+        "required": [
+          "source",
+          "state",
+          "items"
+        ],
+        "type": "object"
+      },
+      "ErrorResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "HealthResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "const": "ok",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "type": "object"
+      },
+      "IntroDbSegment": {
+        "additionalProperties": false,
+        "properties": {
+          "endSec": {
+            "type": "number"
+          },
+          "startSec": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "startSec",
+          "endSec"
+        ],
+        "type": "object"
+      },
+      "IntroDbSegments": {
+        "additionalProperties": false,
+        "properties": {
+          "intro": {
+            "$ref": "#/components/schemas/IntroDbSegment"
+          },
+          "outro": {
+            "$ref": "#/components/schemas/IntroDbSegment"
+          },
+          "postCredits": {
+            "$ref": "#/components/schemas/IntroDbSegment"
+          },
+          "recap": {
+            "$ref": "#/components/schemas/IntroDbSegment"
+          }
+        },
+        "type": "object"
+      },
+      "LibraryItem": {
+        "additionalProperties": false,
+        "properties": {
+          "addedBy": {
+            "$ref": "#/components/schemas/MediaAddedBy"
+          },
+          "id": {
+            "type": "string"
+          },
+          "imageUrl": {
+            "type": "string"
+          },
+          "imdbId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "officialRating": {
+            "type": "string"
+          },
+          "overview": {
+            "type": "string"
+          },
+          "rating": {
+            "type": "number"
+          },
+          "runtimeMinutes": {
+            "type": "number"
+          },
+          "tmdbId": {
+            "type": "number"
+          },
+          "tvdbId": {
+            "type": "number"
+          },
+          "type": {
+            "enum": [
+              "Movie",
+              "Series"
+            ],
+            "type": "string"
+          },
+          "year": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "type"
+        ],
+        "type": "object"
+      },
+      "LibraryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "detail": {
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/LibraryItem"
+            },
+            "type": "array"
+          },
+          "source": {
+            "const": "jellyfin",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/LibraryState"
+          },
+          "total": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "source",
+          "state",
+          "items",
+          "total"
+        ],
+        "type": "object"
+      },
+      "LibraryState": {
+        "enum": [
+          "ok",
+          "setup_required",
+          "unconfigured",
+          "unauthorized",
+          "unreachable"
+        ],
+        "type": "string"
+      },
+      "ManagedProfile": {
+        "additionalProperties": false,
+        "properties": {
+          "createdAt": {
+            "type": "number"
+          },
+          "id": {
+            "type": "string"
+          },
+          "initialPin": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "passwordSet": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "createdAt",
+          "id",
+          "initialPin",
+          "name",
+          "passwordSet"
+        ],
+        "type": "object"
+      },
+      "MediaAddedBy": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "type": "object"
+      },
+      "MetaResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "api": {
+            "additionalProperties": false,
+            "properties": {
+              "current": {
+                "type": "number"
+              },
+              "versions": {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "versions",
+              "current"
+            ],
+            "type": "object"
+          },
+          "features": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "api",
+          "features"
+        ],
+        "type": "object"
+      },
+      "MovieDetailResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "detail": {
+            "type": "string"
+          },
+          "download": {
+            "$ref": "#/components/schemas/ActivityItem"
+          },
+          "imported": {
+            "type": "boolean"
+          },
+          "jellyfinId": {
+            "type": "string"
+          },
+          "movie": {
+            "additionalProperties": false,
+            "properties": {
+              "imageUrl": {
+                "type": "string"
+              },
+              "imdbId": {
+                "type": "string"
+              },
+              "network": {
+                "type": "string"
+              },
+              "overview": {
+                "type": "string"
+              },
+              "rating": {
+                "type": "number"
+              },
+              "runtimeMinutes": {
+                "type": "number"
+              },
+              "title": {
+                "type": "string"
+              },
+              "tmdbId": {
+                "type": "number"
+              },
+              "year": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "title"
+            ],
+            "type": "object"
+          },
+          "radarrId": {
+            "type": "number"
+          },
+          "source": {
+            "enum": [
+              "jellyfin",
+              "radarr"
+            ],
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ArrServiceState"
+          }
+        },
+        "required": [
+          "source",
+          "state",
+          "movie"
+        ],
+        "type": "object"
+      },
+      "MovieDownloadResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "checkedAt": {
+            "type": "string"
+          },
+          "download": {
+            "$ref": "#/components/schemas/ActivityItem"
+          },
+          "ready": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "checkedAt",
+          "ready"
+        ],
+        "type": "object"
+      },
+      "PairedDevice": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "lastSeenAt": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "pairedAt": {
+            "type": "string"
+          },
+          "user": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "user",
+          "pairedAt",
+          "lastSeenAt"
+        ],
+        "type": "object"
+      },
+      "PairedDevicesResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "devices": {
+            "items": {
+              "$ref": "#/components/schemas/PairedDevice"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "devices"
+        ],
+        "type": "object"
+      },
+      "PairingApproveResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "device": {
+            "$ref": "#/components/schemas/PairedDevice"
+          },
+          "status": {
+            "const": "approved",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "device"
+        ],
+        "type": "object"
+      },
+      "PairingDetailsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "deviceName": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "approved",
+              "denied"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "deviceName",
+          "status",
+          "expiresAt"
+        ],
+        "type": "object"
+      },
+      "PairingStartRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "deviceName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "deviceName"
+        ],
+        "type": "object"
+      },
+      "PairingStartResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "approvePath": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string"
+          },
+          "pollIntervalSeconds": {
+            "type": "number"
+          },
+          "pollToken": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "pollToken",
+          "expiresAt",
+          "approvePath",
+          "pollIntervalSeconds"
+        ],
+        "type": "object"
+      },
+      "PairingStatusResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "expiresAt": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "approved",
+              "denied"
+            ],
+            "type": "string"
+          },
+          "token": {
+            "type": "string"
+          },
+          "user": {
+            "$ref": "#/components/schemas/AuthUser"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "type": "object"
+      },
+      "PasskeyAvailabilityResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "origin": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "origin"
+        ],
+        "type": "object"
+      },
+      "PlaybackClientId": {
+        "enum": [
+          "web",
+          "tvos"
+        ],
+        "type": "string"
+      },
+      "PlaybackItem": {
+        "additionalProperties": false,
+        "properties": {
+          "client": {
+            "$ref": "#/components/schemas/PlaybackClientId"
+          },
+          "directPlay": {
+            "type": "boolean"
+          },
+          "episodeNumber": {
+            "type": "number"
+          },
+          "id": {
+            "type": "string"
+          },
+          "imageUrl": {
+            "type": "string"
+          },
+          "mediaSourceId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "nextEpisode": {
+            "$ref": "#/components/schemas/PlaybackNextEpisode"
+          },
+          "officialRating": {
+            "type": "string"
+          },
+          "overview": {
+            "type": "string"
+          },
+          "playSessionId": {
+            "type": "string"
+          },
+          "playbackMethod": {
+            "enum": [
+              "direct",
+              "hls"
+            ],
+            "type": "string"
+          },
+          "played": {
+            "type": "boolean"
+          },
+          "positionTicks": {
+            "type": "number"
+          },
+          "premiereDate": {
+            "type": "string"
+          },
+          "qualities": {
+            "items": {
+              "$ref": "#/components/schemas/PlaybackQualityOption"
+            },
+            "type": "array"
+          },
+          "quality": {
+            "$ref": "#/components/schemas/PlaybackQuality"
+          },
+          "runtimeTicks": {
+            "type": "number"
+          },
+          "seasonNumber": {
+            "type": "number"
+          },
+          "segments": {
+            "$ref": "#/components/schemas/IntroDbSegments"
+          },
+          "seriesId": {
+            "type": "string"
+          },
+          "seriesName": {
+            "type": "string"
+          },
+          "streamUrl": {
+            "type": "string"
+          },
+          "subtitles": {
+            "items": {
+              "$ref": "#/components/schemas/PlaybackSubtitle"
+            },
+            "type": "array"
+          },
+          "type": {
+            "enum": [
+              "Movie",
+              "Episode"
+            ],
+            "type": "string"
+          },
+          "year": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "name",
+          "streamUrl",
+          "directPlay",
+          "playbackMethod",
+          "client",
+          "quality",
+          "qualities",
+          "subtitles"
+        ],
+        "type": "object"
+      },
+      "PlaybackItemResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "detail": {
+            "type": "string"
+          },
+          "item": {
+            "$ref": "#/components/schemas/PlaybackItem"
+          },
+          "state": {
+            "$ref": "#/components/schemas/PlaybackState"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "type": "object"
+      },
+      "PlaybackNextEpisode": {
+        "additionalProperties": false,
+        "properties": {
+          "episodeNumber": {
+            "type": "number"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "seasonNumber": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "seasonNumber",
+          "episodeNumber"
+        ],
+        "type": "object"
+      },
+      "PlaybackQuality": {
+        "enum": [
+          "max",
+          "high",
+          "medium",
+          "low"
+        ],
+        "type": "string"
+      },
+      "PlaybackQualityOption": {
+        "additionalProperties": false,
+        "properties": {
+          "detail": {
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/components/schemas/PlaybackQuality"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "detail"
+        ],
+        "type": "object"
+      },
+      "PlaybackState": {
+        "enum": [
+          "ok",
+          "unauthorized",
+          "unreachable"
+        ],
+        "type": "string"
+      },
+      "PlaybackSubtitle": {
+        "additionalProperties": false,
+        "properties": {
+          "index": {
+            "type": "number"
+          },
+          "language": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "index",
+          "url"
+        ],
+        "type": "object"
+      },
+      "ProfileSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "passwordSet": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "passwordSet"
+        ],
+        "type": "object"
+      },
+      "ReleaseGroup": {
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "lowSeeders": {
+            "type": "boolean"
+          },
+          "maxSeeders": {
+            "type": "number"
+          },
+          "releases": {
+            "items": {
+              "$ref": "#/components/schemas/ShowRelease"
+            },
+            "type": "array"
+          },
+          "tier": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "tier",
+          "label",
+          "lowSeeders",
+          "releases"
+        ],
+        "type": "object"
+      },
+      "ReleaseIndexerProgress": {
+        "additionalProperties": false,
+        "properties": {
+          "canGrab": {
+            "type": "boolean"
+          },
+          "count": {
+            "type": "number"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "id": {
+            "type": "number"
+          },
+          "name": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ReleaseIndexerState"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "state",
+          "count",
+          "canGrab"
+        ],
+        "type": "object"
+      },
+      "ReleaseIndexerState": {
+        "enum": [
+          "pending",
+          "searching",
+          "finished",
+          "error"
+        ],
+        "type": "string"
+      },
+      "ReleasePickReason": {
+        "enum": [
+          "preferred",
+          "tier_upgrade",
+          "below_threshold",
+          "best_effort"
+        ],
+        "type": "string"
+      },
+      "ReleaseRepickEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "type": "string"
+          },
+          "connectedSeeds": {
+            "type": "number"
+          },
+          "downloadSpeed": {
+            "type": "number"
+          },
+          "fromReportedSeeders": {
+            "type": "number"
+          },
+          "fromTitle": {
+            "type": "string"
+          },
+          "id": {
+            "type": "number"
+          },
+          "mediaTitle": {
+            "type": "string"
+          },
+          "seasonNumber": {
+            "type": "number"
+          },
+          "service": {
+            "enum": [
+              "sonarr",
+              "radarr"
+            ],
+            "type": "string"
+          },
+          "toReportedSeeders": {
+            "type": "number"
+          },
+          "toTitle": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "at",
+          "service",
+          "mediaTitle",
+          "fromTitle",
+          "toTitle"
+        ],
+        "type": "object"
+      },
+      "ReleaseSearchProgress": {
+        "additionalProperties": false,
+        "properties": {
+          "finished": {
+            "type": "number"
+          },
+          "indexers": {
+            "items": {
+              "$ref": "#/components/schemas/ReleaseIndexerProgress"
+            },
+            "type": "array"
+          },
+          "total": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "finished",
+          "total",
+          "indexers"
+        ],
+        "type": "object"
+      },
+      "RequestKind": {
+        "enum": [
+          "movie",
+          "series"
+        ],
+        "type": "string"
+      },
+      "RequestOptionsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "checkedAt": {
+            "type": "string"
+          },
+          "services": {
+            "additionalProperties": false,
+            "properties": {
+              "radarr": {
+                "$ref": "#/components/schemas/ArrRequestOptions"
+              },
+              "sonarr": {
+                "$ref": "#/components/schemas/ArrRequestOptions"
+              }
+            },
+            "required": [
+              "sonarr",
+              "radarr"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "checkedAt",
+          "services"
+        ],
+        "type": "object"
+      },
+      "RequestedLibraryItem": {
+        "additionalProperties": false,
+        "properties": {
+          "addedBy": {
+            "$ref": "#/components/schemas/MediaAddedBy"
+          },
+          "arrId": {
+            "type": "number"
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "imageUrl": {
+            "type": "string"
+          },
+          "imdbId": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "movie",
+              "series"
+            ],
+            "type": "string"
+          },
+          "network": {
+            "type": "string"
+          },
+          "overview": {
+            "type": "string"
+          },
+          "rating": {
+            "type": "number"
+          },
+          "runtimeMinutes": {
+            "type": "number"
+          },
+          "service": {
+            "enum": [
+              "sonarr",
+              "radarr"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "tmdbId": {
+            "type": "number"
+          },
+          "tvdbId": {
+            "type": "number"
+          },
+          "year": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "key",
+          "service",
+          "kind",
+          "arrId",
+          "title",
+          "available"
+        ],
+        "type": "object"
+      },
+      "RequestedLibraryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "checkedAt": {
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RequestedLibraryItem"
+            },
+            "type": "array"
+          },
+          "services": {
+            "items": {
+              "$ref": "#/components/schemas/RequestedLibraryServiceState"
+            },
+            "type": "array"
+          },
+          "total": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "checkedAt",
+          "services",
+          "items",
+          "total"
+        ],
+        "type": "object"
+      },
+      "RequestedLibraryServiceState": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "type": "number"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "id": {
+            "enum": [
+              "sonarr",
+              "radarr"
+            ],
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ArrServiceState"
+          }
+        },
+        "required": [
+          "id",
+          "state",
+          "count"
+        ],
+        "type": "object"
+      },
+      "SavedPasskey": {
+        "additionalProperties": false,
+        "properties": {
+          "createdAt": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "lastUsedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "createdAt"
+        ],
+        "type": "object"
+      },
+      "SearchResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/SearchResult"
+            },
+            "type": "array"
+          },
+          "searchedAt": {
+            "type": "string"
+          },
+          "services": {
+            "items": {
+              "$ref": "#/components/schemas/SearchServiceState"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "query",
+          "searchedAt",
+          "results",
+          "services"
+        ],
+        "type": "object"
+      },
+      "SearchResult": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "certification": {
+            "type": "string"
+          },
+          "genres": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "imageUrl": {
+            "type": "string"
+          },
+          "imdbId": {
+            "type": "string"
+          },
+          "inLibrary": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "key": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/RequestKind"
+          },
+          "network": {
+            "type": "string"
+          },
+          "overview": {
+            "type": "string"
+          },
+          "rating": {
+            "type": "number"
+          },
+          "runtimeMinutes": {
+            "type": "number"
+          },
+          "seasons": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "monitored": {
+                  "type": "boolean"
+                },
+                "seasonNumber": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "seasonNumber",
+                "monitored"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "service": {
+            "enum": [
+              "sonarr",
+              "radarr"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "tmdbId": {
+            "type": "number"
+          },
+          "tvdbId": {
+            "type": "number"
+          },
+          "votes": {
+            "type": "number"
+          },
+          "year": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "key",
+          "kind",
+          "service",
+          "title",
+          "inLibrary"
+        ],
+        "type": "object"
+      },
+      "SearchServiceState": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "type": "number"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "id": {
+            "enum": [
+              "sonarr",
+              "radarr"
+            ],
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ArrServiceState"
+          }
+        },
+        "required": [
+          "id",
+          "state",
+          "count"
+        ],
+        "type": "object"
+      },
+      "ServiceId": {
+        "enum": [
+          "jellyfin",
+          "sonarr",
+          "radarr"
+        ],
+        "type": "string"
+      },
+      "ServiceState": {
+        "enum": [
+          "ok",
+          "unconfigured",
+          "unauthorized",
+          "unreachable"
+        ],
+        "type": "string"
+      },
+      "ServiceStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "detail": {
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/components/schemas/ServiceId"
+          },
+          "latencyMs": {
+            "type": "number"
+          },
+          "name": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ServiceState"
+          },
+          "url": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "url",
+          "state"
+        ],
+        "type": "object"
+      },
+      "ShowAvailability": {
+        "enum": [
+          "jellyfin",
+          "missing",
+          "upcoming"
+        ],
+        "type": "string"
+      },
+      "ShowDetailResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "defaultSeason": {
+            "type": "number"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "episodes": {
+            "items": {
+              "$ref": "#/components/schemas/ShowEpisode"
+            },
+            "type": "array"
+          },
+          "scanning": {
+            "type": "boolean"
+          },
+          "seasons": {
+            "items": {
+              "$ref": "#/components/schemas/ShowSeason"
+            },
+            "type": "array"
+          },
+          "series": {
+            "$ref": "#/components/schemas/ShowSeriesSummary"
+          },
+          "sonarrId": {
+            "type": "number"
+          },
+          "source": {
+            "$ref": "#/components/schemas/ShowSource"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ArrServiceState"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "source",
+          "state",
+          "series",
+          "seasons",
+          "episodes"
+        ],
+        "type": "object"
+      },
+      "ShowDownload": {
+        "additionalProperties": false,
+        "properties": {
+          "connectedSeeders": {
+            "type": "number"
+          },
+          "downloadClient": {
+            "type": "string"
+          },
+          "downloadSpeedBytes": {
+            "type": "number"
+          },
+          "estimatedCompletionTime": {
+            "type": "string"
+          },
+          "progress": {
+            "type": "number"
+          },
+          "protocol": {
+            "enum": [
+              "torrent",
+              "usenet"
+            ],
+            "type": "string"
+          },
+          "quality": {
+            "type": "string"
+          },
+          "seasonPack": {
+            "type": "boolean"
+          },
+          "sizeBytes": {
+            "type": "number"
+          },
+          "sizeLeftBytes": {
+            "type": "number"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ActivityStatus"
+          },
+          "statusMessages": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "swarmSeeders": {
+            "type": "number"
+          },
+          "timeLeft": {
+            "type": "string"
+          },
+          "untracked": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "status",
+          "progress"
+        ],
+        "type": "object"
+      },
+      "ShowDownloadsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "checkedAt": {
+            "type": "string"
+          },
+          "downloads": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ShowDownload"
+            },
+            "type": "object"
+          },
+          "ready": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "checkedAt",
+          "ready",
+          "downloads"
+        ],
+        "type": "object"
+      },
+      "ShowEpisode": {
+        "additionalProperties": false,
+        "properties": {
+          "airDate": {
+            "type": "string"
+          },
+          "availability": {
+            "$ref": "#/components/schemas/ShowAvailability"
+          },
+          "download": {
+            "$ref": "#/components/schemas/ShowDownload"
+          },
+          "episodeNumber": {
+            "type": "number"
+          },
+          "imageUrl": {
+            "type": "string"
+          },
+          "imported": {
+            "type": "boolean"
+          },
+          "jellyfinId": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "lastPlayedDate": {
+            "type": "string"
+          },
+          "monitored": {
+            "type": "boolean"
+          },
+          "overview": {
+            "type": "string"
+          },
+          "played": {
+            "type": "boolean"
+          },
+          "progressPercent": {
+            "type": "number"
+          },
+          "runtimeMinutes": {
+            "type": "number"
+          },
+          "seasonNumber": {
+            "type": "number"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "seasonNumber",
+          "episodeNumber",
+          "title",
+          "availability"
+        ],
+        "type": "object"
+      },
+      "ShowRelease": {
+        "additionalProperties": false,
+        "properties": {
+          "ageHours": {
+            "type": "number"
+          },
+          "approved": {
+            "type": "boolean"
+          },
+          "canGrab": {
+            "type": "boolean"
+          },
+          "downloadDetail": {
+            "type": "string"
+          },
+          "episodeLabel": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "indexer": {
+            "type": "string"
+          },
+          "leechers": {
+            "type": "number"
+          },
+          "mappedEpisodeCount": {
+            "type": "number"
+          },
+          "multiSeason": {
+            "type": "boolean"
+          },
+          "protocol": {
+            "enum": [
+              "torrent",
+              "usenet"
+            ],
+            "type": "string"
+          },
+          "publishDate": {
+            "type": "string"
+          },
+          "quality": {
+            "type": "string"
+          },
+          "recommendation": {
+            "$ref": "#/components/schemas/ReleasePickReason"
+          },
+          "recommended": {
+            "type": "boolean"
+          },
+          "rejections": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "searchSeasonNumber": {
+            "type": "number"
+          },
+          "seasonLabel": {
+            "type": "string"
+          },
+          "seeders": {
+            "type": "number"
+          },
+          "sizeBytes": {
+            "type": "number"
+          },
+          "tier": {
+            "type": "number"
+          },
+          "tierLabel": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "sizeBytes",
+          "seasonLabel",
+          "multiSeason",
+          "approved",
+          "canGrab",
+          "recommended",
+          "rejections",
+          "mappedEpisodeCount"
+        ],
+        "type": "object"
+      },
+      "ShowSeason": {
+        "additionalProperties": false,
+        "properties": {
+          "availableCount": {
+            "type": "number"
+          },
+          "downloadingCount": {
+            "type": "number"
+          },
+          "episodeCount": {
+            "type": "number"
+          },
+          "name": {
+            "type": "string"
+          },
+          "seasonNumber": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "seasonNumber",
+          "name",
+          "episodeCount",
+          "availableCount",
+          "downloadingCount"
+        ],
+        "type": "object"
+      },
+      "ShowSeriesSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "imageUrl": {
+            "type": "string"
+          },
+          "imdbId": {
+            "type": "string"
+          },
+          "network": {
+            "type": "string"
+          },
+          "overview": {
+            "type": "string"
+          },
+          "rating": {
+            "type": "number"
+          },
+          "title": {
+            "type": "string"
+          },
+          "tmdbId": {
+            "type": "number"
+          },
+          "tvdbId": {
+            "type": "number"
+          },
+          "year": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "type": "object"
+      },
+      "ShowSource": {
+        "enum": [
+          "jellyfin",
+          "sonarr"
+        ],
+        "type": "string"
+      },
+      "StatsDiskUsage": {
+        "additionalProperties": false,
+        "properties": {
+          "freeBytes": {
+            "type": "number"
+          },
+          "totalBytes": {
+            "type": "number"
+          },
+          "usedBytes": {
+            "type": "number"
+          },
+          "usedPercent": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "totalBytes",
+          "freeBytes",
+          "usedBytes",
+          "usedPercent"
+        ],
+        "type": "object"
+      },
+      "StatsQbittorrent": {
+        "additionalProperties": false,
+        "properties": {
+          "totalDownloadedBytes": {
+            "type": "number"
+          },
+          "totalUploadedBytes": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "totalDownloadedBytes",
+          "totalUploadedBytes"
+        ],
+        "type": "object"
+      },
+      "StatsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "checkedAt": {
+            "type": "string"
+          },
+          "disk": {
+            "$ref": "#/components/schemas/StatsDiskUsage"
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/StatsSourceError"
+            },
+            "type": "array"
+          },
+          "qbittorrent": {
+            "$ref": "#/components/schemas/StatsQbittorrent"
+          },
+          "topDownloads": {
+            "items": {
+              "$ref": "#/components/schemas/StatsTopItem"
+            },
+            "type": "array"
+          },
+          "topStorage": {
+            "items": {
+              "$ref": "#/components/schemas/StatsTopItem"
+            },
+            "type": "array"
+          },
+          "topUploads": {
+            "items": {
+              "$ref": "#/components/schemas/StatsTopItem"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "checkedAt",
+          "errors"
+        ],
+        "type": "object"
+      },
+      "StatsSource": {
+        "enum": [
+          "qbittorrent",
+          "disk",
+          "library"
+        ],
+        "type": "string"
+      },
+      "StatsSourceError": {
+        "additionalProperties": false,
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/StatsSource"
+          }
+        },
+        "required": [
+          "source",
+          "message"
+        ],
+        "type": "object"
+      },
+      "StatsTopItem": {
+        "additionalProperties": false,
+        "properties": {
+          "bytes": {
+            "type": "number"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "movie",
+              "series"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "bytes"
+        ],
+        "type": "object"
+      },
+      "StatusResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "checkedAt": {
+            "type": "string"
+          },
+          "services": {
+            "items": {
+              "$ref": "#/components/schemas/ServiceStatus"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "checkedAt",
+          "services"
+        ],
+        "type": "object"
+      },
+      "VpnCheck": {
+        "additionalProperties": false,
+        "properties": {
+          "detail": {
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/components/schemas/VpnCheckId"
+          },
+          "label": {
+            "type": "string"
+          },
+          "passed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "passed",
+          "detail"
+        ],
+        "type": "object"
+      },
+      "VpnCheckId": {
+        "enum": [
+          "tunnel_exit",
+          "kill_switch",
+          "dns",
+          "ipv6",
+          "firewall_exception"
+        ],
+        "type": "string"
+      },
+      "VpnCoverageEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/VpnCoverageId"
+          },
+          "name": {
+            "type": "string"
+          },
+          "reachable": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "reachable"
+        ],
+        "type": "object"
+      },
+      "VpnCoverageId": {
+        "enum": [
+          "qbittorrent",
+          "prowlarr",
+          "flaresolverr"
+        ],
+        "type": "string"
+      },
+      "VpnExit": {
+        "additionalProperties": false,
+        "properties": {
+          "country": {
+            "type": "string"
+          },
+          "ip": {
+            "type": "string"
+          },
+          "matchesGluetun": {
+            "type": "boolean"
+          },
+          "organization": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "matchesGluetun"
+        ],
+        "type": "object"
+      },
+      "VpnStatusResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "checkedAt": {
+            "type": "string"
+          },
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/VpnCheck"
+            },
+            "type": "array"
+          },
+          "coverage": {
+            "items": {
+              "$ref": "#/components/schemas/VpnCoverageEntry"
+            },
+            "type": "array"
+          },
+          "dnsNameservers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "durationMs": {
+            "type": "number"
+          },
+          "exit": {
+            "$ref": "#/components/schemas/VpnExit"
+          },
+          "firewallException": {
+            "type": "string"
+          },
+          "protocol": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "secure": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "checkedAt",
+          "durationMs",
+          "secure",
+          "provider",
+          "protocol",
+          "exit",
+          "checks",
+          "coverage",
+          "dnsNameservers"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "device": {
+        "description": "A paired device's token, from pairing (POST /api/tv/pair/start).",
+        "scheme": "bearer",
+        "type": "http"
+      },
+      "session": {
+        "in": "cookie",
+        "name": "churn_session",
+        "type": "apiKey"
+      }
+    }
+  },
+  "info": {
+    "description": "The API behind churn's dashboard. Generated from server/backend/src/api-contract.ts and the types it names; do not edit by hand. Run `npm run api:generate` in server/.",
+    "title": "churn",
+    "version": "1"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/v1/activity": {
+      "get": {
+        "operationId": "getActivity",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "device": []
+          }
+        ],
+        "summary": "Downloads in progress, queued or needing attention."
+      }
+    },
+    "/api/v1/auth/passkeys": {
+      "get": {
+        "operationId": "getAuthPasskeys",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SavedPasskey"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "device": []
+          }
+        ],
+        "summary": "The signed-in person's saved passkeys."
+      }
+    },
+    "/api/v1/auth/passkeys/available": {
+      "get": {
+        "operationId": "getAuthPasskeysAvailable",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasskeyAvailabilityResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [],
+        "summary": "Whether passkey sign-in is on, and for which origin."
+      }
+    },
+    "/api/v1/auth/profiles": {
+      "get": {
+        "operationId": "getAuthProfiles",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProfileSummary"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [],
+        "summary": "Household members to pick from on the sign-in screen."
+      }
+    },
+    "/api/v1/auth/session": {
+      "get": {
+        "operationId": "getAuthSession",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSessionResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [],
+        "summary": "Who is signed in, if anyone."
+      }
+    },
+    "/api/v1/health": {
+      "get": {
+        "operationId": "getHealth",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [],
+        "summary": "Liveness check."
+      }
+    },
+    "/api/v1/library": {
+      "get": {
+        "operationId": "getLibrary",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "device": []
+          }
+        ],
+        "summary": "Every movie and show in Jellyfin that the signed-in person can see."
+      }
+    },
+    "/api/v1/library/images/{itemId}": {
+      "get": {
+        "operationId": "getLibraryImagesByItemId",
+        "parameters": [
+          {
+            "description": "Jellyfin item id.",
+            "in": "path",
+            "name": "itemId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Which image.",
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "enum": [
+                "Primary",
+                "Backdrop"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Jellyfin's image tag, for caching.",
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Largest width wanted, in pixels.",
+            "in": "query",
+            "name": "maxWidth",
+            "required": false,
+            "schema": {
+              "pattern": "^[0-9]+$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Largest height wanted, in pixels.",
+            "in": "query",
+            "name": "maxHeight",
+            "required": false,
+            "schema": {
+              "pattern": "^[0-9]+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "image/*": {}
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "device": []
+          }
+        ],
+        "summary": "A Jellyfin poster or backdrop, proxied so the token stays on the server."
+      }
+    },
+    "/api/v1/library/movies/{id}/releases": {
+      "get": {
+        "operationId": "getLibraryMoviesByIdReleases",
+        "parameters": [
+          {
+            "description": "Radarr movie id.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CachedReleasesResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "device": []
+          }
+        ],
+        "summary": "Cached release search results for a movie."
+      }
+    },
+    "/api/v1/library/movies/{source}/{id}": {
+      "get": {
+        "operationId": "getLibraryMoviesBySourceById",
+        "parameters": [
+          {
+            "description": "Where the id comes from: jellyfin or radarr.",
+            "in": "path",
+            "name": "source",
+            "required": true,
+            "schema": {
+              "enum": [
+                "jellyfin",
+                "radarr"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The movie's id in that source.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MovieDetailResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "device": []
+          }
+        ],
+        "summary": "A movie: details and download state."
+      }
+    },
+    "/api/v1/library/movies/{source}/{id}/download": {
+      "get": {
+        "operationId": "getLibraryMoviesBySourceByIdDownload",
+        "parameters": [
+          {
+            "description": "Where the id comes from: jellyfin or radarr.",
+            "in": "path",
+            "name": "source",
+            "required": true,
+            "schema": {
+              "enum": [
+                "jellyfin",
+                "radarr"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The movie's id in that source.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MovieDownloadResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "device": []
+          }
+        ],
+        "summary": "A movie's download progress."
+      }
+    },
+    "/api/v1/library/requested": {
+      "get": {
+        "operationId": "getLibraryRequested",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestedLibraryResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "device": []
+          }
+        ],
+        "summary": "Titles requested in Sonarr and Radarr that are not in Jellyfin yet."
+      }
+    },
+    "/api/v1/library/resume": {
+      "get": {
+        "operationId": "getLibraryResume",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContinueWatchingResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "device": []
+          }
+        ],
+        "summary": "Continue watching: items in progress and next episodes."
+      }
+    },
+    "/api/v1/library/shows/{source}/{id}": {
+      "get": {
+        "operationId": "getLibraryShowsBySourceById",
+        "parameters": [
+          {
+            "description": "Where the id comes from: jellyfin or sonarr.",
+            "in": "path",
+            "name": "source",
+            "required": true,
+            "schema": {
+              "enum": [
+                "jellyfin",
+                "sonarr"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The show's id in that source.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShowDetailResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "device": []
+          }
+        ],
+        "summary": "A show: its seasons, episodes and what is downloaded."
+      }
+    },
+    "/api/v1/library/shows/{source}/{id}/downloads": {
+      "get": {
+        "operationId": "getLibraryShowsBySourceByIdDownloads",
+        "parameters": [
+          {
+            "description": "Where the id comes from: jellyfin or sonarr.",
+            "in": "path",
+            "name": "source",
+            "required": true,
+            "schema": {
+              "enum": [
+                "jellyfin",
+                "sonarr"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The show's id in that source.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShowDownloadsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "device": []
+          }
+        ],
+        "summary": "Episode downloads in progress for a show."
+      }
+    },
+    "/api/v1/library/shows/{source}/{id}/releases": {
+      "get": {
+        "operationId": "getLibraryShowsBySourceByIdReleases",
+        "parameters": [
+          {
+            "description": "Where the id comes from: sonarr.",
+            "in": "path",
+            "name": "source",
+            "required": true,
+            "schema": {
+              "enum": [
+                "sonarr"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Sonarr series id.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Season number.",
+            "in": "query",
+            "name": "season",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9]+$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Episode number, for one episode.",
+            "in": "query",
+            "name": "episode",
+            "required": false,
+            "schema": {
+              "pattern": "^[0-9]+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CachedReleasesResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "device": []
+          }
+        ],
+        "summary": "Cached release search results for a season or episode."
+      }
+    },
+    "/api/v1/meta": {
+      "get": {
+        "operationId": "getMeta",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetaResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [],
+        "summary": "API versions and optional features this server has. Check it before signing in."
+      }
+    },
+    "/api/v1/playback/items/{itemId}": {
+      "get": {
+        "operationId": "getPlaybackItemsByItemId",
+        "parameters": [
+          {
+            "description": "Jellyfin item id.",
+            "in": "path",
+            "name": "itemId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Quality preset; `max` may play the file directly.",
+            "in": "query",
+            "name": "quality",
+            "required": false,
+            "schema": {
+              "enum": [
+                "max",
+                "high",
+                "medium",
+                "low"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "What will play the stream, so the server chooses formats it can decode: `web` (the default) or `tvos` (Apple TV).",
+            "in": "query",
+            "name": "client",
+            "required": false,
+            "schema": {
+              "enum": [
+                "web",
+                "tvos"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaybackItemResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "device": []
+          }
+        ],
+        "summary": "How to play an item: stream URL, quality options, subtitles, segments."
+      }
+    },
+    "/api/v1/playback/items/{itemId}/hls.m3u8": {
+      "get": {
+        "operationId": "getPlaybackItemsByItemIdHlsM3u8",
+        "parameters": [
+          {
+            "description": "Jellyfin item id.",
+            "in": "path",
+            "name": "itemId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "What will play the stream, so the server chooses formats it can decode: `web` (the default) or `tvos` (Apple TV).",
+            "in": "query",
+            "name": "client",
+            "required": false,
+            "schema": {
+              "enum": [
+                "web",
+                "tvos"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/vnd.apple.mpegurl": {}
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "device": []
+          }
+        ],
+        "summary": "Jellyfin's HLS playlist, proxied, for sources the client can't play directly."
+      }
+    },
+    "/api/v1/playback/items/{itemId}/jellyfin/{path}": {
+      "get": {
+        "operationId": "getPlaybackItemsByItemIdJellyfin*",
+        "parameters": [
+          {
+            "description": "Jellyfin item id.",
+            "in": "path",
+            "name": "itemId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The path inside Jellyfin's HLS output.",
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/octet-stream": {}
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "device": []
+          }
+        ],
+        "summary": "HLS segments and playlists the proxied playlist points to."
+      }
+    },
+    "/api/v1/playback/items/{itemId}/stream": {
+      "get": {
+        "operationId": "getPlaybackItemsByItemIdStream",
+        "parameters": [
+          {
+            "description": "Jellyfin item id.",
+            "in": "path",
+            "name": "itemId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "video/*": {}
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "device": []
+          }
+        ],
+        "summary": "The original file, proxied from Jellyfin for direct play (supports ranges)."
+      }
+    },
+    "/api/v1/playback/items/{itemId}/subtitles/{index}": {
+      "get": {
+        "operationId": "getPlaybackItemsByItemIdSubtitlesByIndex",
+        "parameters": [
+          {
+            "description": "Jellyfin item id.",
+            "in": "path",
+            "name": "itemId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Jellyfin stream index.",
+            "in": "path",
+            "name": "index",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9]+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/vtt": {}
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "device": []
+          }
+        ],
+        "summary": "A text subtitle track as WebVTT."
+      }
+    },
+    "/api/v1/profiles": {
+      "get": {
+        "description": "Administrators only.",
+        "operationId": "getProfiles",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ManagedProfile"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Household members, for an administrator to manage."
+      }
+    },
+    "/api/v1/requests/options": {
+      "get": {
+        "operationId": "getRequestsOptions",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestOptionsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "device": []
+          }
+        ],
+        "summary": "Quality profiles, root folders and defaults for a new request."
+      }
+    },
+    "/api/v1/search": {
+      "get": {
+        "operationId": "getSearch",
+        "parameters": [
+          {
+            "description": "What to look for, 2 to 120 characters.",
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "maxLength": 120,
+              "minLength": 2,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "device": []
+          }
+        ],
+        "summary": "Search Sonarr and Radarr for titles to request."
+      }
+    },
+    "/api/v1/search/images/{service}": {
+      "get": {
+        "operationId": "getSearchImagesByService",
+        "parameters": [
+          {
+            "description": "Which service the image came from.",
+            "in": "path",
+            "name": "service",
+            "required": true,
+            "schema": {
+              "enum": [
+                "sonarr",
+                "radarr"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The artwork URL.",
+            "in": "query",
+            "name": "url",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "image/*": {}
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "device": []
+          }
+        ],
+        "summary": "A Sonarr or Radarr poster from an allowed artwork host, proxied."
+      }
+    },
+    "/api/v1/services/{id}/open": {
+      "get": {
+        "operationId": "getServicesByIdOpen",
+        "parameters": [
+          {
+            "description": "Which service.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "enum": [
+                "jellyfin",
+                "sonarr",
+                "radarr"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect",
+            "headers": {
+              "location": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "device": []
+          }
+        ],
+        "summary": "Redirect to a service's own web page."
+      }
+    },
+    "/api/v1/stats": {
+      "get": {
+        "operationId": "getStats",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "device": []
+          }
+        ],
+        "summary": "Torrent, disk and library statistics."
+      }
+    },
+    "/api/v1/status": {
+      "get": {
+        "operationId": "getStatus",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "device": []
+          }
+        ],
+        "summary": "Health of Jellyfin, Sonarr and Radarr."
+      }
+    },
+    "/api/v1/tv/devices": {
+      "get": {
+        "description": "From the dashboard; a paired device can't call it.",
+        "operationId": "getTvDevices",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PairedDevicesResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Paired devices: your own, or everyone's for an administrator."
+      }
+    },
+    "/api/v1/tv/devices/{id}": {
+      "delete": {
+        "description": "From the dashboard; a paired device can't call it.",
+        "operationId": "deleteTvDevicesById",
+        "parameters": [
+          {
+            "description": "The device id from the device list.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Revoke a paired device. It has to be paired again to sign in."
+      }
+    },
+    "/api/v1/tv/pair/start": {
+      "post": {
+        "operationId": "postTvPairStart",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PairingStartRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PairingStartResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [],
+        "summary": "A device asks to be paired: returns a code to show and a token to poll with."
+      }
+    },
+    "/api/v1/tv/pair/{code}": {
+      "get": {
+        "operationId": "getTvPairByCode",
+        "parameters": [
+          {
+            "description": "The pairing code.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The pollToken from starting the pairing.",
+            "in": "header",
+            "name": "x-churn-pair-token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PairingStatusResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [],
+        "summary": "The device polls until the code is approved or denied; approval carries its token, once."
+      }
+    },
+    "/api/v1/tv/pair/{code}/approve": {
+      "post": {
+        "description": "From the dashboard; a paired device can't call it.",
+        "operationId": "postTvPairByCodeApprove",
+        "parameters": [
+          {
+            "description": "The pairing code.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PairingApproveResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Pair the device as the person approving it."
+      }
+    },
+    "/api/v1/tv/pair/{code}/deny": {
+      "post": {
+        "description": "From the dashboard; a paired device can't call it.",
+        "operationId": "postTvPairByCodeDeny",
+        "parameters": [
+          {
+            "description": "The pairing code.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Refuse to pair the device."
+      }
+    },
+    "/api/v1/tv/pair/{code}/details": {
+      "get": {
+        "description": "From the dashboard; a paired device can't call it.",
+        "operationId": "getTvPairByCodeDetails",
+        "parameters": [
+          {
+            "description": "The pairing code.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PairingDetailsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "What a person is about to approve: the device's name and the code's state."
+      }
+    },
+    "/api/v1/vpn": {
+      "get": {
+        "operationId": "getVpn",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VpnStatusResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "device": []
+          }
+        ],
+        "summary": "The VPN check: whether downloads leave through the VPN."
+      }
+    }
+  }
+}

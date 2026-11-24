@@ -29,7 +29,14 @@ export interface AuthUser {
   isAdmin: boolean;
 }
 
-export type AuthSessionKind = "admin" | "profile" | "direct";
+/**
+ * How a session signed in: an administrator or a person with their Jellyfin
+ * password, a household profile, or a paired device (a TV) holding a token.
+ */
+export type AuthSessionKind = "admin" | "profile" | "direct" | "device";
+
+/** Paired devices stay signed in while used at least this often. */
+export const DEVICE_SESSION_TTL_MS = 180 * 24 * 60 * 60 * 1000;
 
 /** A household member managed by Churn. */
 export interface ProfileRecord {
@@ -64,6 +71,8 @@ export interface SessionRecord {
   deviceId: string;
   kind: AuthSessionKind;
   profileId?: string;
+  /** For a paired device: the name it gave itself, such as "Living Room TV". */
+  deviceName?: string;
   passkeyId?: string;
   createdAt: number;
   lastSeenAt: number;
@@ -78,6 +87,7 @@ export interface SessionCreateOptions {
   kind?: AuthSessionKind;
   profileId?: string;
   deviceId?: string;
+  deviceName?: string;
   passkeyId?: string;
 }
 
@@ -92,6 +102,12 @@ export interface SessionStore {
   destroy(cookieValue: string): SessionRecord | undefined;
   destroyAllForUser(userId: string): number;
   destroyAllForProfile(profileId: string): number;
+  /** Paired-device sessions, oldest first. */
+  listDevices(): SessionRecord[];
+  /** Revoke a paired device by its device id. */
+  destroyDevice(deviceId: string): SessionRecord | undefined;
+  /** How long a session stays valid without being used. */
+  ttlFor(record: SessionRecord): number;
   destroyAllForPasskey(passkeyId: string): number;
   size(): number;
   listProfiles(): ProfileRecord[];
@@ -115,6 +131,8 @@ interface MemorySessionStoreOptions {
   ttlMs: number;
   /** Persist profiles and sessions under this directory. */
   stateDir?: string;
+  /** Lifetime of paired-device sessions; defaults to `DEVICE_SESSION_TTL_MS`. */
+  deviceTtlMs?: number;
   now?: () => number;
   sweepIntervalMs?: number;
   flushDebounceMs?: number;
@@ -196,7 +214,10 @@ function parseSessionRecord(value: unknown): SessionRecord | undefined {
     typeof value.deviceId !== "string" ||
     typeof value.createdAt !== "number" ||
     typeof value.lastSeenAt !== "number" ||
-    (value.kind !== "admin" && value.kind !== "profile" && value.kind !== "direct")
+    (value.kind !== "admin" &&
+      value.kind !== "profile" &&
+      value.kind !== "direct" &&
+      value.kind !== "device")
   ) {
     return undefined;
   }
@@ -207,6 +228,9 @@ function parseSessionRecord(value: unknown): SessionRecord | undefined {
   if (value.profileId !== undefined && typeof value.profileId !== "string") {
     return undefined;
   }
+  if (value.deviceName !== undefined && typeof value.deviceName !== "string") {
+    return undefined;
+  }
   return {
     idHash: value.idHash,
     user,
@@ -214,6 +238,7 @@ function parseSessionRecord(value: unknown): SessionRecord | undefined {
     deviceId: value.deviceId,
     kind: value.kind,
     profileId: value.profileId,
+    ...(value.deviceName !== undefined ? { deviceName: value.deviceName } : {}),
     passkeyId: typeof value.passkeyId === "string" ? value.passkeyId : undefined,
     createdAt: value.createdAt,
     lastSeenAt: value.lastSeenAt,
@@ -260,7 +285,8 @@ export function requireAuth(request: FastifyRequest): AuthContext {
 
 export function requireAdmin(request: FastifyRequest): AuthContext {
   const auth = requireAuth(request);
-  if (!auth.user.isAdmin) {
+  // A paired TV never does admin work, even when an administrator paired it.
+  if (!auth.user.isAdmin || auth.kind === "device") {
     throw new ApiError(403, "forbidden", "Administrator access is required");
   }
   return auth;
@@ -271,12 +297,28 @@ export function expireSession(request: FastifyRequest): void {
   request.auth = null;
 }
 
+/**
+ * The session secret a request carries: the dashboard's cookie, or a paired
+ * device's `Authorization: Bearer <token>`. Both are looked up the same way.
+ */
+export function sessionCredential(request: {
+  cookies: Record<string, string | undefined>;
+  headers: { authorization?: string };
+}): { value: string; via: "cookie" | "bearer" } | undefined {
+  const cookie = request.cookies[SESSION_COOKIE_NAME];
+  if (cookie) return { value: cookie, via: "cookie" };
+  const match = /^Bearer\s+([A-Za-z0-9_-]{20,200})$/.exec(request.headers.authorization ?? "");
+  return match?.[1] ? { value: match[1], via: "bearer" } : undefined;
+}
+
 export function hashSessionId(cookieValue: string): string {
   return createHash("sha256").update(cookieValue).digest("hex");
 }
 
 export function createMemorySessionStore(options: MemorySessionStoreOptions): SessionStore {
   const { ttlMs } = options;
+  const deviceTtlMs = options.deviceTtlMs ?? DEVICE_SESSION_TTL_MS;
+  const ttlFor = (record: SessionRecord): number => (record.kind === "device" ? deviceTtlMs : ttlMs);
   const now = options.now ?? Date.now;
   const sessions = new Map<string, SessionRecord>();
   const profiles = new Map<string, ProfileRecord>();
@@ -296,7 +338,7 @@ export function createMemorySessionStore(options: MemorySessionStoreOptions): Se
   function removeExpired(currentTime: number): boolean {
     let removed = false;
     for (const [hash, record] of sessions) {
-      if (currentTime - record.lastSeenAt >= ttlMs ||
+      if (currentTime - record.lastSeenAt >= ttlFor(record) ||
           (record.passkeyId && !options.passkeyIsValid?.(record.passkeyId))) {
         sessions.delete(hash);
         removed = true;
@@ -342,7 +384,7 @@ export function createMemorySessionStore(options: MemorySessionStoreOptions): Se
     let pruned = false;
     const currentTime = now();
     for (const session of state.sessions) {
-      if (currentTime - session.lastSeenAt >= ttlMs) {
+      if (currentTime - session.lastSeenAt >= ttlFor(session)) {
         pruned = true;
         continue;
       }
@@ -418,6 +460,7 @@ export function createMemorySessionStore(options: MemorySessionStoreOptions): Se
         deviceId: createOptions.deviceId ?? randomUUID(),
         kind: createOptions.kind ?? "direct",
         profileId: createOptions.profileId,
+        ...(createOptions.deviceName !== undefined ? { deviceName: createOptions.deviceName } : {}),
         passkeyId: createOptions.passkeyId,
         createdAt: currentTime,
         lastSeenAt: currentTime,
@@ -433,7 +476,7 @@ export function createMemorySessionStore(options: MemorySessionStoreOptions): Se
         return undefined;
       }
       const currentTime = now();
-      if (currentTime - record.lastSeenAt >= ttlMs ||
+      if (currentTime - record.lastSeenAt >= ttlFor(record) ||
           (record.passkeyId && !options.passkeyIsValid?.(record.passkeyId))) {
         sessions.delete(record.idHash);
         scheduleFlush();
@@ -471,6 +514,24 @@ export function createMemorySessionStore(options: MemorySessionStoreOptions): Se
       return removed;
     },
 
+    listDevices() {
+      return [...sessions.values()]
+        .filter((record) => record.kind === "device")
+        .sort((a, b) => a.createdAt - b.createdAt);
+    },
+
+    destroyDevice(deviceId) {
+      for (const [hash, record] of sessions) {
+        if (record.kind === "device" && record.deviceId === deviceId) {
+          sessions.delete(hash);
+          scheduleFlush();
+          return record;
+        }
+      }
+      return undefined;
+    },
+
+    ttlFor,
     destroyAllForPasskey(passkeyId) {
       let removed = 0;
       for (const [hash, record] of sessions) {

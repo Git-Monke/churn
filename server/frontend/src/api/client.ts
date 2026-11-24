@@ -7,6 +7,9 @@ import type {
 
 import type {
   ActivityResponse,
+  PairedDevicesResponse,
+  PairingApproveResponse,
+  PairingDetailsResponse,
   AuthSessionResponse,
   CancelJellyfinItemResponse,
   CancelLibraryItemResponse,
@@ -43,6 +46,7 @@ import type {
   StatusResponse,
   VpnStatusResponse,
 } from "./types";
+import type { components } from "./generated/openapi";
 
 export class ApiClientError extends Error {
   readonly status: number;
@@ -114,15 +118,10 @@ export function profileLogin(input: ProfileLoginInput): Promise<ProfileLoginResp
 
 const PASSKEYS_PATH = "/api/auth/passkeys";
 
-export interface SavedPasskey {
-  id: string;
-  label: string;
-  createdAt: string;
-  lastUsedAt?: string;
-}
+export type SavedPasskey = components["schemas"]["SavedPasskey"];
 
 export const fetchPasskeyAvailability = () =>
-  getJson<{ origin: string | null }>(`${PASSKEYS_PATH}/available`);
+  getJson<components["schemas"]["PasskeyAvailabilityResponse"]>(`${PASSKEYS_PATH}/available`);
 
 export const fetchPasskeys = () => getJson<SavedPasskey[]>(PASSKEYS_PATH);
 
@@ -415,3 +414,25 @@ function isErrorEnvelope(value: unknown): value is { error: { code?: string; mes
     value.error !== null
   );
 }
+
+/** What a TV that shows this code is asking for. */
+export function fetchPairingDetails(code: string): Promise<PairingDetailsResponse> {
+  return getJson<PairingDetailsResponse>(`/api/tv/pair/${encodeURIComponent(code)}/details`);
+}
+
+export function approvePairing(code: string): Promise<PairingApproveResponse> {
+  return postJson<PairingApproveResponse>(`/api/tv/pair/${encodeURIComponent(code)}/approve`, {});
+}
+
+export function denyPairing(code: string): Promise<null> {
+  return postJson<null>(`/api/tv/pair/${encodeURIComponent(code)}/deny`, {});
+}
+
+export function fetchPairedDevices(): Promise<PairedDevicesResponse> {
+  return getJson<PairedDevicesResponse>("/api/tv/devices");
+}
+
+export function revokePairedDevice(id: string): Promise<null> {
+  return deleteJson<null>(`/api/tv/devices/${encodeURIComponent(id)}`);
+}
+

@@ -4,7 +4,13 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AppConfig } from "../src/config.js";
-import { buildServer } from "../src/server.js";
+import { buildServer as buildUncheckedServer } from "../src/server.js";
+import { createContractChecker } from "./support/api-contract-check.js";
+
+const contract = createContractChecker();
+/** Every server in these tests checks its JSON responses against the API contract. */
+const buildServer: typeof buildUncheckedServer = (config, options = {}) =>
+  buildUncheckedServer(config, { ...options, onResponse: contract.check });
 
 let testServerCounter = 0;
 
@@ -208,6 +214,7 @@ async function waitForCachedReleases(
 const appConfig = makeConfig();
 
 afterEach(() => {
+  contract.assertClean();
   vi.unstubAllGlobals();
 });
 
@@ -1815,6 +1822,40 @@ describe("library images", () => {
     const app = await buildAuthedServer(config);
     const response = await app.inject({ method: "GET", url: "/api/library/images/movie-1" });
     expect(response.statusCode).toBe(404);
+    await app.close();
+  });
+});
+
+describe("API versions", () => {
+  it("serves /api/v1/... from the same routes, with the session and query intact", async () => {
+    const app = await buildAuthedServer(makeConfig());
+
+    const meta = await app.inject({ method: "GET", url: "/api/v1/meta" });
+    expect(meta.statusCode).toBe(200);
+    expect(meta.json()).toMatchObject({ api: { versions: [1], current: 1 } });
+    expect(meta.json().features).toContain("playback");
+    expect((await app.inject({ method: "GET", url: "/api/meta" })).json()).toEqual(meta.json());
+
+    const session = await app.inject({ method: "GET", url: "/api/v1/auth/session" });
+    expect(session.json()).toMatchObject({ authenticated: true, user: { name: "tester" } });
+
+    // The query reaches the handler: a one-letter search is refused the same way on both paths.
+    const versioned = await app.inject({ method: "GET", url: "/api/v1/search?q=a" });
+    const unversioned = await app.inject({ method: "GET", url: "/api/search?q=a" });
+    expect(versioned.statusCode).toBe(400);
+    expect(versioned.json()).toEqual(unversioned.json());
+    await app.close();
+  });
+
+  it("explains a version it doesn't serve", async () => {
+    const app = await buildAuthedServer(makeConfig());
+    const response = await app.inject({ method: "GET", url: "/api/v2/library" });
+    expect(response.statusCode).toBe(404);
+    expect(response.json().error.code).toBe("unsupported_api_version");
+    expect(response.json().error.message).toContain("v1");
+
+    const unknown = await app.inject({ method: "GET", url: "/api/v1/nope" });
+    expect(unknown.json().error.code).toBe("not_found");
     await app.close();
   });
 });
@@ -5151,6 +5192,68 @@ describe("playback", () => {
     expect(master).toContain("MediaSourceId=source-1");
     expect(master).toContain("PlaySessionId=session-1");
     expect(master).not.toContain("api_key");
+    await app.close();
+  });
+
+  it("chooses streams Apple TV can play when the client says it's tvOS", async () => {
+    const fetchMock = installFetch((url) => {
+      if (url.includes("/Videos/item-1/master.m3u8?")) {
+        return new Response("#EXTM3U\nmain.m3u8?MediaSourceId=source-1\n", {
+          headers: { "content-type": "application/vnd.apple.mpegurl" },
+        });
+      }
+      if (url.includes("/PlaybackInfo?")) {
+        return jsonResponse({
+          PlaySessionId: "session-1",
+          MediaSources: [
+            {
+              Id: "source-1",
+              Container: "mkv",
+              Bitrate: 8_785_944,
+              SupportsDirectPlay: true,
+              MediaStreams: [
+                { Type: "Video", Codec: "hevc", Height: 822 },
+                { Type: "Audio", Codec: "eac3", Channels: 6 },
+                { Type: "Subtitle", Codec: "subrip", Index: 2, Language: "eng" },
+              ],
+            },
+          ],
+        });
+      }
+      if (/\/Items\/item-1\?/.test(url)) {
+        return jsonResponse(playbackItem);
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const app = await buildAuthedServer(makeConfig());
+    const metadata = await app.inject({ method: "GET", url: "/api/v1/playback/items/item-1?client=tvos" });
+    expect(metadata.json().item).toMatchObject({
+      client: "tvos",
+      playbackMethod: "hls",
+      directPlay: false,
+      streamUrl: "/api/playback/items/item-1/hls.m3u8?mediaSourceId=source-1&playSessionId=session-1&client=tvos",
+    });
+
+    const manifest = await app.inject({ method: "GET", url: metadata.json().item.streamUrl });
+    expect(manifest.statusCode).toBe(200);
+    expect(manifest.body).toContain("/api/playback/items/item-1/jellyfin/main.m3u8");
+    // What the dashboard asked Jellyfin for, on the Apple TV's behalf.
+    const master = fetchMock.mock.calls
+      .map(([url]) => String(url))
+      .find((url) => url.includes("/Videos/item-1/master.m3u8?"));
+    const params = new URL(String(master)).searchParams;
+    expect(params.get("VideoCodec")).toBe("hevc,h264");
+    expect(params.get("AudioCodec")).toBe("eac3,ac3,aac");
+    expect(params.get("SegmentContainer")).toBe("mp4");
+    expect(params.get("AllowVideoStreamCopy")).toBe("true");
+    expect(params.get("EnableSubtitlesInManifest")).toBe("true");
+
+    const web = await app.inject({ method: "GET", url: "/api/playback/items/item-1" });
+    expect(web.json().item.client).toBe("web");
+    const unknown = await app.inject({ method: "GET", url: "/api/playback/items/item-1?client=toaster" });
+    expect(unknown.statusCode).toBe(400);
+    expect(unknown.json().error.code).toBe("invalid_client");
     await app.close();
   });
 
