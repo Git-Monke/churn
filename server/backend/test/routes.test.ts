@@ -4,7 +4,13 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AppConfig } from "../src/config.js";
-import { buildServer } from "../src/server.js";
+import { buildServer as buildUncheckedServer } from "../src/server.js";
+import { createContractChecker } from "./support/api-contract-check.js";
+
+const contract = createContractChecker();
+/** Every server in these tests checks its JSON responses against the API contract. */
+const buildServer: typeof buildUncheckedServer = (config, options = {}) =>
+  buildUncheckedServer(config, { ...options, onResponse: contract.check });
 
 let testServerCounter = 0;
 
@@ -208,6 +214,7 @@ async function waitForCachedReleases(
 const appConfig = makeConfig();
 
 afterEach(() => {
+  contract.assertClean();
   vi.unstubAllGlobals();
 });
 
@@ -1815,6 +1822,40 @@ describe("library images", () => {
     const app = await buildAuthedServer(config);
     const response = await app.inject({ method: "GET", url: "/api/library/images/movie-1" });
     expect(response.statusCode).toBe(404);
+    await app.close();
+  });
+});
+
+describe("API versions", () => {
+  it("serves /api/v1/... from the same routes, with the session and query intact", async () => {
+    const app = await buildAuthedServer(makeConfig());
+
+    const meta = await app.inject({ method: "GET", url: "/api/v1/meta" });
+    expect(meta.statusCode).toBe(200);
+    expect(meta.json()).toMatchObject({ api: { versions: [1], current: 1 } });
+    expect(meta.json().features).toContain("playback");
+    expect((await app.inject({ method: "GET", url: "/api/meta" })).json()).toEqual(meta.json());
+
+    const session = await app.inject({ method: "GET", url: "/api/v1/auth/session" });
+    expect(session.json()).toMatchObject({ authenticated: true, user: { name: "tester" } });
+
+    // The query reaches the handler: a one-letter search is refused the same way on both paths.
+    const versioned = await app.inject({ method: "GET", url: "/api/v1/search?q=a" });
+    const unversioned = await app.inject({ method: "GET", url: "/api/search?q=a" });
+    expect(versioned.statusCode).toBe(400);
+    expect(versioned.json()).toEqual(unversioned.json());
+    await app.close();
+  });
+
+  it("explains a version it doesn't serve", async () => {
+    const app = await buildAuthedServer(makeConfig());
+    const response = await app.inject({ method: "GET", url: "/api/v2/library" });
+    expect(response.statusCode).toBe(404);
+    expect(response.json().error.code).toBe("unsupported_api_version");
+    expect(response.json().error.message).toContain("v1");
+
+    const unknown = await app.inject({ method: "GET", url: "/api/v1/nope" });
+    expect(unknown.json().error.code).toBe("not_found");
     await app.close();
   });
 });
