@@ -235,7 +235,7 @@ export function registerAuthRoutes(
       secure: sessionCookieOptions(request, config.cookieSecure).secure,
     });
 
-    if (record) {
+    if (record && !record.passkeyId) {
       const client = createJellyfinClient(
         config.services.jellyfin,
         config.requestTimeoutMs,
@@ -323,7 +323,7 @@ function publicProfile(profile: ProfileRecord): ProfileSummary {
   };
 }
 
-function setSessionCookie(
+export function setSessionCookie(
   reply: FastifyReply,
   request: FastifyRequest,
   config: AppConfig,
@@ -336,7 +336,7 @@ function setSessionCookie(
   );
 }
 
-function sessionPayload(
+export function sessionPayload(
   config: AppConfig,
   user: AuthUser,
   kind: AuthSessionKind,
@@ -367,7 +367,7 @@ async function bestEffortLogout(
   }
 }
 
-function mapAuthUser(user: { Id?: string; Name?: string; Policy?: { IsAdministrator?: boolean } } | undefined): AuthUser | undefined {
+export function mapAuthUser(user: { Id?: string; Name?: string; Policy?: { IsAdministrator?: boolean } } | undefined): AuthUser | undefined {
   if (!user?.Id || !user.Name) {
     return undefined;
   }

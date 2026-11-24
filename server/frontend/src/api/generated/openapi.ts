@@ -21,6 +21,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/auth/passkeys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The signed-in person's saved passkeys. */
+        get: operations["getAuthPasskeys"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/passkeys/available": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Whether passkey sign-in is on, and for which origin. */
+        get: operations["getAuthPasskeysAvailable"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/profiles": {
         parameters: {
             query?: never;
@@ -266,8 +300,25 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Redirect to Jellyfin's HLS transcode, for sources the browser can't play directly. */
+        /** Jellyfin's HLS playlist, proxied, for sources the browser can't play directly. */
         get: operations["getPlaybackItemsByItemIdHlsM3u8"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/playback/items/{itemId}/jellyfin/{path}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** HLS segments and playlists the proxied playlist points to. */
+        get: operations["getPlaybackItemsByItemIdJellyfin*"];
         put?: never;
         post?: never;
         delete?: never;
@@ -283,7 +334,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Redirect to the direct-play stream. */
+        /** The original file, proxied from Jellyfin for direct play (supports ranges). */
         get: operations["getPlaybackItemsByItemIdStream"];
         put?: never;
         post?: never;
@@ -664,6 +715,9 @@ export interface components {
             download?: components["schemas"]["ActivityItem"];
             ready: boolean;
         };
+        PasskeyAvailabilityResponse: {
+            origin: string | null;
+        };
         PlaybackItem: {
             directPlay: boolean;
             episodeNumber?: number;
@@ -803,6 +857,12 @@ export interface components {
             /** @enum {string} */
             id: "sonarr" | "radarr";
             state: components["schemas"]["ArrServiceState"];
+        };
+        SavedPasskey: {
+            createdAt: string;
+            id: string;
+            label: string;
+            lastUsedAt?: string;
         };
         SearchResponse: {
             query: string;
@@ -1052,6 +1112,64 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ActivityResponse"];
+                };
+            };
+            /** @description An error, as `{ error: { code, message } }`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getAuthPasskeys: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavedPasskey"][];
+                };
+            };
+            /** @description An error, as `{ error: { code, message } }`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getAuthPasskeysAvailable: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PasskeyAvailabilityResponse"];
                 };
             };
             /** @description An error, as `{ error: { code, message } }`. */
@@ -1534,13 +1652,48 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Redirect */
-            302: {
+            /** @description OK */
+            200: {
                 headers: {
-                    location?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/vnd.apple.mpegurl": unknown;
+                };
+            };
+            /** @description An error, as `{ error: { code, message } }`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    "getPlaybackItemsByItemIdJellyfin*": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Jellyfin item id. */
+                itemId: string;
+                /** @description The path inside Jellyfin's HLS output. */
+                path: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": unknown;
+                };
             };
             /** @description An error, as `{ error: { code, message } }`. */
             default: {
@@ -1565,13 +1718,14 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Redirect */
-            302: {
+            /** @description OK */
+            200: {
                 headers: {
-                    location?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "video/*": unknown;
+                };
             };
             /** @description An error, as `{ error: { code, message } }`. */
             default: {

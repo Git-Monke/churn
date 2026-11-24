@@ -525,7 +525,7 @@ fn is_root() -> bool {
     unsafe { libc::geteuid() == 0 }
 }
 
-fn answer_port(answers: &Answers, port: Port) -> u16 {
+pub fn answer_port(answers: &Answers, port: Port) -> u16 {
     answers
         .get(&Question::Port(port))
         .and_then(|value| ports::validate_port(value).ok())

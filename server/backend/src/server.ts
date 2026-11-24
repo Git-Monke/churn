@@ -18,6 +18,8 @@ import { createIntroDbCache } from "./introdb-cache.js";
 import { createIntroDbService } from "./introdb-warm.js";
 import { createMediaAttributionStore } from "./media-attribution.js";
 import { createMediaCache } from "./media-cache.js";
+import { createPasskeyStore } from "./passkey-store.js";
+import { registerPasskeyRoutes } from "./routes/passkeys.js";
 import { createReleaseSearchService } from "./release-search.js";
 import { createReleaseEventStore } from "./release-events.js";
 import { registerAuthRoutes } from "./routes/auth.js";
@@ -80,9 +82,11 @@ export async function buildServer(
     });
   }
   mkdirSync(config.stateDir, { recursive: true });
+  const passkeyStore = createPasskeyStore(config.stateDir);
   const sessionStore = createMemorySessionStore({
     ttlMs: config.sessionTtlMs,
     stateDir: config.stateDir,
+    passkeyIsValid: (id) => !!config.passkeyOrigin && passkeyStore.get(id)?.origin === config.passkeyOrigin,
     onWarning: (message) => app.log.warn(message),
   });
   app.decorate("sessionStore", sessionStore);
@@ -146,6 +150,18 @@ export async function buildServer(
     if (method === "GET" && pathname === "/api/auth/session") {
       return true;
     }
+    if (method === "GET" && pathname === "/api/auth/passkeys/available") {
+      return true;
+    }
+    if (method === "POST" && (
+      pathname === "/api/auth/passkeys/authenticate/options" ||
+      pathname === "/api/auth/passkeys/authenticate/verify" ||
+      pathname === "/api/auth/passkeys/register/options" ||
+      pathname === "/api/auth/passkeys/register/verify" ||
+      pathname === "/api/auth/passkeys/register/cancel"
+    )) {
+      return true;
+    }
     if (method === "GET" && pathname === "/api/auth/profiles") {
       return true;
     }
@@ -198,7 +214,8 @@ export async function buildServer(
 
   registerHealthRoutes(app);
   registerAuthRoutes(app, config, { store: sessionStore, throttle: loginThrottle });
-  registerProfileRoutes(app, config, { store: sessionStore });
+  const passkeys = registerPasskeyRoutes(app, config, passkeyStore, sessionStore, loginThrottle);
+  registerProfileRoutes(app, config, { store: sessionStore, revokePasskeys: passkeys.revokeForUser });
   registerStatusRoutes(app, config);
   registerStatsRoutes(app, config);
   registerVpnRoutes(app, config);

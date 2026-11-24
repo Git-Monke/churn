@@ -17,8 +17,6 @@ function config(): AppConfig {
     sessionTtlMs: 60_000,
     stateDir: "/tmp/churn-download-import-test/.churn-state",
     cookieSecure: "auto",
-    jellyfinPublicUrl: "http://jellyfin.test:8096",
-    jellyfinPublicUrlExplicit: true,
     services: {
       jellyfin: { id: "jellyfin", name: "Jellyfin", url: "http://jellyfin.test:8096" },
       sonarr: {
