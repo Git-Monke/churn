@@ -43,6 +43,7 @@ import type {
   StatusResponse,
   VpnStatusResponse,
 } from "./types";
+import type { components } from "./generated/openapi";
 
 export class ApiClientError extends Error {
   readonly status: number;
@@ -114,15 +115,10 @@ export function profileLogin(input: ProfileLoginInput): Promise<ProfileLoginResp
 
 const PASSKEYS_PATH = "/api/auth/passkeys";
 
-export interface SavedPasskey {
-  id: string;
-  label: string;
-  createdAt: string;
-  lastUsedAt?: string;
-}
+export type SavedPasskey = components["schemas"]["SavedPasskey"];
 
 export const fetchPasskeyAvailability = () =>
-  getJson<{ origin: string | null }>(`${PASSKEYS_PATH}/available`);
+  getJson<components["schemas"]["PasskeyAvailabilityResponse"]>(`${PASSKEYS_PATH}/available`);
 
 export const fetchPasskeys = () => getJson<SavedPasskey[]>(PASSKEYS_PATH);
 

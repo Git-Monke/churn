@@ -1,7 +1,85 @@
+import type { AuthSessionKind, AuthUser } from "./auth.js";
 import type { ServiceId } from "./config.js";
 import type { MediaAddedBy } from "./media-attribution.js";
 import type { ReleasePickReason } from "./release-pick.js";
 import type { ReleaseRepickEvent } from "./release-events.js";
+
+/** Every error response: `{ error: { code, message } }`. */
+export interface ErrorResponse {
+  error: {
+    /** Stable, machine-readable code such as `invalid_credentials`. */
+    code: string;
+    /** Safe to show to a person. */
+    message: string;
+  };
+}
+
+export interface HealthResponse {
+  status: "ok";
+}
+
+/** `GET /api/auth/session`: who is signed in, if anyone. */
+export interface AuthSessionResponse {
+  authenticated: boolean;
+  user?: AuthUser;
+  kind?: AuthSessionKind;
+  profileId?: string;
+  /** ISO time the session expires. */
+  expiresAt?: string;
+}
+
+/** A successful sign-in. */
+export interface LoginResponse {
+  authenticated: true;
+  user: AuthUser;
+  kind: AuthSessionKind;
+  profileId?: string;
+  expiresAt: string;
+}
+
+/** `GET /api/auth/passkeys/available`: where passkeys work, or `null` when they are off. */
+export interface PasskeyAvailabilityResponse {
+  origin: string | null;
+}
+
+/** A passkey a person saved, as listed for them to remove. */
+export interface SavedPasskey {
+  id: string;
+  label: string;
+  /** ISO times. */
+  createdAt: string;
+  lastUsedAt?: string;
+}
+
+/** A household member as shown on the sign-in screen. */
+export interface ProfileSummary {
+  id: string;
+  name: string;
+  passwordSet: boolean;
+}
+
+/** A household member as an administrator manages them. */
+export interface ManagedProfile extends ProfileSummary {
+  /** One-time PIN, until the person sets their own password. */
+  initialPin: string | null;
+  createdAt: number;
+}
+
+/** Profile sign-in: either signed in, or asked to set a password first. */
+export interface ProfileLoginResponse {
+  authenticated?: true;
+  passwordSetupRequired?: true;
+  user?: AuthUser;
+  kind?: AuthSessionKind;
+  profileId?: string;
+  profile?: ProfileSummary;
+  expiresAt?: string;
+}
+
+export interface CreateProfileResponse {
+  profile: ManagedProfile;
+  pin: string;
+}
 
 export type ServiceState = "ok" | "unconfigured" | "unauthorized" | "unreachable";
 

@@ -309,6 +309,24 @@ Errors use `{ "error": { "code": "...", "message": "..." } }`. Protected API
 routes return `401 unauthenticated` without a session and `401 session_expired`
 when Jellyfin rejects the stored user token.
 
+### The API contract
+
+`backend/src/api-contract.ts` lists every route with what it takes and returns;
+response shapes are the TypeScript types in `backend/src/types.ts` and
+`backend/src/playback.ts`. From those, `npm run api:generate` writes
+`openapi.json` (OpenAPI 3.1) and the frontend's generated types in
+`frontend/src/api/generated/`. Commit all three together.
+
+Tests keep them honest:
+
+- Every JSON response in the route tests is checked against its route's
+  schema, and every error against the error envelope.
+- A test fails when the server registers a route the contract doesn't list.
+- Tests fail when `openapi.json` or the generated frontend types are stale.
+
+Routes that change things are listed in `UNDESCRIBED_ROUTES` until their
+request bodies are described.
+
 ## Search and requests
 
 The Search section queries Sonarr and Radarr together with a debounced search.

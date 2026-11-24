@@ -23,6 +23,7 @@ import { ApiError, isUnauthorized } from "../errors.js";
 import type { PasskeyRecord, PasskeyStore } from "../passkey-store.js";
 import { createJellyfinClient } from "../upstream/jellyfin.js";
 import { mapAuthUser, sessionPayload, setSessionCookie } from "./auth.js";
+import type { PasskeyAvailabilityResponse, SavedPasskey } from "../types.js";
 
 const TTL = 5 * 60_000;
 const MAX_CHALLENGES = 256;
@@ -58,7 +59,7 @@ export function passkeyHandle(origin: string, userId: string, profileId?: string
   return createHash("sha256").update(origin).update("\0").update(scope).digest();
 }
 
-function publicKey(record: PasskeyRecord) {
+function publicKey(record: PasskeyRecord): SavedPasskey {
   return {
     id: record.id, label: record.label, createdAt: record.createdAt,
     lastUsedAt: record.lastUsedAt,
@@ -186,7 +187,7 @@ export function registerPasskeyRoutes(
     await Promise.all(records.map(revoke));
   }
 
-  app.get("/api/auth/passkeys/available", async (_request, reply) => {
+  app.get("/api/auth/passkeys/available", async (_request, reply): Promise<PasskeyAvailabilityResponse> => {
     reply.header("cache-control", "no-store");
     return { origin: origin ?? null };
   });
