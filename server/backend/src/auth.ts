@@ -73,6 +73,7 @@ export interface SessionRecord {
   profileId?: string;
   /** For a paired device: the name it gave itself, such as "Living Room TV". */
   deviceName?: string;
+  passkeyId?: string;
   createdAt: number;
   lastSeenAt: number;
 }
@@ -87,6 +88,7 @@ export interface SessionCreateOptions {
   profileId?: string;
   deviceId?: string;
   deviceName?: string;
+  passkeyId?: string;
 }
 
 export interface SessionStore {
@@ -106,6 +108,7 @@ export interface SessionStore {
   destroyDevice(deviceId: string): SessionRecord | undefined;
   /** How long a session stays valid without being used. */
   ttlFor(record: SessionRecord): number;
+  destroyAllForPasskey(passkeyId: string): number;
   size(): number;
   listProfiles(): ProfileRecord[];
   getProfile(id: string): ProfileRecord | undefined;
@@ -135,6 +138,7 @@ interface MemorySessionStoreOptions {
   flushDebounceMs?: number;
   touchFlushIntervalMs?: number;
   onWarning?: (message: string) => void;
+  passkeyIsValid?: (passkeyId: string) => boolean;
 }
 
 const AUTH_STATE_VERSION = 1;
@@ -235,6 +239,7 @@ function parseSessionRecord(value: unknown): SessionRecord | undefined {
     kind: value.kind,
     profileId: value.profileId,
     ...(value.deviceName !== undefined ? { deviceName: value.deviceName } : {}),
+    passkeyId: typeof value.passkeyId === "string" ? value.passkeyId : undefined,
     createdAt: value.createdAt,
     lastSeenAt: value.lastSeenAt,
   };
@@ -333,7 +338,8 @@ export function createMemorySessionStore(options: MemorySessionStoreOptions): Se
   function removeExpired(currentTime: number): boolean {
     let removed = false;
     for (const [hash, record] of sessions) {
-      if (currentTime - record.lastSeenAt >= ttlFor(record)) {
+      if (currentTime - record.lastSeenAt >= ttlFor(record) ||
+          (record.passkeyId && !options.passkeyIsValid?.(record.passkeyId))) {
         sessions.delete(hash);
         removed = true;
       }
@@ -455,6 +461,7 @@ export function createMemorySessionStore(options: MemorySessionStoreOptions): Se
         kind: createOptions.kind ?? "direct",
         profileId: createOptions.profileId,
         ...(createOptions.deviceName !== undefined ? { deviceName: createOptions.deviceName } : {}),
+        passkeyId: createOptions.passkeyId,
         createdAt: currentTime,
         lastSeenAt: currentTime,
       };
@@ -469,7 +476,8 @@ export function createMemorySessionStore(options: MemorySessionStoreOptions): Se
         return undefined;
       }
       const currentTime = now();
-      if (currentTime - record.lastSeenAt >= ttlFor(record)) {
+      if (currentTime - record.lastSeenAt >= ttlFor(record) ||
+          (record.passkeyId && !options.passkeyIsValid?.(record.passkeyId))) {
         sessions.delete(record.idHash);
         scheduleFlush();
         return undefined;
@@ -524,6 +532,17 @@ export function createMemorySessionStore(options: MemorySessionStoreOptions): Se
     },
 
     ttlFor,
+    destroyAllForPasskey(passkeyId) {
+      let removed = 0;
+      for (const [hash, record] of sessions) {
+        if (record.passkeyId === passkeyId) {
+          sessions.delete(hash);
+          removed += 1;
+        }
+      }
+      if (removed > 0) scheduleFlush();
+      return removed;
+    },
 
     destroyAllForProfile(profileId) {
       let removed = 0;

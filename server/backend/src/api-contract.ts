@@ -164,6 +164,20 @@ export const API_ROUTES: RouteContract[] = [
   },
   {
     method: "GET",
+    path: "/api/auth/passkeys/available",
+    summary: "Whether passkey sign-in is on, and for which origin.",
+    auth: "none",
+    response: { json: "PasskeyAvailabilityResponse" },
+  },
+  {
+    method: "GET",
+    path: "/api/auth/passkeys",
+    summary: "The signed-in person's saved passkeys.",
+    auth: "user",
+    response: { json: "SavedPasskey", array: true },
+  },
+  {
+    method: "GET",
     path: "/api/auth/profiles",
     summary: "Household members to pick from on the sign-in screen.",
     auth: "none",
@@ -341,19 +355,30 @@ export const API_ROUTES: RouteContract[] = [
   {
     method: "GET",
     path: "/api/playback/items/:itemId/stream",
-    summary: "Redirect to the direct-play stream.",
+    summary: "The original file, proxied from Jellyfin for direct play (supports ranges).",
     auth: "user",
     params: { itemId: id("Jellyfin item id.") },
-    response: { redirect: true },
+    response: { contentType: "video/*" },
   },
   {
     method: "GET",
     path: "/api/playback/items/:itemId/hls.m3u8",
-    summary: "Redirect to Jellyfin's HLS stream, for sources the client can't play directly.",
+    summary: "Jellyfin's HLS playlist, proxied, for sources the client can't play directly.",
     auth: "user",
     params: { itemId: id("Jellyfin item id.") },
     query: [playbackClient],
-    response: { redirect: true },
+    response: { contentType: "application/vnd.apple.mpegurl" },
+  },
+  {
+    method: "GET",
+    path: "/api/playback/items/:itemId/jellyfin/*",
+    summary: "HLS segments and playlists the proxied playlist points to.",
+    auth: "user",
+    params: {
+      itemId: id("Jellyfin item id."),
+      "*": { ...id("The path inside Jellyfin's HLS output."), name: "*" },
+    },
+    response: { contentType: "application/octet-stream" },
   },
   {
     method: "GET",
@@ -379,6 +404,12 @@ export const API_ROUTES: RouteContract[] = [
  * listed here so the completeness test knows about them.
  */
 export const UNDESCRIBED_ROUTES: Array<{ method: HttpMethod; path: string }> = [
+  { method: "POST", path: "/api/auth/passkeys/authenticate/options" },
+  { method: "POST", path: "/api/auth/passkeys/authenticate/verify" },
+  { method: "POST", path: "/api/auth/passkeys/register/options" },
+  { method: "POST", path: "/api/auth/passkeys/register/verify" },
+  { method: "POST", path: "/api/auth/passkeys/register/cancel" },
+  { method: "DELETE", path: "/api/auth/passkeys/:id" },
   { method: "POST", path: "/api/auth/login" },
   { method: "POST", path: "/api/auth/profile-login" },
   { method: "POST", path: "/api/auth/logout" },

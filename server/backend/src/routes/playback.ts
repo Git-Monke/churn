@@ -1,8 +1,11 @@
+import { Readable } from "node:stream";
+
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 import { expireSession, requireAuth } from "../auth.js";
-import { jellyfinPublicUrlForRequest, type AppConfig } from "../config.js";
+import type { AppConfig } from "../config.js";
 import { ApiError, isUnauthorized, UpstreamError } from "../errors.js";
+import { upstreamResponseError } from "../http.js";
 import {
   availablePlaybackQualities,
   buildJellyfinHlsUrl,
@@ -16,11 +19,16 @@ import {
   playbackHlsPath,
   playbackReportBodies,
   playbackStreamPath,
+  rewriteHlsPlaylist,
   type PlaybackItemResponse,
 } from "../playback.js";
 import type { IntroDbService } from "../introdb-warm.js";
 import { createNextEpisodeLookup } from "../next-episode.js";
-import { createJellyfinClient, providerString } from "../upstream/jellyfin.js";
+import {
+  createJellyfinClient,
+  providerString,
+  type JellyfinClient,
+} from "../upstream/jellyfin.js";
 import { errorMessage } from "../upstream/states.js";
 import { parsePlaybackClient } from "../playback-clients.js";
 
@@ -35,6 +43,11 @@ interface StreamQuery {
   playSessionId?: unknown;
   quality?: unknown;
   client?: unknown;
+}
+
+interface HlsAssetParams {
+  itemId: string;
+  "*": string;
 }
 
 interface ItemQuery {
@@ -53,6 +66,15 @@ interface SubtitleQuery {
 
 const ITEM_ID_PATTERN = /^[A-Za-z0-9-]{1,64}$/;
 const SESSION_ID_PATTERN = /^[A-Za-z0-9._~-]{1,128}$/;
+const HLS_ASSET_PATTERN = /^[A-Za-z0-9._~/-]{1,512}$/;
+const MEDIA_HEADERS = [
+  "content-type",
+  "content-length",
+  "content-range",
+  "accept-ranges",
+  "etag",
+  "last-modified",
+] as const;
 
 export function registerPlaybackRoutes(
   app: FastifyInstance,
@@ -199,8 +221,6 @@ export function registerPlaybackRoutes(
   app.get<{ Params: PlaybackParams; Querystring: StreamQuery }>(
     "/api/playback/items/:itemId/hls.m3u8",
     async (request, reply) => {
-      reply.header("cache-control", "no-store");
-      reply.header("referrer-policy", "no-referrer");
       const auth = requireAuth(request);
       const itemId = parseItemId(request.params.itemId);
       const client = createJellyfinClient(
@@ -250,24 +270,28 @@ export function registerPlaybackRoutes(
       )
         ? quality
         : "max";
-      const hlsUrl = buildJellyfinHlsUrl(
-        jellyfinPublicUrlForRequest(config, request.headers),
+      const manifestUrl = buildJellyfinHlsUrl(
+        config.services.jellyfin.url,
         itemId,
         source,
         playSessionId,
-        auth.accessToken,
         hlsQuality,
         playbackClient,
       );
-      return reply.redirect(hlsUrl, 302);
+      return proxyUpstreamMedia(
+        request,
+        reply,
+        client,
+        manifestUrl,
+        itemId,
+        config.services.jellyfin.url,
+      );
     },
   );
 
   app.get<{ Params: PlaybackParams; Querystring: StreamQuery }>(
     "/api/playback/items/:itemId/stream",
     async (request, reply) => {
-      reply.header("cache-control", "no-store");
-      reply.header("referrer-policy", "no-referrer");
       const auth = requireAuth(request);
       const itemId = parseItemId(request.params.itemId);
       const client = createJellyfinClient(
@@ -307,13 +331,51 @@ export function registerPlaybackRoutes(
       }
 
       const streamUrl = buildJellyfinStreamUrl(
-        jellyfinPublicUrlForRequest(config, request.headers),
+        config.services.jellyfin.url,
         itemId,
         mediaSourceId,
         playSessionId,
-        auth.accessToken,
       );
-      return reply.redirect(streamUrl, 302);
+      return proxyUpstreamMedia(
+        request,
+        reply,
+        client,
+        streamUrl,
+        itemId,
+        config.services.jellyfin.url,
+      );
+    },
+  );
+
+  app.get<{ Params: HlsAssetParams; Querystring: Record<string, unknown> }>(
+    "/api/playback/items/:itemId/jellyfin/*",
+    async (request, reply) => {
+      const itemId = parseItemId(request.params.itemId);
+      const asset = parseHlsAsset(request.params["*"]);
+      const auth = requireAuth(request);
+      const client = createJellyfinClient(
+        config.services.jellyfin,
+        config.requestTimeoutMs,
+        auth.accessToken,
+        { deviceId: auth.deviceId },
+      );
+      const params = new URLSearchParams();
+      for (const [key, value] of Object.entries(request.query)) {
+        if (key !== "api_key" && typeof value === "string") {
+          params.append(key, value);
+        }
+      }
+      const suffix = params.size > 0 ? `?${params.toString()}` : "";
+      const upstreamUrl =
+        `${config.services.jellyfin.url}/Videos/${encodeURIComponent(itemId)}/${asset}${suffix}`;
+      return proxyUpstreamMedia(
+        request,
+        reply,
+        client,
+        upstreamUrl,
+        itemId,
+        config.services.jellyfin.url,
+      );
     },
   );
 
@@ -372,6 +434,78 @@ export function registerPlaybackRoutes(
     "/api/playback/items/:itemId/stop",
     (request, reply) => reportPlayback(request, reply, config, "stop"),
   );
+}
+
+async function proxyUpstreamMedia(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  client: JellyfinClient,
+  upstreamUrl: string,
+  itemId: string,
+  jellyfinBaseUrl: string,
+): Promise<FastifyReply> {
+  reply.header("cache-control", "no-store");
+  reply.header("referrer-policy", "no-referrer");
+
+  // Abort the upstream transfer when the browser goes away (seek, tab close).
+  // A completed response also emits "close", so only a truncated one counts.
+  const abort = new AbortController();
+  reply.raw.once("close", () => {
+    if (!reply.raw.writableEnded) {
+      abort.abort();
+    }
+  });
+
+  const range = request.headers.range;
+  let response: Response;
+  try {
+    response = await client.openStream(upstreamUrl, {
+      signal: abort.signal,
+      headers: {
+        accept: "*/*",
+        "accept-encoding": "identity",
+        ...(range ? { range } : {}),
+      },
+    });
+  } catch (error) {
+    if (abort.signal.aborted) {
+      reply.hijack();
+      return reply;
+    }
+    throw playbackRouteError(error, "Jellyfin could not serve this video", request);
+  }
+
+  if (response.status === 404) {
+    throw new ApiError(404, "playback_asset_not_found", "Video asset not found");
+  }
+  if (!response.ok && response.status !== 416) {
+    throw playbackRouteError(
+      await upstreamResponseError("jellyfin", response),
+      "Jellyfin could not serve this video",
+      request,
+    );
+  }
+
+  if (new URL(upstreamUrl).pathname.endsWith(".m3u8")) {
+    const playlist = await response.text();
+    reply.type("application/vnd.apple.mpegurl");
+    reply.send(rewriteHlsPlaylist(playlist, itemId, upstreamUrl, jellyfinBaseUrl));
+    return reply;
+  }
+
+  reply.code(response.status);
+  for (const name of MEDIA_HEADERS) {
+    const value = response.headers.get(name);
+    if (value) {
+      reply.header(name, value);
+    }
+  }
+  if (!response.body) {
+    reply.send();
+    return reply;
+  }
+  reply.send(Readable.fromWeb(response.body));
+  return reply;
 }
 
 async function reportPlayback(
@@ -476,6 +610,17 @@ function parseSubtitleIndex(value: string): number {
 function parseItemId(value: string): string {
   if (!ITEM_ID_PATTERN.test(value)) {
     throw new ApiError(400, "invalid_item_id", "Invalid Jellyfin item id");
+  }
+  return value;
+}
+
+function parseHlsAsset(value: string): string {
+  const segments = value.split("/");
+  const valid =
+    HLS_ASSET_PATTERN.test(value) &&
+    !segments.some((segment) => segment === "." || segment === "..");
+  if (!valid) {
+    throw new ApiError(404, "playback_asset_not_found", "Video asset not found");
   }
   return value;
 }

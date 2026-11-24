@@ -1007,6 +1007,21 @@
         ],
         "type": "object"
       },
+      "PasskeyAvailabilityResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "origin": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "origin"
+        ],
+        "type": "object"
+      },
       "PlaybackClientId": {
         "enum": [
           "web",
@@ -1558,6 +1573,29 @@
           "id",
           "state",
           "count"
+        ],
+        "type": "object"
+      },
+      "SavedPasskey": {
+        "additionalProperties": false,
+        "properties": {
+          "createdAt": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "lastUsedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "createdAt"
         ],
         "type": "object"
       },
@@ -2483,6 +2521,74 @@
         "summary": "Downloads in progress, queued or needing attention."
       }
     },
+    "/api/v1/auth/passkeys": {
+      "get": {
+        "operationId": "getAuthPasskeys",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SavedPasskey"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "device": []
+          }
+        ],
+        "summary": "The signed-in person's saved passkeys."
+      }
+    },
+    "/api/v1/auth/passkeys/available": {
+      "get": {
+        "operationId": "getAuthPasskeysAvailable",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasskeyAvailabilityResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [],
+        "summary": "Whether passkey sign-in is on, and for which origin."
+      }
+    },
     "/api/v1/auth/profiles": {
       "get": {
         "operationId": "getAuthProfiles",
@@ -3264,15 +3370,11 @@
           }
         ],
         "responses": {
-          "302": {
-            "description": "Redirect",
-            "headers": {
-              "location": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
+          "200": {
+            "content": {
+              "application/vnd.apple.mpegurl": {}
+            },
+            "description": "OK"
           },
           "default": {
             "content": {
@@ -3293,7 +3395,59 @@
             "device": []
           }
         ],
-        "summary": "Redirect to Jellyfin's HLS stream, for sources the client can't play directly."
+        "summary": "Jellyfin's HLS playlist, proxied, for sources the client can't play directly."
+      }
+    },
+    "/api/v1/playback/items/{itemId}/jellyfin/{path}": {
+      "get": {
+        "operationId": "getPlaybackItemsByItemIdJellyfin*",
+        "parameters": [
+          {
+            "description": "Jellyfin item id.",
+            "in": "path",
+            "name": "itemId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The path inside Jellyfin's HLS output.",
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/octet-stream": {}
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An error, as `{ error: { code, message } }`."
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "device": []
+          }
+        ],
+        "summary": "HLS segments and playlists the proxied playlist points to."
       }
     },
     "/api/v1/playback/items/{itemId}/stream": {
@@ -3311,15 +3465,11 @@
           }
         ],
         "responses": {
-          "302": {
-            "description": "Redirect",
-            "headers": {
-              "location": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
+          "200": {
+            "content": {
+              "video/*": {}
+            },
+            "description": "OK"
           },
           "default": {
             "content": {
@@ -3340,7 +3490,7 @@
             "device": []
           }
         ],
-        "summary": "Redirect to the direct-play stream."
+        "summary": "The original file, proxied from Jellyfin for direct play (supports ranges)."
       }
     },
     "/api/v1/playback/items/{itemId}/subtitles/{index}": {

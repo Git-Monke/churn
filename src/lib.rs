@@ -4,6 +4,7 @@ pub mod answers;
 pub mod assets;
 pub mod compose;
 pub mod envfile;
+pub mod funnel;
 pub mod jellyfin;
 pub mod live;
 pub mod llm;

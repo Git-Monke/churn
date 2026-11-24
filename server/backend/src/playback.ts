@@ -425,15 +425,15 @@ export function canBrowserDirectPlay(source: JellyfinMediaSource | undefined): b
 }
 
 /**
- * Build the Jellyfin URL behind the redirect. Concatenate instead of using
- * `new URL("/...")` so a public URL with a base path survives.
+ * Build the upstream Jellyfin stream URL the backend proxies. Concatenate
+ * instead of using `new URL("/...")` so a base path survives. The URL never
+ * leaves the server; the client authenticates with headers.
  */
 export function buildJellyfinStreamUrl(
-  publicUrl: string,
+  baseUrl: string,
   itemId: string,
   mediaSourceId: string | undefined,
   playSessionId: string | undefined,
-  token: string,
 ): string {
   const params = new URLSearchParams({ static: "true" });
   if (mediaSourceId) {
@@ -442,20 +442,19 @@ export function buildJellyfinStreamUrl(
   if (playSessionId) {
     params.set("playSessionId", playSessionId);
   }
-  params.set("api_key", token);
-  return `${publicUrl}/Videos/${encodeURIComponent(itemId)}/stream?${params.toString()}`;
+  return `${baseUrl}/Videos/${encodeURIComponent(itemId)}/stream?${params.toString()}`;
 }
 
 /**
- * Build a Jellyfin HLS manifest URL. Explicit codec/bitrate parameters are
- * required; without them Jellyfin picks its tiny default transcode profile.
+ * Build the upstream Jellyfin HLS manifest URL. Explicit codec/bitrate
+ * parameters are required; without them Jellyfin picks its tiny default
+ * transcode profile. The URL is fetched server-side and never handed out.
  */
 export function buildJellyfinHlsUrl(
-  publicUrl: string,
+  baseUrl: string,
   itemId: string,
   source: JellyfinMediaSource | undefined,
   playSessionId: string | undefined,
-  token: string,
   quality: PlaybackQuality = "max",
   client: PlaybackClientId = "web",
 ): string {
@@ -489,8 +488,48 @@ export function buildJellyfinHlsUrl(
   if (playSessionId) {
     params.set("PlaySessionId", playSessionId);
   }
-  params.set("api_key", token);
-  return `${publicUrl}/Videos/${encodeURIComponent(itemId)}/master.m3u8?${params.toString()}`;
+  return `${baseUrl}/Videos/${encodeURIComponent(itemId)}/master.m3u8?${params.toString()}`;
+}
+
+/**
+ * Repoint every URI in a Jellyfin HLS playlist at the same-origin asset proxy.
+ * Relative and absolute URIs are both resolved against `upstreamUrl`; anything
+ * outside `<basePath>/Videos/<itemId>/` is left untouched.
+ */
+export function rewriteHlsPlaylist(
+  playlist: string,
+  itemId: string,
+  upstreamUrl: string,
+  jellyfinBaseUrl: string,
+): string {
+  const basePath = new URL(jellyfinBaseUrl).pathname.replace(/\/+$/, "");
+  const prefix = `${basePath}/Videos/${encodeURIComponent(itemId)}/`;
+  const rewrite = (uri: string): string => {
+    let resolved: URL;
+    try {
+      resolved = new URL(uri, upstreamUrl);
+    } catch {
+      return uri;
+    }
+    if (!resolved.pathname.startsWith(prefix)) {
+      return uri;
+    }
+    resolved.searchParams.delete("api_key");
+    const search =
+      resolved.searchParams.size > 0 ? `?${resolved.searchParams.toString()}` : "";
+    const asset = resolved.pathname.slice(prefix.length);
+    return `/api/playback/items/${encodeURIComponent(itemId)}/jellyfin/${asset}${search}`;
+  };
+  return playlist
+    .split(/\r?\n/)
+    .map((line) =>
+      line.startsWith("#")
+        ? line.replace(/URI="([^"]*)"/g, (_match, uri: string) => `URI="${rewrite(uri)}"`)
+        : line.trim() === ""
+          ? line
+          : rewrite(line.trim()),
+    )
+    .join("\n");
 }
 
 function clamp(value: number, min: number, max: number): number {

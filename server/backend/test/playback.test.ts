@@ -14,6 +14,7 @@ import {
   playbackStreamPath,
   pickMediaSource,
   pickNextEpisode,
+  rewriteHlsPlaylist,
 } from "../src/playback.js";
 import { parsePlaybackClient } from "../src/playback-clients.js";
 import { ApiError } from "../src/errors.js";
@@ -35,13 +36,12 @@ describe("playback URLs", () => {
     );
   });
 
-  it("builds a Jellyfin static stream URL on the public base path", () => {
+  it("builds the upstream static stream URL", () => {
     const url = buildJellyfinStreamUrl(
       "https://media.example.test/jellyfin",
       "item-1",
       "source-1",
       "session-1",
-      "user token+/=",
     );
     expect(url).toContain(
       "https://media.example.test/jellyfin/Videos/item-1/stream?",
@@ -49,7 +49,7 @@ describe("playback URLs", () => {
     expect(url).toContain("static=true");
     expect(url).toContain("mediaSourceId=source-1");
     expect(url).toContain("playSessionId=session-1");
-    expect(url).toContain("api_key=user+token%2B%2F%3D");
+    expect(url).not.toContain("api_key");
   });
 
   it("builds a transcoding HLS URL with the source dimensions", () => {
@@ -65,7 +65,6 @@ describe("playback URLs", () => {
         ],
       },
       "session-1",
-      "user token",
     );
     expect(url).toContain(
       "https://media.example.test/jellyfin/Videos/item-1/master.m3u8?",
@@ -76,7 +75,74 @@ describe("playback URLs", () => {
     expect(url).toContain("VideoBitrate=8785944");
     expect(url).toContain("MediaSourceId=source-1");
     expect(url).toContain("PlaySessionId=session-1");
-    expect(url).toContain("api_key=user+token");
+    expect(url).not.toContain("api_key");
+  });
+});
+
+describe("rewriteHlsPlaylist", () => {
+  const itemId = "item-1";
+  const jellyfinBaseUrl = "http://jellyfin.test:8096";
+  const upstreamUrl =
+    `${jellyfinBaseUrl}/Videos/item-1/master.m3u8?MediaSourceId=source-1&PlaySessionId=session-1`;
+
+  it("rewrites master playlist variants at the asset proxy", () => {
+    const playlist =
+      "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=800000\n" +
+      "main.m3u8?MediaSourceId=source-1&PlaySessionId=session-1&api_key=secret\n";
+    expect(
+      rewriteHlsPlaylist(playlist, itemId, upstreamUrl, jellyfinBaseUrl),
+    ).toBe(
+      "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=800000\n" +
+        "/api/playback/items/item-1/jellyfin/main.m3u8?MediaSourceId=source-1&PlaySessionId=session-1\n",
+    );
+  });
+
+  it("rewrites URI attributes in playlist tags", () => {
+    expect(
+      rewriteHlsPlaylist(
+        '#EXT-X-MEDIA:TYPE=SUBTITLES,NAME="English",URI="Subtitles/2/Stream.vtt?api_key=secret"',
+        itemId,
+        upstreamUrl,
+        jellyfinBaseUrl,
+      ),
+    ).toBe(
+      '#EXT-X-MEDIA:TYPE=SUBTITLES,NAME="English",URI="/api/playback/items/item-1/jellyfin/Subtitles/2/Stream.vtt"',
+    );
+  });
+
+  it("rewrites absolute Jellyfin URIs", () => {
+    expect(
+      rewriteHlsPlaylist(
+        "http://jellyfin.test:8096/Videos/item-1/hls1/main/0.ts?PlaySessionId=session-1",
+        itemId,
+        upstreamUrl,
+        jellyfinBaseUrl,
+      ),
+    ).toBe(
+      "/api/playback/items/item-1/jellyfin/hls1/main/0.ts?PlaySessionId=session-1",
+    );
+  });
+
+  it("leaves URIs outside the item's Videos path alone", () => {
+    expect(
+      rewriteHlsPlaylist(
+        "https://cdn.example.test/x.ts",
+        itemId,
+        upstreamUrl,
+        jellyfinBaseUrl,
+      ),
+    ).toBe("https://cdn.example.test/x.ts");
+  });
+
+  it("strips api_key from rewritten URIs", () => {
+    expect(
+      rewriteHlsPlaylist(
+        "hls1/main/0.ts?PlaySessionId=session-1&api_key=secret\n",
+        itemId,
+        upstreamUrl,
+        jellyfinBaseUrl,
+      ),
+    ).not.toContain("api_key");
   });
 });
 
@@ -390,7 +456,6 @@ describe("playback quality presets", () => {
       "item-1",
       hdSource,
       "session-1",
-      "token",
       "medium",
     );
     expect(medium).toContain("MaxHeight=720");
@@ -401,7 +466,6 @@ describe("playback quality presets", () => {
       "item-1",
       hdSource,
       "session-1",
-      "token",
       "low",
     );
     expect(low).toContain("MaxHeight=480");
@@ -417,7 +481,6 @@ describe("playback quality presets", () => {
         MediaStreams: [{ Type: "Video", Codec: "h264", Height: 576 }],
       },
       undefined,
-      "token",
       "low",
     );
     expect(url).toContain("MaxHeight=480");
@@ -433,7 +496,6 @@ describe("playback quality presets", () => {
         MediaStreams: [{ Type: "Video", Codec: "hevc", Height: 2160 }],
       },
       undefined,
-      "token",
       "max",
     );
     expect(url).toContain("MaxHeight=2160");
@@ -562,7 +624,7 @@ describe("playback client profiles", () => {
 
   it("repackages an MKV for Apple TV without re-encoding it, with subtitles in the playlist", () => {
     const url = new URL(
-      buildJellyfinHlsUrl("https://media.test", "item-1", mkvHevc, "session-1", "token", "max", "tvos"),
+      buildJellyfinHlsUrl("https://media.test", "item-1", mkvHevc, "session-1", "max", "tvos"),
     );
     const params = url.searchParams;
     expect(params.get("VideoCodec")).toBe("hevc,h264");
@@ -580,7 +642,7 @@ describe("playback client profiles", () => {
 
   it("re-encodes for Apple TV only when a lower quality is chosen", () => {
     const params = new URL(
-      buildJellyfinHlsUrl("https://media.test", "item-1", mkvHevc, "session-1", "token", "high", "tvos"),
+      buildJellyfinHlsUrl("https://media.test", "item-1", mkvHevc, "session-1", "high", "tvos"),
     ).searchParams;
     expect(params.get("VideoCodec")).toBe("h264");
     expect(params.has("AllowVideoStreamCopy")).toBe(false);
@@ -591,7 +653,7 @@ describe("playback client profiles", () => {
 
   it("keeps the browser's transcode as it was", () => {
     const params = new URL(
-      buildJellyfinHlsUrl("https://media.test", "item-1", mkvHevc, "session-1", "token"),
+      buildJellyfinHlsUrl("https://media.test", "item-1", mkvHevc, "session-1"),
     ).searchParams;
     expect(params.get("VideoCodec")).toBe("h264");
     expect(params.get("AudioCodec")).toBe("aac");
