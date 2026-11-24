@@ -73,15 +73,7 @@ export interface AppConfig {
   passkeyOrigin?: string;
   /** Writable directory for persisted profiles and sessions. */
   stateDir: string;
-  /**
-   * Jellyfin URL handed to the browser for video streams. An explicit
-   * `JELLYFIN_PUBLIC_URL` always wins; otherwise the request host is used (see
-   * `jellyfinPublicUrlForRequest`), with this value as the fallback.
-   */
-  jellyfinPublicUrl: string;
-  /** True when `JELLYFIN_PUBLIC_URL` was set and must override the request host. */
-  jellyfinPublicUrlExplicit: boolean;
-  /** Address used as that fallback; undefined when no LAN interface was found. */
+  /** Address used when a service URL must be rewritten but the request has no usable Host. */
   lanAddress?: string;
   services: Record<ServiceId, ServiceConfig>;
   qbittorrent: QbittorrentConfig;
@@ -255,8 +247,6 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
     timeoutMs: parseVpnTimeout(values.VPN_STATUS_TIMEOUT_MS),
   };
 
-  const explicitPublicUrl = nonEmpty(values.JELLYFIN_PUBLIC_URL);
-
   return {
     host: nonEmpty(values.HOST) ?? "127.0.0.1",
     port: parsePort(values.PORT),
@@ -269,12 +259,6 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
     cookieSecure: parseCookieSecure(values.CHURN_COOKIE_SECURE),
     passkeyOrigin: parsePasskeyOrigin(values.CHURN_PASSKEY_ORIGIN),
     stateDir: resolveStateDir(values.CHURN_STATE_DIR, serverDir),
-    jellyfinPublicUrl: resolveJellyfinPublicUrl(
-      explicitPublicUrl,
-      services.jellyfin.url,
-      lanAddress,
-    ),
-    jellyfinPublicUrlExplicit: explicitPublicUrl !== undefined,
     lanAddress,
     services,
     qbittorrent,
@@ -322,35 +306,6 @@ function publicUrlOverride(
 }
 
 /**
- * Resolve the LAN-based fallback URL for video streams.
- *
- * Used when the request host cannot be used, for example for health checks or
- * a request without a Host header. A loopback Jellyfin address (or a
- * single-label container/service host such as `jellyfin`) is replaced with the
- * host's LAN address, keeping the scheme, port and base path. When no LAN
- * address is available the Jellyfin URL is used unchanged.
- */
-function resolveJellyfinPublicUrl(
-  explicit: string | undefined,
-  jellyfinUrl: string,
-  lanAddress: string | undefined,
-): string {
-  if (nonEmpty(explicit)) {
-    return normalizeUrl(explicit, jellyfinUrl);
-  }
-  if (!lanAddress) {
-    return jellyfinUrl;
-  }
-
-  const url = new URL(jellyfinUrl);
-  if (!needsPublicHost(url.hostname)) {
-    return jellyfinUrl;
-  }
-  url.hostname = lanAddress;
-  return normalizeUrl(url.toString(), jellyfinUrl);
-}
-
-/**
  * Resolve the browser-facing URL of a service for the request that is being
  * served.
  *
@@ -386,22 +341,6 @@ export function serviceUrlForRequest(
   }
   url.hostname = hostname;
   return normalizeUrl(url.toString(), service.url);
-}
-
-/**
- * Resolve the Jellyfin URL for the browser that made this request.
- *
- * Thin wrapper kept for existing callers; see `serviceUrlForRequest` for the
- * general behaviour. An explicit `JELLYFIN_PUBLIC_URL` still always wins.
- */
-export function jellyfinPublicUrlForRequest(
-  config: AppConfig,
-  headers: BrowserHostHeaders,
-): string {
-  if (config.jellyfinPublicUrlExplicit) {
-    return config.jellyfinPublicUrl;
-  }
-  return serviceUrlForRequest(config, "jellyfin", headers);
 }
 
 /** Host as the browser saw it, preferring a reverse proxy's public host. */

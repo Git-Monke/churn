@@ -404,8 +404,8 @@ internet metadata on and `.nfo` writing off; a library that already points at
 either folder is reused as it is. It also removes any `/data` library path so
 Jellyfin does not index qBittorrent's in-progress downloads, and adds the
 private LAN ranges and Tailscale's `100.64.0.0/10` range to Jellyfin's LAN
-networks, so tailnet clients can stream directly from Jellyfin while remote
-access stays disabled. The installer asks for a Jellyfin admin
+networks, so LAN and tailnet clients (including Churn's playback proxy) reach
+Jellyfin while remote access stays disabled. The installer asks for a Jellyfin admin
 username and password when needed; the password is not saved. Reruns reuse a
 valid key. Sonarr and Radarr keys are read automatically from
 `server/config/*/config.xml`.

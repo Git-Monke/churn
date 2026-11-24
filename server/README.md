@@ -72,7 +72,7 @@ A rerun repairs the permissions.
 | `HOST` | `127.0.0.1` | Backend bind address |
 | `PORT` | `4001` (dev), `4000` (production) | Backend port |
 | `JELLYFIN_URL` | `http://127.0.0.1:8096` | Jellyfin base URL used by the backend |
-| `JELLYFIN_PUBLIC_URL` | request host, LAN address as fallback | Jellyfin URL the browser uses for video streams and service links |
+| `JELLYFIN_PUBLIC_URL` | request host, LAN address as fallback | Jellyfin URL the browser uses for service links and redirects |
 | `SONARR_PUBLIC_URL` / `RADARR_PUBLIC_URL` | request host, LAN address as fallback | Browser-facing arr URLs for service links and redirects |
 | `JELLYFIN_API_KEY` | — | Written by churn after Jellyfin setup |
 | `JELLYFIN_ADMIN_USER` | `admin` | Optional non-interactive setup username |
@@ -292,8 +292,9 @@ Jellyfin, sign in with your password and enroll again.
 | `POST /api/library/shows/:source/:id/releases/grab` | Send the chosen season or episode torrent directly to qBittorrent |
 | `DELETE /api/library/shows/sonarr/:id/episodes/:season/:episode/download` | Cancel that episode's active download, blocklist the release and keep imported files |
 | `GET /api/playback/items/:itemId` | Playable item metadata, resume position, quality presets, media source, same-origin stream URL, cached episode segments and next episode |
-| `GET /api/playback/items/:itemId/stream` | Redirect the media element to Jellyfin's direct stream URL for this session |
-| `GET /api/playback/items/:itemId/hls.m3u8` | Redirect to a Jellyfin HLS transcode (H.264/AAC) when the source is not browser-compatible |
+| `GET /api/playback/items/:itemId/stream` | Proxy Jellyfin's direct stream for this session, forwarding `Range` and the media headers |
+| `GET /api/playback/items/:itemId/hls.m3u8` | Proxy a Jellyfin HLS transcode (H.264/AAC) when the source is not browser-compatible, rewriting the playlist at same-origin URLs |
+| `GET /api/playback/items/:itemId/jellyfin/*` | Proxy the HLS child playlists and segments referenced by that manifest |
 | `POST /api/playback/items/:itemId/start` | Report playback start to Jellyfin |
 | `POST /api/playback/items/:itemId/progress` | Report playback position and paused state to Jellyfin |
 | `POST /api/playback/items/:itemId/stop` | Report playback stop so Jellyfin keeps the resume position / watched state |
@@ -452,17 +453,23 @@ the item's resume position comes from Jellyfin `UserData`, and
 start/progress/stop reports keep Jellyfin's Continue Watching and watched state
 in sync.
 
-Video bytes are not proxied through Churn. Playback is codec-aware:
+Video bytes are proxied through Churn, so the browser only talks to the
+dashboard origin. Playback is codec-aware:
 
 - Browser-compatible sources use a same-origin
-  `/api/playback/items/:itemId/stream` URL. The backend validates the session
-  and returns a `302` to Jellyfin's `static=true` stream with the user's access
-  token as `api_key`. Seeking works because Jellyfin serves byte ranges.
+  `/api/playback/items/:itemId/stream` URL. The backend validates the session,
+  fetches Jellyfin's `static=true` stream with the user's access token in an
+  `X-Emby-Token` header, and forwards the bytes, status and `Range` handling.
+  No Jellyfin address or token reaches the browser.
 - Other sources (for example HEVC video with AC3 audio in an MKV) use a
-  same-origin `/api/playback/items/:itemId/hls.m3u8` URL. The backend returns a
-  `302` to Jellyfin's HLS manifest with explicit H.264/AAC transcode parameters
-  based on the source resolution and bitrate. The frontend plays it with
-  `hls.js`, with native HLS as a fallback.
+  same-origin `/api/playback/items/:itemId/hls.m3u8` URL. The backend requests
+  Jellyfin's HLS manifest with explicit H.264/AAC transcode parameters based on
+  the source resolution and bitrate and rewrites every playlist URI to
+  `/api/playback/items/:itemId/jellyfin/...`. The frontend plays it with
+  `hls.js`, with native HLS as a fallback; child playlists and segments are
+  proxied byte-for-byte by that same asset route.
+- The upstream transfer is aborted when the browser seeks away or closes the
+  tab, so a paused or abandoned stream does not keep pulling from Jellyfin.
 
 If Jellyfin's transcode job stops because the source file has a damaged
 section, the player retries transient network and media errors in place. If the
@@ -518,30 +525,24 @@ longer restarts the episode. If a file cannot offer that tier,
 playback falls back to `max` for that file without changing the stored
 preference.
 
-By default the browser-facing Jellyfin URL follows the hostname used to reach
-Churn. A loopback host or a single-label container name in `JELLYFIN_URL`
-(`http://jellyfin:8096`) is replaced with the request host, keeping scheme, port
-and base path. That makes the same install work through a LAN address, a
-Tailscale IP or a MagicDNS hostname without extra configuration; the server
-stack publishes Jellyfin on port 8096, so tailnet clients reach it the same way
-they reach the dashboard. If `JELLYFIN_URL` is already a browser-routable name
-it is used unchanged, and a request without a Host header falls back to the
-detected LAN address.
+Video playback does not depend on a browser-facing Jellyfin URL: every media
+request goes to `/api/playback/...` on the dashboard origin and the backend
+fetches it from `JELLYFIN_URL`. Playback therefore works over a Tailscale
+Funnel, a reverse proxy or a LAN address without mixed-content blocking and
+without publishing Jellyfin. Playback failures show the media error alert with
+an **Open Jellyfin** fallback, except for an HLS interruption, which offers
+**Retry**.
 
-Set `JELLYFIN_PUBLIC_URL` when the browser reaches Jellyfin at an address that
-is neither the request host nor the detected LAN address, for example a reverse
-proxy or a TLS name. An explicit value always wins. Preview the fallback in the
-backend's startup log (`video streams follow the request host (fallback …)`).
-Playback failures show the media error alert with an **Open Jellyfin** fallback,
-except for an HLS interruption, which offers **Retry**.
-
-The same rule applies to the links on the Services page and to
+The browser-facing rule still applies to the links on the Services page and to
 `/api/services/:id/open`: status responses report each service at the host the
 browser used (so a Tailscale client sees `http://100.x.y.z:8096`, not
 `http://127.0.0.1:8096`), while health probes keep using the internal
-`JELLYFIN_URL`/`SONARR_URL`/`RADARR_URL`. Set `SONARR_PUBLIC_URL` or
-`RADARR_PUBLIC_URL` when those services are reachable at a different public
-address.
+`JELLYFIN_URL`/`SONARR_URL`/`RADARR_URL`. A loopback host or a single-label
+container name in a service URL is replaced with the request host, keeping
+scheme, port and base path; a request without a Host header falls back to the
+detected LAN address. Set `JELLYFIN_PUBLIC_URL`, `SONARR_PUBLIC_URL` or
+`RADARR_PUBLIC_URL` when a service is reachable at a different public address,
+for example a reverse proxy or a TLS name. An explicit value always wins.
 
 ## Development
 

@@ -713,7 +713,7 @@ export interface PlaybackItem {
   positionTicks?: number;
   played?: boolean;
   imageUrl?: string;
-  /** Same-origin redirect endpoint; never contains the Jellyfin token. */
+  /** Same-origin proxy endpoint; never contains the Jellyfin token. */
   streamUrl: string;
   playSessionId?: string;
   mediaSourceId?: string;
