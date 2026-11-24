@@ -37,16 +37,55 @@ import { registerShowRoutes } from "./routes/shows.js";
 import { registerStatsRoutes } from "./routes/stats.js";
 import { registerStatusRoutes } from "./routes/status.js";
 import { registerVpnRoutes } from "./routes/vpn.js";
+import { API_VERSIONS, routeUrlFor, unsupportedVersion } from "./api-version.js";
+
+/** One response, as `BuildServerOptions.onResponse` sees it. */
+export interface ServedResponse {
+  method: string;
+  /** Fastify's route path, with `:params`; undefined when no route matched. */
+  route: string | undefined;
+  statusCode: number;
+  contentType: string;
+  payload: unknown;
+}
 
 interface BuildServerOptions {
   logger?: boolean;
+  /**
+   * Sees every response before it is sent. Tests use it to check JSON
+   * responses against the API contract; production never sets it.
+   */
+  onResponse?: (response: ServedResponse) => void;
+  /** Sees every route as it is registered; tests use it to check the contract covers them. */
+  onRoute?: (route: { method: string | string[]; url: string }) => void;
 }
 
 export async function buildServer(
   config: AppConfig,
   options: BuildServerOptions = {},
 ): Promise<FastifyInstance> {
-  const app = Fastify({ logger: options.logger ?? false });
+  const app = Fastify({
+    logger: options.logger ?? false,
+    // `/api/v1/...` is served by the same routes as `/api/...`.
+    rewriteUrl: (request) => routeUrlFor(request.url ?? "/"),
+  });
+  if (options.onRoute) {
+    const onRoute = options.onRoute;
+    app.addHook("onRoute", (route) => onRoute({ method: route.method, url: route.url }));
+  }
+  if (options.onResponse) {
+    const onResponse = options.onResponse;
+    app.addHook("onSend", async (request, reply, payload) => {
+      onResponse({
+        method: request.method,
+        route: request.routeOptions.url,
+        statusCode: reply.statusCode,
+        contentType: String(reply.getHeader("content-type") ?? ""),
+        payload,
+      });
+      return payload;
+    });
+  }
   mkdirSync(config.stateDir, { recursive: true });
   const passkeyStore = createPasskeyStore(config.stateDir);
   const sessionStore = createMemorySessionStore({
@@ -105,6 +144,9 @@ export async function buildServer(
 
   const isPublicApi = (method: string, pathname: string): boolean => {
     if (method === "GET" && pathname === "/api/health") {
+      return true;
+    }
+    if (method === "GET" && pathname === "/api/meta") {
       return true;
     }
     if (method === "POST" && pathname === "/api/auth/login") {
@@ -206,7 +248,16 @@ export async function buildServer(
   }
 
   app.setNotFoundHandler((request, reply) => {
-    if (request.url.startsWith("/api/")) {
+    if (request.url.startsWith("/api/") || request.url === "/api") {
+      const version = unsupportedVersion(request.originalUrl);
+      if (version !== undefined) {
+        return reply.code(404).send({
+          error: {
+            code: "unsupported_api_version",
+            message: `This server doesn't serve API version ${version}. It serves ${API_VERSIONS.map((v) => `v${v}`).join(", ")}; see GET /api/meta.`,
+          },
+        });
+      }
       return reply
         .code(404)
         .send({ error: { code: "not_found", message: "API route not found" } });

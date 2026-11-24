@@ -10,6 +10,7 @@ import {
 } from "../auth.js";
 import type { AppConfig } from "../config.js";
 import { ApiError, isUnauthorized, UpstreamError } from "../errors.js";
+import type { ManagedProfile } from "../types.js";
 import { createJellyfinClient } from "../upstream/jellyfin.js";
 
 export interface ProfileDependencies {
@@ -139,13 +140,7 @@ export function registerProfileRoutes(
   });
 }
 
-function managedProfile(profile: ProfileRecord): {
-  id: string;
-  name: string;
-  initialPin: string | null;
-  passwordSet: boolean;
-  createdAt: number;
-} {
+function managedProfile(profile: ProfileRecord): ManagedProfile {
   return {
     id: profile.id,
     name: profile.name,
