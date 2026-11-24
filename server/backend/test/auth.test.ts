@@ -46,8 +46,6 @@ function makeConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     sessionTtlMs: 12 * 60 * 60 * 1000,
     stateDir: mkdtempSync(path.join(tmpdir(), "churn-auth-")),
     cookieSecure: "auto",
-    jellyfinPublicUrl: "http://jellyfin.test:8096",
-    jellyfinPublicUrlExplicit: true,
     services: {
       jellyfin: {
         id: "jellyfin",

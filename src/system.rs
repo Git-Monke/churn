@@ -209,6 +209,27 @@ pub fn compose_ps(dir: &Path) -> io::Result<Vec<compose::PsService>> {
         .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
 }
 
+/// Whether `service` has a running container in the Compose project in `dir`.
+///
+/// The funnel command uses this to avoid starting a stopped stack just to
+/// rewrite its environment.
+pub fn compose_service_running(dir: &Path, service: &str) -> io::Result<bool> {
+    let output = Command::new("docker")
+        .args([
+            "compose", "--ansi", "never", "ps", "--status", "running", "-q", service,
+        ])
+        .current_dir(dir)
+        .output()?;
+    if !output.status.success() {
+        return Err(io::Error::other(format!(
+            "docker compose ps failed in {}: {}",
+            dir.display(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    Ok(!String::from_utf8_lossy(&output.stdout).trim().is_empty())
+}
+
 /// Read one environment variable from an existing Compose service container.
 ///
 /// Host-networked services such as the dashboard have no published-port entry

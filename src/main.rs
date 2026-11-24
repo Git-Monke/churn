@@ -21,6 +21,7 @@ use cliclack::{
 
 use churn::assets;
 use churn::envfile;
+use churn::funnel;
 use churn::jellyfin::{self, Credentials, Jellyfin};
 use churn::live::LiveLog;
 use churn::migrate;
@@ -52,6 +53,7 @@ USAGE:
     churn migrate [--to <PATH>] [OPTIONS]
     churn verify-vpn [--dir <PATH>] [--env-file <PATH>] [--config <PATH|->]
     churn llm-install [--stacks <LIST>] [--format <md|json>] [--write <PATH>]
+    churn funnel [off|status]
 
 COMMANDS:
     show              print the URLs for the installed services; does not need
@@ -74,11 +76,18 @@ COMMANDS:
     llm-install       print a self-contained prompt that teaches an LLM to
                       interview the user and then run a --non-interactive
                       install on this machine; writes and changes nothing
+    funnel            serve the dashboard over Tailscale Funnel at
+                      https://<tailscale-dns-name>:8443, set the passkey origin
+                      and restart the dashboard; `funnel off` removes the public
+                      endpoint and `funnel status` prints what is configured
 
 OPTIONS:
     --stacks <LIST>   comma separated: server,torrent (skips the menu; with
                       uninstall, show, update or migrate, limits what is
                       handled)
+    --tailscale-funnel
+                      enable Tailscale Funnel during install instead of
+                      prompting (default No); requires the server stack
     --dry-run         show the plan; write, remove, copy and start nothing
     -y, --yes         skip the final confirmation
     --json            print one JSON object instead of human text (install,
@@ -176,7 +185,16 @@ struct Args {
     format: Option<String>,
     write: Option<String>,
     llm_install: bool,
+    funnel: Option<FunnelAction>,
+    tailscale_funnel: bool,
     help: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FunnelAction {
+    Enable,
+    Disable,
+    Status,
 }
 
 impl Args {
@@ -201,7 +219,7 @@ fn env_flag(name: &str) -> bool {
 
 fn parse_args() -> Result<Args, String> {
     let mut args = Args::default();
-    let mut raw = std::env::args().skip(1);
+    let mut raw = std::env::args().skip(1).peekable();
     while let Some(arg) = raw.next() {
         match arg.as_str() {
             "--stacks" | "-s" => {
@@ -248,6 +266,20 @@ fn parse_args() -> Result<Args, String> {
             "--install-docker" => args.install_docker = true,
             "--json" => args.json = true,
             "llm-install" => args.llm_install = true,
+            "funnel" => {
+                // The action is decided before consuming the sub-command, so
+                // the `peek` borrow has ended by the time `raw.next()` runs.
+                let action = match raw.peek().map(String::as_str) {
+                    Some("off") => FunnelAction::Disable,
+                    Some("status") => FunnelAction::Status,
+                    _ => FunnelAction::Enable,
+                };
+                if !matches!(action, FunnelAction::Enable) {
+                    raw.next();
+                }
+                args.funnel = Some(action);
+            }
+            "--tailscale-funnel" => args.tailscale_funnel = true,
             "--answers" => {
                 let value = raw.next().ok_or("--answers needs a path or '-'")?;
                 args.answers = Some(value);
@@ -336,15 +368,40 @@ fn validate_args(args: &Args) -> Result<(), String> {
         args.migrate,
         args.verify_vpn,
         args.llm_install,
+        args.funnel.is_some(),
     ]
     .into_iter()
     .filter(|chosen| *chosen)
     .count();
     if commands > 1 {
         return Err(
-            "'show', 'update', 'uninstall', 'migrate', 'verify-vpn' and 'llm-install' cannot be combined"
+            "'show', 'update', 'uninstall', 'migrate', 'verify-vpn', 'llm-install' and 'funnel' cannot be combined"
                 .to_string(),
         );
+    }
+
+    if args.tailscale_funnel
+        && (args.show
+            || args.update
+            || args.uninstall
+            || args.migrate
+            || args.verify_vpn
+            || args.llm_install
+            || args.funnel.is_some())
+    {
+        return Err(
+            "--tailscale-funnel is an install option and cannot be combined with a command"
+                .to_string(),
+        );
+    }
+    if args.funnel.is_some() && args.dry_run {
+        return Err("--dry-run cannot be combined with the 'funnel' command".to_string());
+    }
+    if args.funnel.is_some() && args.non_interactive() {
+        return Err("--non-interactive cannot be combined with the 'funnel' command".to_string());
+    }
+    if args.funnel.is_some() && args.json {
+        return Err("--json is not supported by the 'funnel' command".to_string());
     }
 
     let answers_option = args.answers.is_some()
@@ -368,6 +425,12 @@ fn validate_args(args: &Args) -> Result<(), String> {
         // A non-interactive install has no menu to fall back on; update and
         // migrate discover what is installed instead of asking.
         return Err("--non-interactive requires --stacks <LIST>".to_string());
+    }
+    if args.tailscale_funnel
+        && let Some(stacks) = &args.stacks
+        && !stacks.contains(&Stack::Server)
+    {
+        return Err("--tailscale-funnel requires the server stack".to_string());
     }
     if (args.format.is_some() || args.write.is_some()) && !args.llm_install {
         return Err("--format and --write require the 'llm-install' command".to_string());
@@ -1003,7 +1066,12 @@ fn warn_unindexed_media(media: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn show_plan(chosen: &[Stack], questions: &[Question], answers: &Answers) -> io::Result<()> {
+fn show_plan(
+    chosen: &[Stack],
+    questions: &[Question],
+    answers: &Answers,
+    funnel: Option<&funnel::Node>,
+) -> io::Result<()> {
     let mut lines = String::new();
     for stack in chosen {
         lines.push_str(&format!("{:<8} {}\n", stack.key(), stack.description()));
@@ -1029,6 +1097,9 @@ fn show_plan(chosen: &[Stack], questions: &[Question], answers: &Answers) -> io:
         if let Some(value) = stack::summary(question, answers) {
             lines.push_str(&format!("{:<30} {value}\n", question.label()));
         }
+    }
+    if let Some(node) = funnel {
+        lines.push_str(&format!("{:<30} {}\n", "Tailscale Funnel", node.url()));
     }
     if chosen.contains(&Stack::Server) {
         lines.push_str(
@@ -1330,21 +1401,20 @@ fn setup_jellyfin(
         }
     }
 
-    restart_dashboard()
+    restart_dashboard("the Jellyfin API key")
 }
 
-/// The dashboard reads `JELLYFIN_API_KEY` from `.env` at boot, but churn only
-/// writes that key after the stack is up. Recreate the dashboard once setup has
-/// completed so it starts with the key instead of running without one.
-fn restart_dashboard() -> io::Result<()> {
-    let mut live = LiveLog::start("restarting the dashboard with the Jellyfin API key");
+/// The dashboard reads `.env` at boot, but churn writes some keys only after the
+/// stack is up. Recreate the dashboard so it starts with the current file.
+fn restart_dashboard(reason: &str) -> io::Result<()> {
+    let mut live = LiveLog::start(format!("restarting the dashboard with {reason}"));
     match system::compose_recreate_service(
         &Stack::Server.dir(),
         stack::DASHBOARD_SERVICE,
         &mut |line| live.push(line),
     ) {
         Ok(()) => {
-            live.success("dashboard restarted with the Jellyfin API key");
+            live.success(format!("dashboard restarted with {reason}"));
             Ok(())
         }
         Err(err) => {
@@ -2784,6 +2854,73 @@ fn show_services(args: &Args) -> io::Result<()> {
     Ok(())
 }
 
+/// `churn funnel`: inspect, enable or disable the public dashboard endpoint.
+///
+/// Enabling rewrites a root-owned `.env` and recreates the dashboard, so the
+/// command needs root just like the installer.
+fn handle_funnel(action: FunnelAction) -> io::Result<()> {
+    if !system::is_root() {
+        return Err(io::Error::other(
+            "churn funnel must run as root; re-run it with sudo",
+        ));
+    }
+    if !server_installed() {
+        return Err(io::Error::other(
+            "the server stack is not installed; run 'sudo churn --stacks server' first",
+        ));
+    }
+    let port = stack::answer_port(&Stack::Server.stored_answers(), Port::Dashboard);
+    let node = funnel::detect().ok_or_else(|| {
+        io::Error::other(
+            "Tailscale is not installed or is not running; start Tailscale and try again",
+        )
+    })?;
+
+    match action {
+        FunnelAction::Status => {
+            let status = funnel::status(&node, port)?;
+            println!("{}", node.url());
+            println!("Funnel: {}", if status.funnel_on { "on" } else { "off" });
+            if let Some(proxy) = &status.proxy {
+                println!("Proxy: {proxy}");
+            }
+        }
+        FunnelAction::Enable => {
+            // Fail before exposing anything when Docker is unusable.
+            let running =
+                system::compose_service_running(&Stack::Server.dir(), stack::DASHBOARD_SERVICE)?;
+            funnel::enable(&node, port)?;
+            if let Err(err) = funnel::save_origin(&node) {
+                return Err(match funnel::disable(&node, port) {
+                    Ok(()) => err,
+                    Err(rollback) => io::Error::other(format!(
+                        "{err}; additionally could not turn Funnel off: {rollback}"
+                    )),
+                });
+            }
+            if running {
+                // Leave Funnel up if this fails: rerunning the command retries
+                // the restart instead of re-exposing from scratch.
+                restart_dashboard("the updated passkey origin")?;
+            }
+            println!("Funnel on: {}", node.url());
+        }
+        FunnelAction::Disable => {
+            funnel::disable(&node, port)?;
+            funnel::clear_origin(&node)?;
+            match system::compose_service_running(&Stack::Server.dir(), stack::DASHBOARD_SERVICE) {
+                Ok(true) => restart_dashboard("the updated passkey origin")?,
+                Ok(false) => {}
+                Err(err) => eprintln!(
+                    "churn: could not check whether the dashboard is running ({err}); Funnel is off, restart the dashboard manually if it is running"
+                ),
+            }
+            println!("Funnel off");
+        }
+    }
+    Ok(())
+}
+
 /// `churn llm-install`: print the prompt an LLM follows to install for a user.
 ///
 /// Read-only and root-free: it prints text and touches nothing, so it is safe on
@@ -2902,6 +3039,13 @@ fn run(args: Args) -> io::Result<bool> {
     }
 
     let chosen = choose_stacks(&args)?;
+    // An explicit `--stacks` list was already checked, but an interactive menu
+    // can still pick torrent only.
+    if args.tailscale_funnel && !chosen.contains(&Stack::Server) {
+        return Err(io::Error::other(
+            "--tailscale-funnel requires the server stack",
+        ));
+    }
     let existing_ports = preflight(&chosen)?;
     let questions = stack::collect_questions(&chosen);
     // No prompt is ever constructed on the non-interactive path; see
@@ -2919,11 +3063,14 @@ fn run(args: Args) -> io::Result<bool> {
         ask_questions(&questions, args.yes, &existing_ports)?
     };
 
+    let dashboard_port = stack::answer_port(&answers, Port::Dashboard);
+    let funnel_node = prepare_funnel(&args, &chosen, dashboard_port, non_interactive, quiet)?;
+
     // A scripted run was told which paths to use, so it creates them and says
     // so rather than stopping to ask about each one.
     ensure_directories(&answers, args.yes || non_interactive, args.dry_run)?;
     if !quiet {
-        show_plan(&chosen, &questions, &answers)?;
+        show_plan(&chosen, &questions, &answers, funnel_node.as_ref())?;
     }
 
     // Non-interactive implies yes: the caller (usually an agent that already
@@ -2943,12 +3090,42 @@ fn run(args: Args) -> io::Result<bool> {
     }
 
     write_stacks(&chosen, &answers, args.dry_run)?;
-    start_stacks(&chosen, args.dry_run)?;
+    // The passkey origin must be in `server/.env` before the dashboard's first
+    // start, so a fresh install does not need a second recreate.
+    if let Some(node) = &funnel_node
+        && !args.dry_run
+    {
+        funnel::enable(node, dashboard_port)?;
+        if let Err(err) = funnel::save_origin(node) {
+            let _ = funnel::disable(node, dashboard_port);
+            return Err(err);
+        }
+    }
+    if let Err(err) = start_stacks(&chosen, args.dry_run) {
+        // Never leave a public endpoint pointing at a stack that failed to start.
+        if let Some(node) = &funnel_node
+            && !args.dry_run
+        {
+            if let Err(rollback) = funnel::disable(node, dashboard_port) {
+                eprintln!("churn: {rollback}");
+            }
+            if let Err(rollback) = funnel::clear_origin(node) {
+                eprintln!("churn: {rollback}");
+            }
+        }
+        return Err(err);
+    }
     if chosen.contains(&Stack::Server) {
         setup_jellyfin(args.dry_run, non_interactive, &supplied)?;
     }
 
     let mut steps = String::new();
+    if let Some(node) = &funnel_node {
+        steps.push_str(&format!(
+            "tailscale funnel\n  open {}  # churn dashboard over HTTPS\n",
+            node.url()
+        ));
+    }
     for stack in &chosen {
         steps.push_str(&format!("{}\n", stack.key()));
         for step in stack.next_steps(&answers) {
@@ -2956,7 +3133,10 @@ fn run(args: Args) -> io::Result<bool> {
         }
     }
     if args.json {
-        println!("{}", install_result_json(&args, &chosen, &answers)?);
+        println!(
+            "{}",
+            install_result_json(&args, &chosen, &answers, funnel_node.as_ref())?
+        );
         return Ok(true);
     }
     outro_note("Next steps", steps.trim_end().to_string())?;
@@ -2968,12 +3148,92 @@ fn run(args: Args) -> io::Result<bool> {
     Ok(true)
 }
 
+/// Decide whether this install should expose the dashboard over Funnel.
+///
+/// A running Tailscale node is only a candidate; the answer is `None` unless the
+/// flag or the prompt says yes, and a foreign handler at 8443 is never replaced.
+fn prepare_funnel(
+    args: &Args,
+    chosen: &[Stack],
+    dashboard_port: u16,
+    non_interactive: bool,
+    quiet: bool,
+) -> io::Result<Option<funnel::Node>> {
+    if !chosen.contains(&Stack::Server) {
+        return Ok(None);
+    }
+    let Some(node) = funnel::detect() else {
+        if args.tailscale_funnel {
+            return Err(io::Error::other(
+                "--tailscale-funnel was requested, but Tailscale is not installed or not running",
+            ));
+        }
+        return Ok(None);
+    };
+
+    match funnel::status(&node, dashboard_port) {
+        Ok(status) => {
+            // A matching origin marks a churn handler from a previous dashboard
+            // port; the later enable updates its target.
+            if status.funnel_on && (status.ours || funnel::owns(&node)) {
+                if !quiet {
+                    eprintln!("churn: Tailscale Funnel is already serving {}", node.url());
+                }
+                return Ok(Some(node));
+            }
+            let foreign = !status.ours && !funnel::owns(&node);
+            if let Some(proxy) = status.proxy.as_deref().filter(|_| foreign) {
+                let message = format!(
+                    "Tailscale already serves {proxy} on {}; not enabling Funnel for churn",
+                    node.url()
+                );
+                if args.tailscale_funnel {
+                    return Err(io::Error::other(message));
+                }
+                if !quiet {
+                    eprintln!("churn: {message}");
+                }
+                return Ok(None);
+            }
+        }
+        Err(err) => {
+            if args.tailscale_funnel {
+                return Err(err);
+            }
+            if !quiet {
+                eprintln!("churn: {err}");
+            }
+            return Ok(None);
+        }
+    }
+
+    if args.tailscale_funnel {
+        return Ok(Some(node));
+    }
+    // Silence means off: a scripted run must not expose anything implicitly.
+    if non_interactive {
+        return Ok(None);
+    }
+    let expose = confirm(format!(
+        "Serve the dashboard over Tailscale Funnel at {}? This exposes the login page to the public internet",
+        node.url()
+    ))
+    .initial_value(false)
+    .interact()?;
+    Ok(expose.then_some(node))
+}
+
 /// One JSON object describing what was installed, for a script or an agent.
 ///
 /// Secret answers (the WireGuard key, the OpenVPN password) are never included:
 /// they are already in the stack `.env`, which is where a caller should read
 /// them from if it genuinely needs them.
-fn install_result_json(args: &Args, chosen: &[Stack], answers: &Answers) -> io::Result<String> {
+fn install_result_json(
+    args: &Args,
+    chosen: &[Stack],
+    answers: &Answers,
+    funnel: Option<&funnel::Node>,
+) -> io::Result<String> {
     let root = envfile::root();
     let host = churn::show::host_ip(&root);
     let services: Vec<String> = churn::show::services(&root, chosen, &host)
@@ -3036,6 +3296,9 @@ fn install_result_json(args: &Args, chosen: &[Stack], answers: &Answers) -> io::
     let jellyfin_env = Stack::Server.env_path();
     let has_admin = envfile::read(&jellyfin_env).contains_key("JELLYFIN_ADMIN_PASSWORD");
     fields.push(format!("\"jellyfin_admin_password_saved\":{has_admin}"));
+    if let Some(node) = funnel {
+        fields.push(format!("\"funnel_url\":{}", json_string(&node.url())));
+    }
     Ok(format!("{{{}}}", fields.join(",")))
 }
 
@@ -3088,6 +3351,15 @@ fn main() -> ExitCode {
     }
     if args.show {
         return match show_services(&args) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(err) => {
+                eprintln!("churn: {err}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+    if let Some(action) = args.funnel {
+        return match handle_funnel(action) {
             Ok(()) => ExitCode::SUCCESS,
             Err(err) => {
                 eprintln!("churn: {err}");
@@ -3160,7 +3432,7 @@ mod tests {
     /// Parse a command line the way `main` does, without touching `argv`.
     fn parse(argv: &[&str]) -> Result<Args, String> {
         let mut args = Args::default();
-        let mut raw = argv.iter().map(|value| value.to_string());
+        let mut raw = argv.iter().map(|value| value.to_string()).peekable();
         while let Some(arg) = raw.next() {
             match arg.as_str() {
                 "--stacks" | "-s" => {
@@ -3180,6 +3452,18 @@ mod tests {
                 "--json" => args.json = true,
                 "--install-docker" => args.install_docker = true,
                 "llm-install" => args.llm_install = true,
+                "funnel" => {
+                    let action = match raw.peek().map(String::as_str) {
+                        Some("off") => FunnelAction::Disable,
+                        Some("status") => FunnelAction::Status,
+                        _ => FunnelAction::Enable,
+                    };
+                    if !matches!(action, FunnelAction::Enable) {
+                        raw.next();
+                    }
+                    args.funnel = Some(action);
+                }
+                "--tailscale-funnel" => args.tailscale_funnel = true,
                 "--answers" => {
                     let value = raw.next().ok_or("--answers needs a value")?;
                     args.answers = Some(value);
@@ -3268,6 +3552,42 @@ mod tests {
         // An install that cannot ask is an install that has already been
         // confirmed by its caller.
         assert!(!args.yes, "the flag itself does not set --yes");
+    }
+
+    #[test]
+    fn funnel_is_a_command() {
+        assert_eq!(
+            parse(&["funnel"]).expect("enable").funnel,
+            Some(FunnelAction::Enable)
+        );
+        assert_eq!(
+            parse(&["funnel", "off"]).expect("disable").funnel,
+            Some(FunnelAction::Disable)
+        );
+        assert_eq!(
+            parse(&["funnel", "status"]).expect("status").funnel,
+            Some(FunnelAction::Status)
+        );
+        let err = parse(&["funnel", "show"]).expect_err("commands cannot be combined");
+        assert!(err.contains("cannot be combined"), "{err}");
+        // A bare `off` stays an unknown option instead of a hidden command.
+        assert!(parse(&["off"]).is_err());
+    }
+
+    #[test]
+    fn funnel_rejects_dry_run() {
+        let err = parse(&["funnel", "--dry-run"]).expect_err("funnel changes the host");
+        assert!(err.contains("--dry-run"), "{err}");
+    }
+
+    #[test]
+    fn tailscale_funnel_requires_the_server_stack() {
+        let err = parse(&["--stacks", "torrent", "--tailscale-funnel"])
+            .expect_err("the dashboard lives in the server stack");
+        assert!(err.contains("server stack"), "{err}");
+
+        let args = parse(&["--stacks", "server", "--tailscale-funnel"]).expect("server install");
+        assert!(args.tailscale_funnel);
     }
 
     #[test]

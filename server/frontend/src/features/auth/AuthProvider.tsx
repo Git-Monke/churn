@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useState,
   type ReactNode,
 } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -28,6 +29,9 @@ interface AuthContextValue {
   login: (input: LoginInput) => Promise<LoginResponse>;
   profileLogin: (input: ProfileLoginInput) => Promise<ProfileLoginResponse>;
   logout: () => Promise<void>;
+  applySession: (data: LoginResponse) => void;
+  /** True after an active sign-in this page load; a restored session leaves it false. */
+  signedIn: boolean;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -43,10 +47,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     staleTime: 60_000,
   });
 
+  const replaceSession = useCallback(
+    (data: AuthSessionResponse) => {
+      void queryClient.cancelQueries({ queryKey: SESSION_QUERY_KEY });
+      queryClient.removeQueries({ predicate: ({ queryKey }) => queryKey[0] !== SESSION_QUERY_KEY[0] });
+      queryClient.setQueryData<AuthSessionResponse>(SESSION_QUERY_KEY, data);
+    },
+    [queryClient],
+  );
+
+  // A 401 arrives after the next screen has mounted; wiping the cache here would
+  // cancel its in-flight queries, and React Query silently leaves those observers
+  // pending, so the login screen never finishes loading.
+  const clearSession = useCallback(() => {
+    void queryClient.cancelQueries({ queryKey: SESSION_QUERY_KEY });
+    queryClient.setQueryData<AuthSessionResponse>(SESSION_QUERY_KEY, { authenticated: false });
+  }, [queryClient]);
+
+  const [signedIn, setSignedIn] = useState(false);
+
   const applySession = useCallback(
     (data: LoginResponse) => {
-      queryClient.getQueryCache().clear();
-      queryClient.setQueryData<AuthSessionResponse>(SESSION_QUERY_KEY, {
+      setSignedIn(true);
+      replaceSession({
         authenticated: true,
         user: data.user,
         kind: data.kind,
@@ -54,7 +77,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         expiresAt: data.expiresAt,
       });
     },
-    [queryClient],
+    [replaceSession],
   );
 
   const loginMutation = useMutation({
@@ -80,23 +103,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logoutMutation = useMutation({
     mutationFn: logoutRequest,
     onSettled: () => {
-      queryClient.getQueryCache().clear();
-      queryClient.setQueryData<AuthSessionResponse>(SESSION_QUERY_KEY, {
-        authenticated: false,
-      });
+      replaceSession({ authenticated: false });
     },
   });
 
   useEffect(() => {
     const handleUnauthorized = () => {
-      queryClient.getQueryCache().clear();
-      queryClient.setQueryData<AuthSessionResponse>(SESSION_QUERY_KEY, {
-        authenticated: false,
-      });
+      clearSession();
     };
     window.addEventListener("churn:unauthorized", handleUnauthorized);
     return () => window.removeEventListener("churn:unauthorized", handleUnauthorized);
-  }, [queryClient]);
+  }, [clearSession]);
 
   const login = useCallback(
     (input: LoginInput) => loginMutation.mutateAsync(input),
@@ -125,7 +142,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           logoutMutation.isPending,
         login,
         profileLogin,
+        applySession,
         logout,
+        signedIn,
       }}
     >
       {children}

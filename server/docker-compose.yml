@@ -112,6 +112,7 @@ services:
       - PORT=${DASHBOARD_PORT:-4000}
       - CHURN_SERVER_DIR=/app
       - CHURN_STATE_DIR=/app/state
+      - CHURN_PASSKEY_ORIGIN=${CHURN_PASSKEY_ORIGIN:-}
       - JELLYFIN_URL=http://127.0.0.1:${JELLYFIN_PORT:-8096}
       - SONARR_URL=http://127.0.0.1:${SONARR_PORT:-8989}
       - RADARR_URL=http://127.0.0.1:${RADARR_PORT:-7878}

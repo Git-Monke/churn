@@ -393,3 +393,28 @@
   max-width: none;
   aspect-ratio: auto;
 }
+
+/* Arrival after an active sign-in: header, then content, in reading order. */
+.motion-signin-arrive > header,
+.motion-signin-arrive > main {
+  animation: churn-signin-arrive 520ms cubic-bezier(0.25, 0.8, 0.25, 1) backwards;
+}
+
+.motion-signin-arrive > main {
+  animation-delay: 60ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .motion-signin-arrive > header,
+  .motion-signin-arrive > main {
+    animation: churn-signin-fade 160ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+}
+
+@keyframes churn-signin-arrive {
+  from { opacity: 0; transform: translateY(8px); }
+}
+
+@keyframes churn-signin-fade {
+  from { opacity: 0; }
+}

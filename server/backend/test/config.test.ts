@@ -5,7 +5,6 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
-  jellyfinPublicUrlForRequest,
   loadConfig,
   readApiKeyFromConfigXml,
   readProwlarrApiKey,
@@ -62,8 +61,6 @@ describe("config loading", () => {
     expect(config.sessionTtlMs).toBe(12 * 60 * 60 * 1000);
     expect(config.cookieSecure).toBe("auto");
     expect(config.services.jellyfin.url).toBe("http://127.0.0.1:8096");
-    expect(config.jellyfinPublicUrl).toBe("http://127.0.0.1:8096");
-    expect(config.jellyfinPublicUrlExplicit).toBe(false);
     expect(config.lanAddress).toBeUndefined();
     expect(config.services.jellyfin.apiKey).toBeUndefined();
     expect(config.services.sonarr.url).toBe("http://127.0.0.1:8989");
@@ -103,12 +100,13 @@ describe("config loading", () => {
       detectLan: () => "192.168.0.97",
     });
 
-    // The backend still talks to Jellyfin over loopback; only the URL handed
-    // to the browser moves to the LAN address.
+    // The backend still talks to Jellyfin over loopback; a browser-facing URL
+    // without a request Host falls back to the LAN address.
     expect(config.services.jellyfin.url).toBe("http://127.0.0.1:8096");
     expect(config.lanAddress).toBe("192.168.0.97");
-    expect(config.jellyfinPublicUrl).toBe("http://192.168.0.97:8096");
-    expect(config.jellyfinPublicUrlExplicit).toBe(false);
+    expect(serviceUrlForRequest(config, "jellyfin", {})).toBe(
+      "http://192.168.0.97:8096",
+    );
   });
 
   it("follows the request host when Jellyfin is only reachable through Churn", () => {
@@ -121,16 +119,16 @@ describe("config loading", () => {
     });
 
     expect(
-      jellyfinPublicUrlForRequest(config, { host: "100.117.4.8:5173" }),
+      serviceUrlForRequest(config, "jellyfin", { host: "100.117.4.8:5173" }),
     ).toBe("http://100.117.4.8:8096");
     expect(
-      jellyfinPublicUrlForRequest(config, {
+      serviceUrlForRequest(config, "jellyfin", {
         host: "127.0.0.1:4000",
         "x-forwarded-host": "fedora.tail457b41.ts.net",
       }),
     ).toBe("http://fedora.tail457b41.ts.net:8096");
     expect(
-      jellyfinPublicUrlForRequest(config, {
+      serviceUrlForRequest(config, "jellyfin", {
         forwarded: 'for=100.64.0.2;proto=http;host="[fd7a:115c:a1e0::ca31:409]:4000"',
       }),
     ).toBe("http://[fd7a:115c:a1e0::ca31:409]:8096");
@@ -145,9 +143,9 @@ describe("config loading", () => {
       detectLan: () => "192.168.0.97",
     });
 
-    expect(jellyfinPublicUrlForRequest(config, {})).toBe("http://192.168.0.97:8096");
+    expect(serviceUrlForRequest(config, "jellyfin", {})).toBe("http://192.168.0.97:8096");
     expect(
-      jellyfinPublicUrlForRequest(config, { host: "evil.test/path" }),
+      serviceUrlForRequest(config, "jellyfin", { host: "evil.test/path" }),
     ).toBe("http://192.168.0.97:8096");
   });
 
@@ -158,9 +156,11 @@ describe("config loading", () => {
       readDotEnv: false,
       detectLan: () => "192.168.0.97",
     });
-    expect(explicit.jellyfinPublicUrlExplicit).toBe(true);
+    expect(explicit.services.jellyfin.publicUrl).toBe(
+      "https://media.example.test/jellyfin",
+    );
     expect(
-      jellyfinPublicUrlForRequest(explicit, { host: "100.117.4.8:4000" }),
+      serviceUrlForRequest(explicit, "jellyfin", { host: "100.117.4.8:4000" }),
     ).toBe("https://media.example.test/jellyfin");
 
     const routable = loadConfig({
@@ -170,7 +170,7 @@ describe("config loading", () => {
       detectLan: () => "192.168.0.97",
     });
     expect(
-      jellyfinPublicUrlForRequest(routable, { host: "100.117.4.8:4000" }),
+      serviceUrlForRequest(routable, "jellyfin", { host: "100.117.4.8:4000" }),
     ).toBe("http://media.example.test:8096");
   });
 
@@ -228,7 +228,9 @@ describe("config loading", () => {
       detectLan: () => "10.1.2.3",
     });
 
-    expect(config.jellyfinPublicUrl).toBe("https://10.1.2.3/jellyfin");
+    expect(serviceUrlForRequest(config, "jellyfin", {})).toBe(
+      "https://10.1.2.3/jellyfin",
+    );
   });
 
   it("substitutes the LAN address for a container hostname", () => {
@@ -242,7 +244,9 @@ describe("config loading", () => {
     });
 
     expect(config.services.jellyfin.url).toBe("http://jellyfin:8096");
-    expect(config.jellyfinPublicUrl).toBe("http://192.168.0.97:8096");
+    expect(serviceUrlForRequest(config, "jellyfin", {})).toBe(
+      "http://192.168.0.97:8096",
+    );
   });
 
   it("leaves explicit and already-routable Jellyfin URLs alone", () => {
@@ -257,7 +261,9 @@ describe("config loading", () => {
       readDotEnv: false,
       detectLan: () => "192.168.0.97",
     });
-    expect(explicit.jellyfinPublicUrl).toBe("https://media.example.test/jellyfin");
+    expect(explicit.services.jellyfin.publicUrl).toBe(
+      "https://media.example.test/jellyfin",
+    );
 
     const routable = loadConfig({
       serverDir,
@@ -265,7 +271,9 @@ describe("config loading", () => {
       readDotEnv: false,
       detectLan: () => "192.168.0.97",
     });
-    expect(routable.jellyfinPublicUrl).toBe("http://media.example.test:8096");
+    expect(
+      serviceUrlForRequest(routable, "jellyfin", { host: "100.117.4.8:4000" }),
+    ).toBe("http://media.example.test:8096");
   });
 
   it("reads the qBittorrent key from env or the seeded config file", () => {
@@ -352,8 +360,9 @@ describe("config loading", () => {
     expect(config.host).toBe("0.0.0.0");
     expect(config.port).toBe(5000);
     expect(config.services.jellyfin.url).toBe("http://jellyfin:8096");
-    expect(config.jellyfinPublicUrl).toBe("https://media.example.test/jellyfin");
-    expect(config.jellyfinPublicUrlExplicit).toBe(true);
+    expect(config.services.jellyfin.publicUrl).toBe(
+      "https://media.example.test/jellyfin",
+    );
     expect(config.services.jellyfin.apiKey).toBe("jellyfin-key");
     expect(config.services.sonarr.url).toBe("http://sonarr:8989");
     expect(config.services.sonarr.apiKey).toBe("env-key");

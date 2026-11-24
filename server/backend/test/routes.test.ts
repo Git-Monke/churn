@@ -27,8 +27,6 @@ function makeConfig(overrides: Partial<AppConfig["services"]> = {}): AppConfig {
     sessionTtlMs: 12 * 60 * 60 * 1000,
     stateDir: path.join(serverDir, ".churn-state"),
     cookieSecure: "auto",
-    jellyfinPublicUrl: "http://jellyfin.test:8096",
-    jellyfinPublicUrlExplicit: true,
     services: {
       jellyfin: {
         id: "jellyfin",
@@ -5051,39 +5049,63 @@ describe("playback", () => {
     await app.close();
   });
 
-  it("redirects the media element to Jellyfin without exposing the token in the API body", async () => {
-    installFetch(() => {
-      throw new Error("the stream route should not call upstream with both ids");
+  it("proxies the media stream with Range support", async () => {
+    const fetchMock = installFetch((url) => {
+      if (url.includes("/Videos/item-1/stream?")) {
+        return new Response("video-bytes", {
+          status: 206,
+          headers: {
+            "content-type": "video/mp4",
+            "content-length": "11",
+            "content-range": "bytes 0-10/100",
+            "accept-ranges": "bytes",
+          },
+        });
+      }
+      throw new Error(`unexpected URL ${url}`);
     });
     const app = await buildAuthedServer(makeConfig());
     const response = await app.inject({
       method: "GET",
       url: "/api/playback/items/item-1/stream?mediaSourceId=source-1&playSessionId=session-1",
+      headers: { range: "bytes=0-10" },
     });
 
-    expect(response.statusCode).toBe(302);
+    expect(response.statusCode).toBe(206);
     expect(response.headers["cache-control"]).toBe("no-store");
     expect(response.headers["referrer-policy"]).toBe("no-referrer");
-    const location = String(response.headers.location);
-    expect(location).toContain(
-      "http://jellyfin.test:8096/Videos/item-1/stream?",
+    expect(response.headers["content-range"]).toBe("bytes 0-10/100");
+    expect(response.headers["content-length"]).toBe("11");
+    expect(response.body).toBe("video-bytes");
+
+    const call = fetchMock.mock.calls.find(([url]) =>
+      String(url).includes("/Videos/item-1/stream?"),
     );
-    expect(location).toContain("static=true");
-    expect(location).toContain("mediaSourceId=source-1");
-    expect(location).toContain("playSessionId=session-1");
-    expect(location).toContain("api_key=test-user-token");
+    expect(call).toBeDefined();
+    const [streamUrl, init] = call ?? [];
+    expect(String(streamUrl)).toMatch(
+      /^http:\/\/jellyfin\.test:8096\/Videos\/item-1\/stream\?/,
+    );
+    expect(String(streamUrl)).toContain("static=true");
+    expect(String(streamUrl)).not.toContain("api_key");
+    const headers = init?.headers as Record<string, string>;
+    expect(headers["X-Emby-Token"]).toBe("test-user-token");
+    expect(headers.range).toBe("bytes=0-10");
     await app.close();
   });
 
-  it("follows the host the browser used to reach Churn", async () => {
-    installFetch(() => {
-      throw new Error("the stream route should not call upstream with both ids");
+  it("fetches through the configured Jellyfin URL regardless of Host", async () => {
+    const fetchMock = installFetch((url) => {
+      if (url.includes("/Videos/item-1/stream?")) {
+        return new Response("video-bytes", {
+          headers: { "content-type": "video/mp4" },
+        });
+      }
+      throw new Error(`unexpected URL ${url}`);
     });
     const config = makeConfig({
       jellyfin: { id: "jellyfin", name: "Jellyfin", url: "http://127.0.0.1:8096" },
     });
-    config.jellyfinPublicUrl = "http://127.0.0.1:8096";
-    config.jellyfinPublicUrlExplicit = false;
 
     const app = await buildAuthedServer(config);
     const response = await app.inject({
@@ -5092,15 +5114,18 @@ describe("playback", () => {
       headers: { host: "100.117.4.8:5173" },
     });
 
-    expect(response.statusCode).toBe(302);
-    expect(String(response.headers.location)).toMatch(
-      /^http:\/\/100\.117\.4\.8:8096\/Videos\/item-1\/stream\?/,
+    expect(response.statusCode).toBe(200);
+    const streamUrl = fetchMock.mock.calls
+      .map(([url]) => String(url))
+      .find((url) => url.includes("/Videos/item-1/stream?"));
+    expect(streamUrl).toMatch(
+      /^http:\/\/127\.0\.0\.1:8096\/Videos\/item-1\/stream\?/,
     );
     await app.close();
   });
 
   it("uses HLS for sources the browser cannot decode directly", async () => {
-    installFetch((url) => {
+    const fetchMock = installFetch((url) => {
       if (url.includes("/PlaybackInfo?")) {
         return jsonResponse({
           PlaySessionId: "session-1",
@@ -5121,6 +5146,13 @@ describe("playback", () => {
       if (/\/Items\/item-1\?/.test(url)) {
         return jsonResponse(playbackItem);
       }
+      if (url.includes("/Videos/item-1/master.m3u8?")) {
+        return new Response(
+          "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=800000\n" +
+            "main.m3u8?MediaSourceId=source-1&PlaySessionId=session-1&api_key=test-user-token\n",
+          { headers: { "content-type": "application/vnd.apple.mpegurl" } },
+        );
+      }
       throw new Error(`unexpected URL ${url}`);
     });
 
@@ -5140,20 +5172,31 @@ describe("playback", () => {
       method: "GET",
       url: "/api/playback/items/item-1/hls.m3u8?mediaSourceId=source-1&playSessionId=session-1",
     });
-    expect(manifest.statusCode).toBe(302);
-    const location = String(manifest.headers.location);
-    expect(location).toContain("http://jellyfin.test:8096/Videos/item-1/master.m3u8?");
-    expect(location).toContain("VideoCodec=h264");
-    expect(location).toContain("AudioCodec=aac");
-    expect(location).toContain("MaxHeight=822");
-    expect(location).toContain("MediaSourceId=source-1");
-    expect(location).toContain("PlaySessionId=session-1");
-    expect(location).toContain("api_key=test-user-token");
+    expect(manifest.statusCode).toBe(200);
+    expect(manifest.headers["content-type"]).toContain(
+      "application/vnd.apple.mpegurl",
+    );
+    expect(manifest.body).toContain(
+      "/api/playback/items/item-1/jellyfin/main.m3u8",
+    );
+    expect(manifest.body).not.toContain("api_key");
+    expect(manifest.body).not.toContain("test-user-token");
+
+    const master = fetchMock.mock.calls
+      .map(([url]) => String(url))
+      .find((url) => url.includes("/Videos/item-1/master.m3u8?"));
+    expect(master).toBeDefined();
+    expect(master).toContain("VideoCodec=h264");
+    expect(master).toContain("AudioCodec=aac");
+    expect(master).toContain("MaxHeight=822");
+    expect(master).toContain("MediaSourceId=source-1");
+    expect(master).toContain("PlaySessionId=session-1");
+    expect(master).not.toContain("api_key");
     await app.close();
   });
 
   it("offers quality presets and forces a transcode for a chosen tier", async () => {
-    installFetch((url) => {
+    const fetchMock = installFetch((url) => {
       if (url.includes("/PlaybackInfo?")) {
         return jsonResponse({
           PlaySessionId: "session-1",
@@ -5173,6 +5216,11 @@ describe("playback", () => {
       }
       if (/\/Items\/item-1\?/.test(url)) {
         return jsonResponse(playbackItem);
+      }
+      if (url.includes("/Videos/item-1/master.m3u8?")) {
+        return new Response("#EXTM3U\nmain.m3u8\n", {
+          headers: { "content-type": "application/vnd.apple.mpegurl" },
+        });
       }
       throw new Error(`unexpected URL ${url}`);
     });
@@ -5203,15 +5251,18 @@ describe("playback", () => {
       method: "GET",
       url: "/api/playback/items/item-1/hls.m3u8?mediaSourceId=source-1&playSessionId=session-1&quality=medium",
     });
-    expect(manifest.statusCode).toBe(302);
-    const location = String(manifest.headers.location);
-    expect(location).toContain("MaxHeight=720");
-    expect(location).toContain("VideoBitrate=5000000");
+    expect(manifest.statusCode).toBe(200);
+    const master = fetchMock.mock.calls
+      .map(([url]) => String(url))
+      .find((url) => url.includes("/Videos/item-1/master.m3u8?"));
+    expect(master).toBeDefined();
+    expect(master).toContain("MaxHeight=720");
+    expect(master).toContain("VideoBitrate=5000000");
     await app.close();
   });
 
   it("falls back to max when the source cannot offer the remembered tier", async () => {
-    installFetch((url) => {
+    const fetchMock = installFetch((url) => {
       if (url.includes("/PlaybackInfo?")) {
         return jsonResponse({
           PlaySessionId: "session-1",
@@ -5231,6 +5282,11 @@ describe("playback", () => {
       }
       if (/\/Items\/item-1\?/.test(url)) {
         return jsonResponse(playbackItem);
+      }
+      if (url.includes("/Videos/item-1/master.m3u8?")) {
+        return new Response("#EXTM3U\nmain.m3u8\n", {
+          headers: { "content-type": "application/vnd.apple.mpegurl" },
+        });
       }
       throw new Error(`unexpected URL ${url}`);
     });
@@ -5258,8 +5314,11 @@ describe("playback", () => {
       method: "GET",
       url: "/api/playback/items/item-1/hls.m3u8?mediaSourceId=source-1&playSessionId=session-1&quality=medium",
     });
-    expect(manifest.statusCode).toBe(302);
-    expect(String(manifest.headers.location)).toContain("MaxHeight=1080");
+    expect(manifest.statusCode).toBe(200);
+    const master = fetchMock.mock.calls
+      .map(([url]) => String(url))
+      .find((url) => url.includes("/Videos/item-1/master.m3u8?"));
+    expect(master).toContain("MaxHeight=1080");
     await app.close();
   });
 
@@ -5279,17 +5338,116 @@ describe("playback", () => {
   });
 
   it("fills missing stream ids from PlaybackInfo", async () => {
-    installPlaybackFetch();
+    const fetchMock = installFetch((url) => {
+      if (url.includes("/PlaybackInfo?")) {
+        return jsonResponse(playbackInfo);
+      }
+      if (url.includes("/Videos/item-1/stream?")) {
+        return new Response("video-bytes", {
+          headers: { "content-type": "video/mp4" },
+        });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
     const app = await buildAuthedServer(makeConfig());
     const response = await app.inject({
       method: "GET",
       url: "/api/playback/items/item-1/stream",
     });
 
-    expect(response.statusCode).toBe(302);
-    const location = String(response.headers.location);
-    expect(location).toContain("mediaSourceId=source-1");
-    expect(location).toContain("playSessionId=session-1");
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toBe("video-bytes");
+    const streamUrl = fetchMock.mock.calls
+      .map(([url]) => String(url))
+      .find((url) => url.includes("/Videos/item-1/stream?"));
+    expect(streamUrl).toContain("mediaSourceId=source-1");
+    expect(streamUrl).toContain("playSessionId=session-1");
+    await app.close();
+  });
+
+  it("proxies and rewrites an HLS child playlist", async () => {
+    installFetch((url) => {
+      if (url.includes("/Videos/item-1/main.m3u8?PlaySessionId=session-1")) {
+        return new Response(
+          "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6.0,\n" +
+            "hls1/main/0.ts?PlaySessionId=session-1&api_key=secret\n",
+          { headers: { "content-type": "application/vnd.apple.mpegurl" } },
+        );
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+    const app = await buildAuthedServer(makeConfig());
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/playback/items/item-1/jellyfin/main.m3u8?PlaySessionId=session-1",
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toContain(
+      "/api/playback/items/item-1/jellyfin/hls1/main/0.ts?PlaySessionId=session-1",
+    );
+    expect(response.body).not.toContain("api_key");
+    await app.close();
+  });
+
+  it("proxies an HLS segment as bytes", async () => {
+    installFetch((url) => {
+      if (url.includes("/Videos/item-1/hls1/main/0.ts")) {
+        return new Response("ts-bytes", {
+          headers: { "content-type": "video/mp2t" },
+        });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+    const app = await buildAuthedServer(makeConfig());
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/playback/items/item-1/jellyfin/hls1/main/0.ts",
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toBe("ts-bytes");
+    expect(response.headers["content-type"]).toContain("video/mp2t");
+    await app.close();
+  });
+
+  it("rejects path escapes", async () => {
+    installFetch(() => {
+      throw new Error("should not reach Jellyfin");
+    });
+    const app = await buildAuthedServer(makeConfig());
+    // The router normalises a literal `..` segment into a path that matches no
+    // route; an encoded slash reaches the handler, whose validator rejects it.
+    for (const asset of ["%2e%2e/System/Info", "..%2FSystem/Info"]) {
+      const response = await app.inject({
+        method: "GET",
+        url: `/api/playback/items/item-1/jellyfin/${asset}`,
+      });
+      expect(response.statusCode).toBe(404);
+    }
+    const encoded = await app.inject({
+      method: "GET",
+      url: "/api/playback/items/item-1/jellyfin/..%2FSystem/Info",
+    });
+    expect(encoded.json().error.code).toBe("playback_asset_not_found");
+    await app.close();
+  });
+
+  it("expires the session when Jellyfin rejects the stream token", async () => {
+    installFetch((url) => {
+      if (url.includes("/Videos/item-1/stream?")) {
+        return new Response("no", { status: 401 });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+    const app = await buildAuthedServer(makeConfig());
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/playback/items/item-1/stream?mediaSourceId=source-1&playSessionId=session-1",
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json().error.code).toBe("session_expired");
     await app.close();
   });
 
