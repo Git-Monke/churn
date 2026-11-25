@@ -387,6 +387,18 @@
   }
 }
 
+/* The desktop rule reserves 19rem for page chrome. On a short landscape
+   phone that leaves only a sliver of width, so let the player use the screen. */
+.churn-player-frame {
+  max-width: calc((100dvh - 19rem) * 16 / 9);
+}
+
+@media (max-height: 34rem) {
+  .churn-player-frame {
+    max-width: none;
+  }
+}
+
 .churn-player-frame:fullscreen {
   width: 100%;
   height: 100%;

@@ -21,6 +21,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/features/auth/AuthProvider";
@@ -294,10 +295,9 @@ export function LoginPage() {
                     <Label htmlFor="profile-password">
                       {selected.passwordSet ? "Password" : "PIN"}
                     </Label>
-                    <Input
+                    <PasswordInput
                       id="profile-password"
                       name="password"
-                      type="password"
                       inputMode={selected.passwordSet ? undefined : "numeric"}
                       autoComplete="current-password"
                       autoFocus={!passkeySetup}
@@ -309,10 +309,9 @@ export function LoginPage() {
                 ) : (
                   <div className="flex flex-col gap-2">
                     <Label htmlFor="profile-new-password">New password</Label>
-                    <Input
+                    <PasswordInput
                       id="profile-new-password"
                       name="new-password"
-                      type="password"
                       autoComplete="new-password"
                       autoFocus
                       value={newPassword}
@@ -559,10 +558,9 @@ function AdminSignIn({
           </div>
           <div className="flex flex-col gap-2">
             <Label htmlFor="password">Password</Label>
-            <Input
+            <PasswordInput
               id="password"
               name="password"
-              type="password"
               autoComplete="current-password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}

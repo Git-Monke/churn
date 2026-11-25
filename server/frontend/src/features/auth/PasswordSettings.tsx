@@ -4,7 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { ApiClientError, changePassword } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 
 export function PasswordSettings({ onClose }: { onClose: () => void }) {
@@ -45,9 +45,8 @@ export function PasswordSettings({ onClose }: { onClose: () => void }) {
         <form onSubmit={(event) => void submit(event)} className="flex flex-col gap-3">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="current-password">Current password</Label>
-            <Input
+            <PasswordInput
               id="current-password"
-              type="password"
               autoComplete="current-password"
               value={currentPassword}
               onChange={(event) => setCurrentPassword(event.target.value)}
@@ -56,9 +55,8 @@ export function PasswordSettings({ onClose }: { onClose: () => void }) {
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="new-password">New password</Label>
-            <Input
+            <PasswordInput
               id="new-password"
-              type="password"
               autoComplete="new-password"
               value={newPassword}
               onChange={(event) => setNewPassword(event.target.value)}
@@ -70,9 +68,8 @@ export function PasswordSettings({ onClose }: { onClose: () => void }) {
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="confirm-password">Confirm new password</Label>
-            <Input
+            <PasswordInput
               id="confirm-password"
-              type="password"
               autoComplete="new-password"
               value={confirm}
               onChange={(event) => setConfirm(event.target.value)}

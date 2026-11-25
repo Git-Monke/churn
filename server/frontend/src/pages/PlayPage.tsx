@@ -1223,7 +1223,7 @@ export function PlayPage({
       </a>
       <div
         ref={frameRef}
-        className="churn-player-frame relative mx-auto aspect-video w-full max-w-[calc((100dvh_-_19rem)*16/9)] overflow-hidden bg-black"
+        className="churn-player-frame relative mx-auto aspect-video w-full overflow-hidden bg-black"
       >
         <video
           ref={videoRef}
@@ -1371,7 +1371,7 @@ function PlaybackLoading() {
   return (
     <div className="flex flex-col gap-5">
       <Skeleton className="h-5 w-44" />
-      <Skeleton className="mx-auto aspect-video w-full max-w-[calc((100dvh_-_19rem)*16/9)]" />
+      <Skeleton className="churn-player-frame mx-auto aspect-video w-full" />
       <div className="flex flex-wrap items-start justify-between gap-6">
         <div className="flex min-w-0 flex-[999_1_480px] flex-col gap-2.5">
           <Skeleton className="h-8 w-72" />
