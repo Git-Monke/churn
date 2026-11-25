@@ -1,4 +1,4 @@
-import { ChevronDownIcon, FingerprintIcon, LogOutIcon, UsersIcon } from "lucide-react";
+import { ChevronDownIcon, FingerprintIcon, KeyRoundIcon, LogOutIcon, UsersIcon } from "lucide-react";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,7 @@ import { cn } from "@/lib/utils";
 interface AppHeaderProps {
   route: AppRoute;
   onManagePasskeys: () => void;
+  onChangePassword: () => void;
 }
 
 const NAV_ITEMS = [
@@ -28,7 +29,7 @@ const NAV_ITEMS = [
   { page: "services", label: "Status", href: "#/services" },
 ] as const;
 
-export function AppHeader({ route, onManagePasskeys }: AppHeaderProps) {
+export function AppHeader({ route, onManagePasskeys, onChangePassword }: AppHeaderProps) {
   const { session, logout, isPending } = useAuth();
   const { available: passkeysAvailable } = usePasskeyAvailability();
   const activePage = route.page === "show" || route.page === "movie" || route.page === "play" ? "library" : route.page;
@@ -94,6 +95,12 @@ export function AppHeader({ route, onManagePasskeys }: AppHeaderProps) {
                     <DropdownMenuItem onSelect={onManagePasskeys}>
                       <FingerprintIcon />
                       Passkeys
+                    </DropdownMenuItem>
+                  ) : null}
+                  {session?.kind === "profile" ? (
+                    <DropdownMenuItem onSelect={onChangePassword}>
+                      <KeyRoundIcon />
+                      Change password
                     </DropdownMenuItem>
                   ) : null}
                   <DropdownMenuItem

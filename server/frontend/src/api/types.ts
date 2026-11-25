@@ -44,6 +44,11 @@ export interface ProfileLoginInput {
   newPassword?: string;
 }
 
+export interface PasswordChangeInput {
+  currentPassword: string;
+  newPassword: string;
+}
+
 export interface ProfileLoginResponse {
   authenticated?: true;
   passwordSetupRequired?: true;

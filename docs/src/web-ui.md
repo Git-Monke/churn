@@ -50,7 +50,7 @@ change the values compose interpolates; a rerun repairs the permissions.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `HOST` | `0.0.0.0` in the compose container | Backend bind address |
+| `HOST` | `127.0.0.1` in the compose container | Backend bind address |
 | `PORT` | `4001` in dev, `4000` in production | Backend port (`DASHBOARD_PORT` in compose) |
 | `JELLYFIN_URL` | `http://127.0.0.1:8096` | Jellyfin base URL used by the backend |
 | `JELLYFIN_PUBLIC_URL` | request host, LAN address as fallback | Browser-facing Jellyfin URL for service links and redirects |

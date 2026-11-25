@@ -22,6 +22,7 @@ import { createPasskeyStore } from "./passkey-store.js";
 import { registerPasskeyRoutes } from "./routes/passkeys.js";
 import { createReleaseSearchService } from "./release-search.js";
 import { createReleaseEventStore } from "./release-events.js";
+import { registerSecurityHeaders } from "./security-headers.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerActivityRoutes } from "./routes/activity.js";
 import { registerHealthRoutes } from "./routes/health.js";
@@ -46,7 +47,11 @@ export async function buildServer(
   config: AppConfig,
   options: BuildServerOptions = {},
 ): Promise<FastifyInstance> {
-  const app = Fastify({ logger: options.logger ?? false });
+  // Funnel is the only proxy in front of the app and it connects from loopback,
+  // so trust forwarded headers only from there: remote clients cannot spoof
+  // request.ip, and request.protocol is https under Funnel.
+  const app = Fastify({ logger: options.logger ?? false, trustProxy: "loopback" });
+  registerSecurityHeaders(app);
   mkdirSync(config.stateDir, { recursive: true });
   const passkeyStore = createPasskeyStore(config.stateDir);
   const sessionStore = createMemorySessionStore({

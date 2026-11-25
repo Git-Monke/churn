@@ -89,8 +89,9 @@ services:
 
   # Web dashboard. The image is built by CI and pinned in .env by the
   # installer. Host networking keeps every upstream on 127.0.0.1 (including
-  # the loopback-only VPN status agent) and lets the backend discover the
-  # host's LAN address for browser-facing Jellyfin streams.
+  # the loopback-only VPN status agent). The dashboard itself binds
+  # 127.0.0.1 and is reached by browsers through the Tailscale Funnel URL,
+  # not through the host's LAN address.
   dashboard:
     # The installer pins CHURN_DASHBOARD_IMAGE to the matching release tag.
     # `latest` is only a safety net for older installs (for example a compose
@@ -108,7 +109,7 @@ services:
     pull_policy: missing
     environment:
       - NODE_ENV=production
-      - HOST=0.0.0.0
+      - HOST=127.0.0.1
       - PORT=${DASHBOARD_PORT:-4000}
       - CHURN_SERVER_DIR=/app
       - CHURN_STATE_DIR=/app/state

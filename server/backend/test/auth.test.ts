@@ -622,8 +622,8 @@ describe("household profiles", () => {
           CurrentPw?: string;
           NewPw: string;
         };
-        if (body.CurrentPw !== undefined) {
-          expect(body.CurrentPw).toBe(state.pin);
+        if (body.CurrentPw !== undefined && body.CurrentPw !== (state.password ?? state.pin)) {
+          return jsonResponse({}, 401);
         }
         state.password = body.NewPw;
         return new Response(null, { status: 204 });
@@ -767,7 +767,7 @@ describe("household profiles", () => {
       payload: {
         profileId: created.profile.id,
         password: created.pin,
-        newPassword: "a-strong-password",
+        newPassword: "Jac0b-Strong-P4ss",
       },
     });
     expect(completed.statusCode).toBe(200);
@@ -802,10 +802,124 @@ describe("household profiles", () => {
     const later = await app.inject({
       method: "POST",
       url: "/api/auth/profile-login",
-      payload: { profileId: created.profile.id, password: "a-strong-password" },
+      payload: { profileId: created.profile.id, password: "Jac0b-Strong-P4ss" },
     });
     expect(later.statusCode).toBe(200);
     expect(later.json()).toMatchObject({ kind: "profile", authenticated: true });
+    await app.close();
+  });
+
+  async function setupProfile() {
+    const state: HouseholdState = { pin: "", jellyfinUserId: "jf-jacob" };
+    installHouseholdFetch(state);
+    const app = await buildServer(makeConfig());
+    const { cookie: adminCookie } = await login(app);
+    const created = await createJacob(app, adminCookie as string);
+    state.profileId = created.profile.id;
+    const completed = await app.inject({
+      method: "POST",
+      url: "/api/auth/profile-login",
+      payload: {
+        profileId: created.profile.id,
+        password: created.pin,
+        newPassword: "Jac0b-Strong-P4ss",
+      },
+    });
+    expect(completed.statusCode).toBe(200);
+    const setCookie = completed.headers["set-cookie"];
+    const profileCookie = (Array.isArray(setCookie) ? setCookie[0] : setCookie)?.split(";")[0] as string;
+    return { state, app, adminCookie: adminCookie as string, created, profileCookie };
+  }
+
+  it("rejects weak self-chosen passwords", async () => {
+    const state: HouseholdState = { pin: "", jellyfinUserId: "jf-jacob" };
+    installHouseholdFetch(state);
+    const app = await buildServer(makeConfig());
+    const { cookie: adminCookie } = await login(app);
+    const created = await createJacob(app, adminCookie as string);
+    state.profileId = created.profile.id;
+
+    const cases: Array<[string, string]> = [
+      ["short-one", "Use at least 12 characters"],
+      ["alllowercase1", "Include an uppercase letter"],
+      ["ALLUPPERCASE1", "Include a lowercase letter"],
+      ["NoNumber-Here", "Include a number"],
+      ["NoSymbol1234", "Include a symbol"],
+      [created.pin, "Choose a password different from the one you signed in with"],
+    ];
+    for (const [newPassword, message] of cases) {
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/auth/profile-login",
+        payload: { profileId: created.profile.id, password: created.pin, newPassword },
+      });
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toMatchObject({ code: "invalid_password", message });
+    }
+    await app.close();
+  });
+
+  it("lets a person change their own password and signs out their sessions", async () => {
+    const { app, profileCookie, created } = await setupProfile();
+    const changed = await injectWithCookie(app, profileCookie, {
+      method: "POST",
+      url: "/api/auth/profile-password",
+      payload: { currentPassword: "Jac0b-Strong-P4ss", newPassword: "Jac0b-Sec0nd-P4ss" },
+    });
+    expect(changed.statusCode).toBe(200);
+    expect(changed.json()).toEqual({ updated: true });
+
+    const session = await injectWithCookie(app, profileCookie, {
+      method: "GET",
+      url: "/api/auth/session",
+    });
+    expect(session.json()).toEqual({ authenticated: false });
+
+    const oldPassword = await app.inject({
+      method: "POST",
+      url: "/api/auth/profile-login",
+      payload: { profileId: created.profile.id, password: "Jac0b-Strong-P4ss" },
+    });
+    expect(oldPassword.statusCode).toBe(401);
+
+    const newPassword = await app.inject({
+      method: "POST",
+      url: "/api/auth/profile-login",
+      payload: { profileId: created.profile.id, password: "Jac0b-Sec0nd-P4ss" },
+    });
+    expect(newPassword.statusCode).toBe(200);
+    expect(newPassword.json()).toMatchObject({ authenticated: true, kind: "profile" });
+    await app.close();
+  });
+
+  it("guards password changes with the current password and a profile session", async () => {
+    const { app, profileCookie, adminCookie } = await setupProfile();
+    const wrong = await injectWithCookie(app, profileCookie, {
+      method: "POST",
+      url: "/api/auth/profile-password",
+      payload: { currentPassword: "wrong-Passw0rd", newPassword: "Jac0b-Sec0nd-P4ss" },
+    });
+    expect(wrong.statusCode).toBe(401);
+    expect(wrong.json().error.code).toBe("invalid_credentials");
+
+    const same = await injectWithCookie(app, profileCookie, {
+      method: "POST",
+      url: "/api/auth/profile-password",
+      payload: { currentPassword: "Jac0b-Strong-P4ss", newPassword: "Jac0b-Strong-P4ss" },
+    });
+    expect(same.statusCode).toBe(400);
+    expect(same.json().error).toMatchObject({
+      code: "invalid_password",
+      message: "Choose a password different from the one you signed in with",
+    });
+
+    const admin = await injectWithCookie(app, adminCookie, {
+      method: "POST",
+      url: "/api/auth/profile-password",
+      payload: { currentPassword: "secret", newPassword: "Jac0b-Sec0nd-P4ss" },
+    });
+    expect(admin.statusCode).toBe(403);
+    expect(admin.json().error.code).toBe("profile_required");
     await app.close();
   });
 
@@ -823,7 +937,7 @@ describe("household profiles", () => {
       payload: {
         profileId: created.profile.id,
         password: created.pin,
-        newPassword: "a-strong-password",
+        newPassword: "Jac0b-Strong-P4ss",
       },
     });
     const profileCookie = (

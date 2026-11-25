@@ -6,6 +6,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 import type { AppConfig } from "../config.js";
 import {
+  requireAuth,
   SESSION_COOKIE_NAME,
   sessionCookieOptions,
   sessionExpiresAt,
@@ -33,6 +34,22 @@ interface ProfileLoginBody {
   profileId: string;
   password: string;
   newPassword?: string;
+}
+
+const PASSWORD_MIN_LENGTH = 12;
+
+/** Rules a person's self-chosen password must satisfy; shared by first set and rotation. */
+function passwordProblem(password: string, previous?: string): string | undefined {
+  if (previous !== undefined && password === previous) {
+    return "Choose a password different from the one you signed in with";
+  }
+  if (password.length < PASSWORD_MIN_LENGTH) return `Use at least ${PASSWORD_MIN_LENGTH} characters`;
+  if (password.length > 1024) return "Password is too long";
+  if (!/[a-z]/.test(password)) return "Include a lowercase letter";
+  if (!/[A-Z]/.test(password)) return "Include an uppercase letter";
+  if (!/[0-9]/.test(password)) return "Include a number";
+  if (!/[^A-Za-z0-9]/.test(password)) return "Include a symbol";
+  return undefined;
 }
 
 export function registerAuthRoutes(
@@ -161,13 +178,6 @@ export function registerAuthRoutes(
 
     let accessToken = result.AccessToken;
     if (pendingPin && body.newPassword !== undefined) {
-      if (body.newPassword === body.password) {
-        throw new ApiError(
-          400,
-          "invalid_password",
-          "Choose a password different from the PIN",
-        );
-      }
       const userClient = createJellyfinClient(
         service,
         config.requestTimeoutMs,
@@ -221,6 +231,59 @@ export function registerAuthRoutes(
     });
     setSessionCookie(reply, request, config, session.cookieValue);
     return sessionPayload(config, user, "profile", session.record, profile.id);
+  });
+
+  app.post<{ Body: unknown }>("/api/auth/profile-password", async (request, reply) => {
+    reply.header("cache-control", "no-store");
+    const auth = requireAuth(request);
+    const profile = auth.profileId ? deps.store.getProfile(auth.profileId) : undefined;
+    if (!profile) {
+      throw new ApiError(403, "profile_required", "Sign in as a person to change your password");
+    }
+
+    const body = parsePasswordChangeBody(request.body);
+    const problem = passwordProblem(body.newPassword, body.currentPassword);
+    if (problem) {
+      throw new ApiError(400, "invalid_password", problem);
+    }
+
+    const throttleKey = `profile-password:${request.ip}|${profile.id}`;
+    const decision = deps.throttle.check(throttleKey);
+    if (!decision.allowed) {
+      reply.header("retry-after", String(decision.retryAfterSeconds ?? 60));
+      throw new ApiError(429, "too_many_attempts", "Too many attempts. Try again later.");
+    }
+
+    const userClient = createJellyfinClient(
+      config.services.jellyfin,
+      config.requestTimeoutMs,
+      auth.accessToken,
+      { deviceId: auth.deviceId },
+    );
+    try {
+      await userClient.setUserPassword(profile.jellyfinUserId, body.newPassword, {
+        currentPassword: body.currentPassword,
+      });
+    } catch (error) {
+      if (isUnauthorized(error)) {
+        deps.throttle.recordFailure(throttleKey);
+        throw new ApiError(401, "invalid_credentials", "The current password was incorrect");
+      }
+      if (error instanceof UpstreamError) {
+        throw new ApiError(502, "jellyfin_password_failed", error.message);
+      }
+      throw error;
+    }
+
+    deps.throttle.reset(throttleKey);
+    deps.store.destroyAllForUser(profile.jellyfinUserId);
+    reply.clearCookie(SESSION_COOKIE_NAME, {
+      path: "/",
+      httpOnly: true,
+      sameSite: "lax",
+      secure: sessionCookieOptions(request, config.cookieSecure).secure,
+    });
+    return { updated: true };
   });
 
   app.post("/api/auth/logout", async (request, reply) => {
@@ -286,6 +349,27 @@ function parseLoginBody(body: unknown): LoginBody {
   return { username, password };
 }
 
+interface PasswordChangeBody {
+  currentPassword: string;
+  newPassword: string;
+}
+
+function parsePasswordChangeBody(body: unknown): PasswordChangeBody {
+  if (typeof body !== "object" || body === null) {
+    throw new ApiError(400, "invalid_request", "Enter your current and new password");
+  }
+  const record = body as Record<string, unknown>;
+  const currentPassword = typeof record.currentPassword === "string" ? record.currentPassword : "";
+  const newPassword = typeof record.newPassword === "string" ? record.newPassword : "";
+  if (!currentPassword || !newPassword) {
+    throw new ApiError(400, "invalid_request", "Enter your current and new password");
+  }
+  if (currentPassword.length > 1024) {
+    throw new ApiError(400, "invalid_request", "Password is too long");
+  }
+  return { currentPassword, newPassword };
+}
+
 function parseProfileLoginBody(body: unknown): ProfileLoginBody {
   if (typeof body !== "object" || body === null) {
     throw new ApiError(400, "invalid_request", "Person and password are required");
@@ -305,11 +389,12 @@ function parseProfileLoginBody(body: unknown): ProfileLoginBody {
   if (record.newPassword === undefined) {
     return { profileId, password };
   }
-  if (typeof record.newPassword !== "string" || record.newPassword.length < 8) {
-    throw new ApiError(400, "invalid_password", "Use at least 8 characters for the new password");
+  if (typeof record.newPassword !== "string") {
+    throw new ApiError(400, "invalid_password", "Choose a stronger password");
   }
-  if (record.newPassword.length > 1024) {
-    throw new ApiError(400, "invalid_password", "Password is too long");
+  const problem = passwordProblem(record.newPassword, password);
+  if (problem) {
+    throw new ApiError(400, "invalid_password", problem);
   }
   return { profileId, password, newPassword: record.newPassword };
 }

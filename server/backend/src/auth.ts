@@ -644,6 +644,7 @@ interface LoginThrottleOptions {
 export function createLoginThrottle(options: LoginThrottleOptions = {}): LoginThrottle {
   const maxFailures = options.maxFailures ?? 10;
   const windowMs = options.windowMs ?? 15 * 60 * 1000;
+  const MAX_ENTRIES = 10_000;
   const now = options.now ?? Date.now;
   const entries = new Map<string, ThrottleEntry>();
 
@@ -673,11 +674,20 @@ export function createLoginThrottle(options: LoginThrottleOptions = {}): LoginTh
 
     recordFailure(key) {
       const entry = activeEntry(key);
-      if (!entry) {
-        entries.set(key, { failures: 1, resetAt: now() + windowMs });
+      if (entry) {
+        entry.failures += 1;
         return;
       }
-      entry.failures += 1;
+      if (entries.size >= MAX_ENTRIES) {
+        for (const [candidate, value] of entries) {
+          if (now() >= value.resetAt) entries.delete(candidate);
+        }
+        if (entries.size >= MAX_ENTRIES) {
+          const oldest = entries.keys().next().value;
+          if (oldest !== undefined) entries.delete(oldest);
+        }
+      }
+      entries.set(key, { failures: 1, resetAt: now() + windowMs });
     },
 
     reset(key) {

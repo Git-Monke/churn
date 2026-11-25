@@ -147,8 +147,8 @@ export function LoginPage() {
 
     try {
       if (!selected.passwordSet && passwordStep === "newPassword") {
-        if (newPassword.length < 8) {
-          setError("Choose a password with at least 8 characters.");
+        if (newPassword.length < 12) {
+          setError("Choose a password with at least 12 characters, upper and lower case, a number, and a symbol.");
           return;
         }
         await profileLogin({

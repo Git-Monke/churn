@@ -16,6 +16,7 @@ import type {
   LoginInput,
   LoginResponse,
   ManagedProfile,
+  PasswordChangeInput,
   ProfileLoginInput,
   ProfileLoginResponse,
   ProfileSummary,
@@ -110,6 +111,10 @@ export function fetchProfiles(): Promise<ProfileSummary[]> {
 
 export function profileLogin(input: ProfileLoginInput): Promise<ProfileLoginResponse> {
   return postJson<ProfileLoginResponse>("/api/auth/profile-login", input);
+}
+
+export function changePassword(input: PasswordChangeInput): Promise<{ updated: true }> {
+  return postJson<{ updated: true }>("/api/auth/profile-password", input);
 }
 
 const PASSKEYS_PATH = "/api/auth/passkeys";

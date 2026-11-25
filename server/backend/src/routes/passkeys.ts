@@ -26,6 +26,7 @@ import { mapAuthUser, sessionPayload, setSessionCookie } from "./auth.js";
 
 const TTL = 5 * 60_000;
 const MAX_CHALLENGES = 256;
+const MAX_CHALLENGES_PER_CLIENT = 16;
 const MAX_KEYS = 20;
 
 interface PendingRegistration {
@@ -39,6 +40,7 @@ interface PendingRegistration {
 interface Challenge {
   expected: string;
   expiresAt: number;
+  ip: string;
   registration?: PendingRegistration;
 }
 
@@ -116,9 +118,13 @@ export function registerPasskeyRoutes(
     return origin;
   }
 
-  function ensureRoom() {
+  function ensureRoom(ip: string) {
     cleanExpired();
-    if (challenges.size >= MAX_CHALLENGES) {
+    let mine = 0;
+    for (const challenge of challenges.values()) {
+      if (challenge.ip === ip) mine += 1;
+    }
+    if (mine >= MAX_CHALLENGES_PER_CLIENT || challenges.size >= MAX_CHALLENGES) {
       throw new ApiError(429, "too_many_challenges", "Too many passkey attempts. Try again shortly.");
     }
   }
@@ -147,10 +153,10 @@ export function registerPasskeyRoutes(
     if (challenge.registration) void revoke(challenge.registration);
   }
 
-  function issue(reply: FastifyReply, expected: string, registration?: PendingRegistration) {
-    ensureRoom();
+  function issue(request: FastifyRequest, reply: FastifyReply, expected: string, registration?: PendingRegistration) {
+    ensureRoom(request.ip);
     const id = randomUUID();
-    challenges.set(id, { expected, registration, expiresAt: Date.now() + TTL });
+    challenges.set(id, { expected, registration, ip: request.ip, expiresAt: Date.now() + TTL });
     reply.setCookie(cookieName(!!registration), id, {
       httpOnly: true, sameSite: "strict", secure: origin?.startsWith("https:"),
       path: "/api/auth/passkeys", maxAge: TTL / 1000,
@@ -215,7 +221,7 @@ export function registerPasskeyRoutes(
     const key = `passkey-register:${request.ip}|${typeof profileId === "string" ? profileId : accountName.toLowerCase()}`;
     limit(key, reply);
     const profile = typeof profileId === "string" ? enrollableProfile(profileId) : undefined;
-    ensureRoom();
+    ensureRoom(request.ip);
     const previous = take(request, reply, true);
     if (previous?.registration) void revoke(previous.registration);
 
@@ -249,7 +255,7 @@ export function registerPasskeyRoutes(
           .filter((record) => record.origin === origin && record.profileId === profile?.id)
           .map(({ id }) => ({ id })),
       });
-      issue(reply, options.challenge, {
+      issue(request, reply, options.challenge, {
         label: label.trim(), user, profileId: profile?.id, deviceId, accessToken,
       });
       throttle.reset(key);
@@ -323,7 +329,7 @@ export function registerPasskeyRoutes(
     const options = await generateAuthenticationOptions({
       rpID: new URL(expectedOrigin).hostname, userVerification: "required", timeout: TTL,
     });
-    issue(reply, options.challenge);
+    issue(request, reply, options.challenge);
     return options;
   });
 
@@ -332,9 +338,10 @@ export function registerPasskeyRoutes(
     const key = `passkey-auth:${request.ip}`;
     limit(key, reply);
     const challenge = take(request, reply, false);
+    if (!challenge) throw rejected();
     const response = jsonObject(request.body) as unknown as AuthenticationResponseJSON;
     const record = store.get(response.id);
-    if (!challenge || !record || record.origin !== expectedOrigin ||
+    if (!record || record.origin !== expectedOrigin ||
         response.response?.userHandle !== passkeyHandle(expectedOrigin, record.userId, record.profileId).toString("base64url")) {
       throttle.recordFailure(key);
       throw rejected();

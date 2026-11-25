@@ -7,6 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { AppHeader } from "@/components/AppHeader";
 import { AuthProvider, useAuth } from "@/features/auth/AuthProvider";
 import { PasskeySettings } from "@/features/auth/PasskeySettings";
+import { PasswordSettings } from "@/features/auth/PasswordSettings";
 import { useLibraryPosterNavigation } from "@/features/library/use-library-poster-navigation";
 import { LibraryPage } from "@/pages/LibraryPage";
 import { LoginPage } from "@/pages/LoginPage";
@@ -31,10 +32,14 @@ export default function App() {
 function AppShell() {
   const { session, isLoading } = useAuth();
   const [showPasskeys, setShowPasskeys] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const authenticated = session?.authenticated === true && !!session.user;
 
   useEffect(() => {
-    if (!authenticated) setShowPasskeys(false);
+    if (!authenticated) {
+      setShowPasskeys(false);
+      setShowPassword(false);
+    }
   }, [authenticated]);
 
   if (isLoading) {
@@ -45,13 +50,20 @@ function AppShell() {
   }
   return (
     <>
-      <Dashboard onManagePasskeys={() => setShowPasskeys(true)} />
+      <Dashboard
+        onManagePasskeys={() => setShowPasskeys(true)}
+        onChangePassword={() => setShowPassword(true)}
+      />
       {showPasskeys ? <PasskeySettings onClose={() => setShowPasskeys(false)} /> : null}
+      {showPassword ? <PasswordSettings onClose={() => setShowPassword(false)} /> : null}
     </>
   );
 }
 
-function Dashboard({ onManagePasskeys }: { onManagePasskeys: () => void }) {
+function Dashboard({ onManagePasskeys, onChangePassword }: {
+  onManagePasskeys: () => void;
+  onChangePassword: () => void;
+}) {
   const { route, poster, keepLibrary, main, onLibraryClick } = useLibraryPosterNavigation();
   const { session, signedIn } = useAuth();
   const isAdmin = session?.user?.isAdmin === true;
@@ -74,7 +86,11 @@ function Dashboard({ onManagePasskeys }: { onManagePasskeys: () => void }) {
 
   return (
     <div className={`flex min-h-dvh w-full flex-col${signedIn ? " motion-signin-arrive" : ""}`}>
-      <AppHeader route={route} onManagePasskeys={onManagePasskeys} />
+      <AppHeader
+        route={route}
+        onManagePasskeys={onManagePasskeys}
+        onChangePassword={onChangePassword}
+      />
       <main ref={main} tabIndex={-1} data-title-from-library={poster ? "" : undefined} className="mx-auto flex w-full max-w-content flex-1 flex-col gap-8 px-4 py-6 sm:px-6 lg:px-10">
         {route.page === "services" ? (
           <ServicesPage
