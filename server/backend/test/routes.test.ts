@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AppConfig } from "../src/config.js";
+import { mediaOwnerTag } from "../src/direct-grab.js";
 import { buildServer } from "../src/server.js";
 
 let testServerCounter = 0;
@@ -196,6 +197,26 @@ async function waitForCachedReleases(
 ): Promise<Record<string, any>> {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     const response = await app.inject({ method: "GET", url });
+    const body = response.json() as Record<string, any>;
+    if (body.state === "ready" || body.state === "error") {
+      return body;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error(`release cache did not become ready for ${url}`);
+}
+
+async function waitForCachedReleasesAs(
+  app: Awaited<ReturnType<typeof buildServer>>,
+  cookie: string,
+  url: string,
+): Promise<Record<string, any>> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const response = await app.inject({
+      method: "GET",
+      url,
+      headers: { cookie },
+    });
     const body = response.json() as Record<string, any>;
     if (body.state === "ready" || body.state === "error") {
       return body;
@@ -2514,7 +2535,9 @@ describe("create requests", () => {
     );
     expect(qbittorrentAdd?.get("savepath")).toBe("/data/media/movies/Dune (2021)");
     expect(qbittorrentAdd?.get("category")).toBe("movies");
-    expect(qbittorrentAdd?.get("tags")).toBe("churn-direct,churn-movie-7");
+    const addedTags = qbittorrentAdd?.get("tags")?.split(",") ?? [];
+    expect(addedTags.slice(0, 2)).toEqual(["churn-direct", "churn-movie-7"]);
+    expect(addedTags[2]).toMatch(/^churn-user-[0-9a-f]{16}$/);
     expect(qbittorrentAdd?.get("contentLayout")).toBe("NoSubfolder");
     expect(radarrReleaseSearches).toHaveLength(0);
     expect(radarrGrab).toBeUndefined();
@@ -2746,6 +2769,420 @@ describe("create requests", () => {
   });
 });
 
+
+describe("disk shares", () => {
+  const GIGABYTE = 1024 ** 3;
+  const TERABYTE = 1024 ** 4;
+
+  async function startSessions(
+    app: Awaited<ReturnType<typeof buildServer>>,
+    profileName: string,
+    jellyfinUserId: string,
+  ) {
+    const profile = app.sessionStore.createProfile({
+      name: profileName,
+      jellyfinUserId,
+      initialPin: null,
+    });
+    const admin = app.sessionStore.create(
+      { id: "admin-id", name: "Admin", isAdmin: true },
+      "admin-token",
+      { kind: "admin" },
+    );
+    const person = app.sessionStore.create(
+      { id: jellyfinUserId, name: profileName, isAdmin: false },
+      "profile-token",
+      { kind: "profile", profileId: profile.id },
+    );
+    return {
+      profile,
+      admin: `churn_session=${admin.cookieValue}`,
+      person: `churn_session=${person.cookieValue}`,
+    };
+  }
+
+  it("rejects a grab that exceeds the person's share", async () => {
+    const adds: URLSearchParams[] = [];
+    const duneReleases = [
+      {
+        guid: "dune-big",
+        title: "Dune.2021.1080p.BluRay.x264",
+        size: 11 * GIGABYTE,
+        seeders: 84,
+        leechers: 2,
+        indexerId: 2,
+        indexer: "YTS",
+        protocol: "torrent",
+        infoHash: "dune-big-hash",
+        downloadUrl: "https://prowlarr.test/2/download?link=big",
+      },
+      {
+        guid: "dune-small",
+        title: "Dune.2021.720p.BluRay.x264",
+        size: 8 * GIGABYTE,
+        seeders: 40,
+        leechers: 1,
+        indexerId: 2,
+        indexer: "YTS",
+        protocol: "torrent",
+        infoHash: "dune-small-hash",
+        downloadUrl: "https://prowlarr.test/2/download?link=small",
+      },
+    ];
+    installFetch((url, init) => {
+      if (url === "http://qbittorrent.test:8080/api/v2/torrents/info") {
+        return jsonResponse([]);
+      }
+      if (url === "http://qbittorrent.test:8080/api/v2/torrents/add") {
+        adds.push(new URLSearchParams(String(init?.body)));
+        return new Response("Ok.", { status: 200 });
+      }
+      if (url.includes("sonarr.test") && url.endsWith("/api/v3/series")) {
+        return jsonResponse([]);
+      }
+      if (url.endsWith("/api/v3/movie")) {
+        return jsonResponse([
+          {
+            ...movieLookup,
+            id: 7,
+            statistics: { sizeOnDisk: 40 * GIGABYTE },
+          },
+        ]);
+      }
+      if (url.endsWith("/api/v3/movie/7")) {
+        return jsonResponse({ ...movieLookup, id: 7 });
+      }
+      if (url.includes("/api/v3/diskspace")) {
+        return jsonResponse([
+          { path: "/data", totalSpace: TERABYTE, freeSpace: TERABYTE },
+        ]);
+      }
+      if (url.endsWith("/api/v3/rootfolder")) {
+        return jsonResponse(rootFolders);
+      }
+      if (url.endsWith("/api/v1/indexer")) {
+        return jsonResponse([{ id: 2, name: "YTS", enable: true }]);
+      }
+      if (url.includes("/api/v3/parse")) {
+        return arrParseResponse(url, new URL(url).searchParams.get("title") ?? "");
+      }
+      if (url.includes("/api/v1/search")) {
+        return jsonResponse(duneReleases);
+      }
+      if (url.includes("/qualityprofile")) return jsonResponse(profiles);
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const config = makeConfig();
+    config.qbittorrent.apiKey = "qbt-test-key";
+    mkdirSync(config.stateDir, { recursive: true });
+    writeFileSync(
+      path.join(config.stateDir, "media-attribution.json"),
+      JSON.stringify({
+        version: 1,
+        entries: [
+          {
+            key: "movie:tmdb:438631",
+            addedBy: { id: "user-alex", name: "Alex" },
+            addedAt: "2026-01-01T00:00:00.000Z",
+          },
+        ],
+      }),
+      "utf8",
+    );
+
+    const app = await buildServer(config);
+    const { profile, admin, person } = await startSessions(
+      app,
+      "Alex",
+      "user-alex",
+    );
+    for (const name of ["Blair", "Casey", "Devon"]) {
+      app.sessionStore.createProfile({
+        name,
+        jellyfinUserId: `user-${name.toLowerCase()}`,
+        initialPin: null,
+      });
+    }
+
+    const enabled = await app.inject({
+      method: "PUT",
+      url: "/api/disk-share/settings",
+      headers: { cookie: admin },
+      payload: { enabled: true },
+    });
+    expect(enabled.statusCode).toBe(200);
+
+    const limited = await app.inject({
+      method: "PUT",
+      url: `/api/disk-share/users/${profile.id}`,
+      headers: { cookie: admin },
+      payload: { limitBytes: 50 * GIGABYTE },
+    });
+    expect(limited.statusCode).toBe(200);
+
+    const list = await waitForCachedReleasesAs(
+      app,
+      admin,
+      "/api/library/movies/7/releases",
+    );
+    const releases = flattenCachedReleases(list) as Array<{
+      id: string;
+      title: string;
+    }>;
+    const big = releases.find(
+      (release) => release.title === "Dune.2021.1080p.BluRay.x264",
+    );
+    const small = releases.find(
+      (release) => release.title === "Dune.2021.720p.BluRay.x264",
+    );
+    if (!big || !small) {
+      throw new Error(`missing Dune releases: ${JSON.stringify(releases)}`);
+    }
+
+    const rejected = await app.inject({
+      method: "POST",
+      url: "/api/library/movies/7/releases/grab",
+      headers: { cookie: person },
+      payload: { releaseId: big.id },
+    });
+    expect(rejected.statusCode).toBe(409);
+    expect(rejected.json()).toMatchObject({
+      error: { code: "disk_share_exceeded" },
+    });
+    expect(adds).toHaveLength(0);
+
+    const allowed = await app.inject({
+      method: "POST",
+      url: "/api/library/movies/7/releases/grab",
+      headers: { cookie: person },
+      payload: { releaseId: small.id },
+    });
+    expect(allowed.statusCode).toBe(200);
+    expect(adds).toHaveLength(1);
+    const tags = adds[0]?.get("tags")?.split(",") ?? [];
+    expect(tags.slice(0, 2)).toEqual(["churn-direct", "churn-movie-7"]);
+    expect(tags[2]).toBe(mediaOwnerTag("user-alex"));
+    await app.close();
+  });
+
+  it("records the grabber as owner of an unclaimed title", async () => {
+    installFetch((url) => {
+      if (url === "http://qbittorrent.test:8080/api/v2/torrents/info") {
+        return jsonResponse([]);
+      }
+      if (url === "http://qbittorrent.test:8080/api/v2/torrents/add") {
+        return new Response("Ok.", { status: 200 });
+      }
+      if (url.endsWith("/api/v3/movie/7")) {
+        return jsonResponse({ ...movieLookup, id: 7 });
+      }
+      if (url.endsWith("/api/v1/indexer")) {
+        return jsonResponse([{ id: 2, name: "YTS", enable: true }]);
+      }
+      if (url.includes("/api/v3/parse")) {
+        return arrParseResponse(url, new URL(url).searchParams.get("title") ?? "");
+      }
+      if (url.includes("/api/v1/search")) {
+        return jsonResponse([
+          {
+            guid: "dune-small",
+            title: "Dune.2021.720p.BluRay.x264",
+            size: 8 * GIGABYTE,
+            seeders: 40,
+            leechers: 1,
+            indexerId: 2,
+            indexer: "YTS",
+            protocol: "torrent",
+            infoHash: "dune-small-hash",
+            downloadUrl: "https://prowlarr.test/2/download?link=small",
+          },
+        ]);
+      }
+      if (url.includes("/qualityprofile")) return jsonResponse(profiles);
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const config = makeConfig();
+    config.qbittorrent.apiKey = "qbt-test-key";
+    const app = await buildServer(config);
+    const { admin, person } = await startSessions(app, "Alex", "user-alex");
+
+    const list = await waitForCachedReleasesAs(
+      app,
+      admin,
+      "/api/library/movies/7/releases",
+    );
+    const releases = flattenCachedReleases(list) as Array<{
+      id: string;
+      title: string;
+    }>;
+    const release = releases.find(
+      (candidate) => candidate.title === "Dune.2021.720p.BluRay.x264",
+    );
+    if (!release) {
+      throw new Error(`missing Dune release: ${JSON.stringify(releases)}`);
+    }
+
+    const grabbed = await app.inject({
+      method: "POST",
+      url: "/api/library/movies/7/releases/grab",
+      headers: { cookie: person },
+      payload: { releaseId: release.id },
+    });
+    expect(grabbed.statusCode).toBe(200);
+
+    const stored = JSON.parse(
+      readFileSync(
+        path.join(config.stateDir, "media-attribution.json"),
+        "utf8",
+      ),
+    ) as { entries: Array<{ key: string; addedBy: { id: string; name: string } }> };
+    expect(stored.entries).toContainEqual(
+      expect.objectContaining({
+        key: "movie:tmdb:438631",
+        addedBy: { id: "user-alex", name: "Alex" },
+      }),
+    );
+    await app.close();
+  });
+
+  it("lets only admins change disk share limits", async () => {
+    installFetch((url) => {
+      if (url === "http://qbittorrent.test:8080/api/v2/torrents/info") {
+        return jsonResponse([]);
+      }
+      if (url.endsWith("/api/v3/diskspace")) {
+        return jsonResponse([
+          { path: "/data", totalSpace: TERABYTE, freeSpace: TERABYTE },
+        ]);
+      }
+      if (url.endsWith("/api/v3/rootfolder")) {
+        return jsonResponse([{ id: 1, path: "/data/media", accessible: true }]);
+      }
+      if (url.includes("sonarr.test") && url.endsWith("/api/v3/series")) {
+        return jsonResponse([]);
+      }
+      if (url.endsWith("/api/v3/movie")) {
+        return jsonResponse([]);
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+
+    const config = makeConfig();
+    config.qbittorrent.apiKey = "qbt-test-key";
+    const app = await buildServer(config);
+    const { profile, admin, person } = await startSessions(
+      app,
+      "Alex",
+      "user-alex",
+    );
+
+    const enabled = await app.inject({
+      method: "PUT",
+      url: "/api/disk-share/settings",
+      headers: { cookie: admin },
+      payload: { enabled: true },
+    });
+    expect(enabled.json()).toEqual({ enabled: true });
+
+    const own = await app.inject({
+      method: "GET",
+      url: "/api/disk-share",
+      headers: { cookie: person },
+    });
+    expect(own.json()).toMatchObject({
+      enabled: true,
+      state: "ok",
+      limitBytes: TERABYTE,
+      usedBytes: 0,
+    });
+
+    const adminView = await app.inject({
+      method: "GET",
+      url: "/api/disk-share",
+      headers: { cookie: admin },
+    });
+    expect(adminView.json()).toMatchObject({ limitBytes: null, nearLimit: false });
+
+    const forbidden = await app.inject({
+      method: "GET",
+      url: "/api/disk-share/admin",
+      headers: { cookie: person },
+    });
+    expect(forbidden.statusCode).toBe(403);
+
+    const badSwitch = await app.inject({
+      method: "PUT",
+      url: "/api/disk-share/settings",
+      headers: { cookie: admin },
+      payload: { enabled: "yes" },
+    });
+    expect(badSwitch.statusCode).toBe(400);
+
+    const badLimit = await app.inject({
+      method: "PUT",
+      url: `/api/disk-share/users/${profile.id}`,
+      headers: { cookie: admin },
+      payload: { limitBytes: -1 },
+    });
+    expect(badLimit.statusCode).toBe(400);
+
+    const custom = await app.inject({
+      method: "PUT",
+      url: `/api/disk-share/users/${profile.id}`,
+      headers: { cookie: admin },
+      payload: { limitBytes: 50 * GIGABYTE },
+    });
+    expect(custom.json()).toEqual({
+      profileId: profile.id,
+      limitBytes: 50 * GIGABYTE,
+    });
+
+    const withOverride = await app.inject({
+      method: "GET",
+      url: "/api/disk-share/admin",
+      headers: { cookie: admin },
+    });
+    expect(withOverride.json()).toMatchObject({
+      enabled: true,
+      state: "ok",
+      totalBytes: TERABYTE,
+      equalShareBytes: TERABYTE,
+      users: [
+        {
+          profileId: profile.id,
+          customLimit: true,
+          limitBytes: 50 * GIGABYTE,
+        },
+      ],
+    });
+
+    const cleared = await app.inject({
+      method: "PUT",
+      url: `/api/disk-share/users/${profile.id}`,
+      headers: { cookie: admin },
+      payload: { limitBytes: null },
+    });
+    expect(cleared.json()).toEqual({ profileId: profile.id, limitBytes: null });
+
+    const withoutOverride = await app.inject({
+      method: "GET",
+      url: "/api/disk-share/admin",
+      headers: { cookie: admin },
+    });
+    expect(withoutOverride.json()).toMatchObject({
+      users: [
+        {
+          profileId: profile.id,
+          customLimit: false,
+          limitBytes: TERABYTE,
+        },
+      ],
+    });
+    await app.close();
+  });
+});
 
 describe("activity", () => {
   it("aggregates active qBittorrent downloads using the local catalog", async () => {
@@ -4331,7 +4768,9 @@ describe("show releases", () => {
     expect(addBody?.get("urls")).toBe("https://prowlarr.test/2/download?link=pack");
     expect(addBody?.get("savepath")).toBe("/data/media/tv/Example Show");
     expect(addBody?.get("category")).toBe("tv");
-    expect(addBody?.get("tags")).toBe("churn-direct,churn-series-42");
+    const addedTags = addBody?.get("tags")?.split(",") ?? [];
+    expect(addedTags.slice(0, 2)).toEqual(["churn-direct", "churn-series-42"]);
+    expect(addedTags[2]).toMatch(/^churn-user-[0-9a-f]{16}$/);
     expect(addBody?.get("contentLayout")).toBe("NoSubfolder");
     await app.close();
   });

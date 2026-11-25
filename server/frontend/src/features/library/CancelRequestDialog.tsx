@@ -62,6 +62,7 @@ export function CancelRequestDialog({
         "movie",
         "movie-releases",
         "status",
+        "disk-share",
       ]) {
         void queryClient.invalidateQueries({ queryKey: [key] });
       }

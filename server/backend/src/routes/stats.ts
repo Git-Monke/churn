@@ -2,19 +2,10 @@ import type { FastifyInstance } from "fastify";
 
 import type { AppConfig } from "../config.js";
 import { UpstreamError } from "../errors.js";
-import { aggregateStats, rankStorage, rankTorrents } from "../stats.js";
+import { aggregateStats, loadDiskSource, rankStorage, rankTorrents } from "../stats.js";
 import type { StatsResponse, StatsSource, StatsSourceError } from "../types.js";
 import { createQbittorrentClient } from "../upstream/qbittorrent.js";
-import {
-  createArrClient,
-  type ServarrDiskSpace,
-  type ServarrRootFolder,
-} from "../upstream/servarr.js";
-
-interface DiskSourceData {
-  diskSpace: ServarrDiskSpace[];
-  rootFolders: ServarrRootFolder[];
-}
+import { createArrClient } from "../upstream/servarr.js";
 
 export function registerStatsRoutes(app: FastifyInstance, config: AppConfig): void {
   app.get("/api/stats", async (_request, reply) => {
@@ -125,34 +116,6 @@ export function registerStatsRoutes(app: FastifyInstance, config: AppConfig): vo
     };
     return response;
   });
-}
-
-async function loadDiskSource(config: AppConfig): Promise<DiskSourceData> {
-  let lastError: unknown;
-  for (const service of ["sonarr", "radarr"] as const) {
-    try {
-      const client = createArrClient(
-        service,
-        config.services[service],
-        config.requestTimeoutMs,
-      );
-      const [diskSpace, rootFolders] = await Promise.all([
-        client.getDiskSpace(),
-        client.getRootFolders(),
-      ]);
-      if (diskSpace.some((entry) => (entry.totalSpace ?? 0) > 0)) {
-        return { diskSpace, rootFolders };
-      }
-      lastError = new UpstreamError(
-        service,
-        "invalid_response",
-        `${service} did not report any disk capacity`,
-      );
-    } catch (error) {
-      lastError = error;
-    }
-  }
-  throw lastError ?? new Error("no arr disk space available");
 }
 
 function sourceErrorMessage(source: StatsSource, error: unknown): string {

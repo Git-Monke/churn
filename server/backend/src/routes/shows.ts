@@ -5,7 +5,16 @@ import { isActiveQueueRecord, isSeasonPack, queueRecordSeasons } from "../activi
 import { requireAuth, type AuthContext } from "../auth.js";
 import { ApiError, isUnauthorized, isUpstreamNotFound, UpstreamError } from "../errors.js";
 import { refreshJellyfinLibrary } from "../library-scan.js";
-import { directGrabError, grabTorrentDirect } from "../direct-grab.js";
+import {
+  directGrabError,
+  grabTorrentDirect,
+  type DirectGrabOptions,
+} from "../direct-grab.js";
+import type { DiskShareService } from "../disk-shares.js";
+import {
+  claimMediaAttribution,
+  type MediaAttributionStore,
+} from "../media-attribution.js";
 import type { IntroDbService } from "../introdb-warm.js";
 import {
   createLiveDownloadStore,
@@ -44,6 +53,8 @@ export function registerShowRoutes(
   config: AppConfig,
   releaseSearch: ReleaseSearchService,
   introDb: IntroDbService,
+  diskShares: DiskShareService,
+  attribution: MediaAttributionStore,
 ): void {
   const downloads = createLiveDownloadStore();
 
@@ -150,6 +161,7 @@ export function registerShowRoutes(
       if (source !== "sonarr") {
         throw new ApiError(400, "invalid_source", "Releases are only available for Sonarr-backed shows");
       }
+      const auth = requireAuth(request);
       const seriesId = parseSonarrId(request.params.id);
       return grabShowRelease(
         config,
@@ -157,6 +169,8 @@ export function registerShowRoutes(
         introDb,
         seriesId,
         parseGrabReleaseInput(request.body),
+        { actor: auth.user, quota: diskShares },
+        attribution,
       );
     },
   );
@@ -375,6 +389,8 @@ async function grabShowRelease(
   introDb: IntroDbService,
   seriesId: number,
   input: ReturnType<typeof parseGrabReleaseInput>,
+  options: DirectGrabOptions,
+  attribution: MediaAttributionStore,
 ): Promise<GrabShowReleaseResponse> {
   const searchSeasonNumber = input.searchSeasonNumber ?? input.seasonNumber;
   const found = await releaseSearch.findRelease(
@@ -390,14 +406,19 @@ async function grabShowRelease(
   }
 
   try {
-    const result = await grabTorrentDirect(config, found.release, {
-      kind: "series",
-      arrId: seriesId,
-      title: found.media.title || found.release.title,
-      ...(found.media.year !== undefined ? { year: found.media.year } : {}),
-      seasonNumber: searchSeasonNumber,
-      multiSeason: found.release.parsed.seasonNumbers.length > 1,
-    });
+    const result = await grabTorrentDirect(
+      config,
+      found.release,
+      {
+        kind: "series",
+        arrId: seriesId,
+        title: found.media.title || found.release.title,
+        ...(found.media.year !== undefined ? { year: found.media.year } : {}),
+        seasonNumber: searchSeasonNumber,
+        multiSeason: found.release.parsed.seasonNumbers.length > 1,
+      },
+      options,
+    );
     // Warm IntroDB while the torrent downloads. A season grab fetches every
     // episode of that season; an episode grab fetches only that episode.
     void introDb.warm(
@@ -405,6 +426,17 @@ async function grabShowRelease(
       input.seasonNumber,
       input.episodeNumber,
     );
+    if (options.actor) {
+      await claimMediaAttribution(
+        attribution,
+        {
+          kind: "series",
+          tvdbId: found.media.tvdbId,
+          tmdbId: found.media.tmdbId,
+        },
+        options.actor,
+      );
+    }
     return { status: "grabbed", title: result.title };
   } catch (error) {
     throw directGrabError(error);

@@ -92,13 +92,7 @@ export interface ReleaseSearchService {
   findRelease(
     target: ReleaseSearchTarget,
     id: string,
-  ): Promise<
-    | {
-        release: RawIndexerRelease;
-        media: { title: string; year?: number };
-      }
-    | undefined
-  >;
+  ): Promise<FoundRelease | undefined>;
   invalidateMovie(movieId: number): Promise<void>;
   invalidateSeries(seriesId: number): Promise<void>;
 }
@@ -108,6 +102,14 @@ interface SearchMedia {
   id: number;
   title: string;
   year?: number;
+  tmdbId?: number;
+  tvdbId?: number;
+}
+
+/** A cached release plus the provider ids of the title it belongs to. */
+export interface FoundRelease {
+  release: RawIndexerRelease;
+  media: { title: string; year?: number; tmdbId?: number; tvdbId?: number };
 }
 
 interface JobIndexer {
@@ -193,10 +195,23 @@ export function createReleaseSearchService(
   async function loadMedia(target: ReleaseSearchTarget): Promise<SearchMedia> {
     if (target.kind === "movie") {
       const cached = await ensureMovieMedia(target.movieId);
-      return { kind: "movie", id: cached.id, title: cached.title, year: cached.year };
+      return {
+        kind: "movie",
+        id: cached.id,
+        title: cached.title,
+        ...(cached.year !== undefined ? { year: cached.year } : {}),
+        ...(cached.tmdbId !== undefined ? { tmdbId: cached.tmdbId } : {}),
+      };
     }
     const cached = await ensureSeriesMedia(target.seriesId);
-    return { kind: "series", id: cached.id, title: cached.title, year: cached.year };
+    return {
+      kind: "series",
+      id: cached.id,
+      title: cached.title,
+      ...(cached.year !== undefined ? { year: cached.year } : {}),
+      ...(cached.tvdbId !== undefined ? { tvdbId: cached.tvdbId } : {}),
+      ...(cached.tmdbId !== undefined ? { tmdbId: cached.tmdbId } : {}),
+    };
   }
 
   async function ensureMovieMedia(movieId: number): Promise<MovieMetadataCacheEntry> {
@@ -664,13 +679,7 @@ export function createReleaseSearchService(
   async function findRelease(
     target: ReleaseSearchTarget,
     id: string,
-  ): Promise<
-    | {
-        release: RawIndexerRelease;
-        media: { title: string; year?: number };
-      }
-    | undefined
-  > {
+  ): Promise<FoundRelease | undefined> {
     const key = targetKey(target);
     let job = jobs.get(key);
     if (!job) {
@@ -700,6 +709,8 @@ export function createReleaseSearchService(
         media: {
           title: media.title,
           ...(media.year !== undefined ? { year: media.year } : {}),
+          ...(media.tmdbId !== undefined ? { tmdbId: media.tmdbId } : {}),
+          ...(media.tvdbId !== undefined ? { tvdbId: media.tvdbId } : {}),
         },
       };
     }

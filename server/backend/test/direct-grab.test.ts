@@ -4,8 +4,12 @@ import type { AppConfig } from "../src/config.js";
 import {
   grabTorrentDirect,
   mediaDownloadTag,
+  mediaOwnerTag,
   parseMediaDownloadTag,
+  type GrabQuota,
 } from "../src/direct-grab.js";
+import { ApiError } from "../src/errors.js";
+import type { AuthUser } from "../src/auth.js";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -110,6 +114,140 @@ describe("direct grab media tags", () => {
 
     expect(result.alreadyDownloading).toBe(true);
     expect(tagBodies[0]?.get("hashes")).toBe("abc123");
+    expect(tagBodies[0]?.get("tags")).toBe("churn-movie-7");
+  });
+
+  it("tags a new direct download with the owner's tag", async () => {
+    const actor: AuthUser = { id: "user-alex", name: "Alex", isAdmin: false };
+    const bodies: URLSearchParams[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/api/v2/torrents/info")) {
+          return new Response("[]", {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        if (url.endsWith("/api/v2/torrents/add")) {
+          bodies.push(new URLSearchParams(String(init?.body)));
+          return new Response("Ok.", { status: 200 });
+        }
+        throw new Error(`unexpected URL ${url}`);
+      }),
+    );
+
+    await grabTorrentDirect(
+      config(),
+      release,
+      {
+        kind: "movie",
+        arrId: 7,
+        title: "Dune",
+        year: 2021,
+        libraryPath: "/data/media/movies/Dune (2021)",
+      },
+      { actor },
+    );
+
+    expect(bodies[0]?.get("tags")).toBe(
+      `churn-direct,churn-movie-7,${mediaOwnerTag(actor.id)}`,
+    );
+  });
+
+  it("does not start the download when the quota rejects it", async () => {
+    const released: Array<{ actorId: string; bytes: number }> = [];
+    const reserved: number[] = [];
+    const quota: GrabQuota = {
+      reserve: async (_actor, bytes) => {
+        reserved.push(bytes);
+        throw new ApiError(409, "disk_share_exceeded", "no");
+      },
+      release: (actorId, bytes) => {
+        released.push({ actorId, bytes });
+      },
+    };
+    let addCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = String(input);
+        if (url.endsWith("/api/v2/torrents/info")) {
+          return new Response("[]", {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        if (url.endsWith("/api/v2/torrents/add")) {
+          addCalls += 1;
+          return new Response("Ok.", { status: 200 });
+        }
+        throw new Error(`unexpected URL ${url}`);
+      }),
+    );
+
+    await expect(
+      grabTorrentDirect(
+        config(),
+        { ...release, size: 11 * 1024 ** 3 },
+        {
+          kind: "movie",
+          arrId: 7,
+          title: "Dune",
+          year: 2021,
+          libraryPath: "/data/media/movies/Dune (2021)",
+        },
+        { actor: { id: "user-alex", name: "Alex", isAdmin: false }, quota },
+      ),
+    ).rejects.toMatchObject({ statusCode: 409, code: "disk_share_exceeded" });
+    expect(reserved).toEqual([11 * 1024 ** 3]);
+    expect(addCalls).toBe(0);
+    expect(released).toEqual([]);
+  });
+
+  it("leaves another person's owner tag alone on an existing torrent", async () => {
+    const tagBodies: URLSearchParams[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/api/v2/torrents/info")) {
+          return new Response(
+            JSON.stringify([
+              {
+                hash: "abc123",
+                name: "abc123",
+                tags: `churn-direct,churn-user-0123456789abcdef`,
+                state: "metaDL",
+                has_metadata: false,
+              },
+            ]),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        if (url.endsWith("/api/v2/torrents/addTags")) {
+          tagBodies.push(new URLSearchParams(String(init?.body)));
+          return new Response(null, { status: 200 });
+        }
+        throw new Error(`unexpected URL ${url}`);
+      }),
+    );
+
+    const result = await grabTorrentDirect(
+      config(),
+      release,
+      {
+        kind: "movie",
+        arrId: 7,
+        title: "Dune",
+        year: 2021,
+        libraryPath: "/data/media/movies/Dune (2021)",
+      },
+      { actor: { id: "user-alex", name: "Alex", isAdmin: false } },
+    );
+
+    expect(result.alreadyDownloading).toBe(true);
     expect(tagBodies[0]?.get("tags")).toBe("churn-movie-7");
   });
 });

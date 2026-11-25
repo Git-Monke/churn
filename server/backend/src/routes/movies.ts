@@ -4,7 +4,16 @@ import type { AppConfig } from "../config.js";
 import { movieMetadata } from "../activity.js";
 import { requireAuth, type AuthContext } from "../auth.js";
 import { ApiError, isUnauthorized, isUpstreamNotFound, UpstreamError } from "../errors.js";
-import { directGrabError, grabTorrentDirect } from "../direct-grab.js";
+import {
+  directGrabError,
+  grabTorrentDirect,
+  type DirectGrabOptions,
+} from "../direct-grab.js";
+import type { DiskShareService } from "../disk-shares.js";
+import {
+  claimMediaAttribution,
+  type MediaAttributionStore,
+} from "../media-attribution.js";
 import {
   createLiveDownloadStore,
   movieLiveDownload,
@@ -35,6 +44,8 @@ export function registerMovieRoutes(
   app: FastifyInstance,
   config: AppConfig,
   releaseSearch: ReleaseSearchService,
+  diskShares: DiskShareService,
+  attribution: MediaAttributionStore,
 ): void {
   const downloads = createLiveDownloadStore();
 
@@ -138,8 +149,16 @@ export function registerMovieRoutes(
     "/api/library/movies/:id/releases/grab",
     async (request, reply) => {
       reply.header("cache-control", "no-store");
+      const auth = requireAuth(request);
       const movieId = parseMovieId(request.params.id);
-      return grabMovieRelease(config, releaseSearch, movieId, parseGrabInput(request.body));
+      return grabMovieRelease(
+        config,
+        releaseSearch,
+        movieId,
+        parseGrabInput(request.body),
+        { actor: auth.user, quota: diskShares },
+        attribution,
+      );
     },
   );
 }
@@ -490,6 +509,8 @@ async function grabMovieRelease(
   releaseSearch: ReleaseSearchService,
   movieId: number,
   input: { releaseId: string },
+  options: DirectGrabOptions,
+  attribution: MediaAttributionStore,
 ): Promise<GrabShowReleaseResponse> {
   const found = await releaseSearch.findRelease({ kind: "movie", movieId }, input.releaseId);
   if (!found) {
@@ -501,12 +522,24 @@ async function grabMovieRelease(
   }
 
   try {
-    const result = await grabTorrentDirect(config, found.release, {
-      kind: "movie",
-      arrId: movieId,
-      title: found.media.title || found.release.title,
-      ...(found.media.year !== undefined ? { year: found.media.year } : {}),
-    });
+    const result = await grabTorrentDirect(
+      config,
+      found.release,
+      {
+        kind: "movie",
+        arrId: movieId,
+        title: found.media.title || found.release.title,
+        ...(found.media.year !== undefined ? { year: found.media.year } : {}),
+      },
+      options,
+    );
+    if (options.actor) {
+      await claimMediaAttribution(
+        attribution,
+        { kind: "movie", tmdbId: found.media.tmdbId },
+        options.actor,
+      );
+    }
     return { status: "grabbed", title: result.title };
   } catch (error) {
     throw directGrabError(error);

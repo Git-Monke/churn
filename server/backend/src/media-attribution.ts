@@ -31,6 +31,21 @@ export interface MediaAttributionStore {
   remove(identity: MediaIdentity): Promise<void>;
 }
 
+/**
+ * Claims an unowned title for the person who grabbed it. Someone who already
+ * owns a title keeps it, so a later grab or upgrade never moves the bytes.
+ */
+export async function claimMediaAttribution(
+  store: MediaAttributionStore,
+  identity: MediaIdentity,
+  addedBy: MediaAddedBy,
+): Promise<void> {
+  if (mediaAttributionKey(identity) === undefined || store.get(identity)) {
+    return;
+  }
+  await store.record(identity, addedBy);
+}
+
 export interface MediaAttributionOptions {
   stateDir: string;
   now?: () => Date;

@@ -34,6 +34,7 @@ import {
 import { Toggle } from "@/components/ui/toggle";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useAuth } from "@/features/auth/AuthProvider";
+import { NearLimitBanner } from "@/features/disk-share/NearLimitBanner";
 import { ContinueWatching } from "@/features/library/ContinueWatching";
 import { LibraryGrid, LibraryGridSkeleton } from "@/features/library/LibraryGrid";
 import { OnTheWay } from "@/features/library/OnTheWay";
@@ -182,6 +183,7 @@ export function LibraryPage({ jellyfinUrl }: { jellyfinUrl?: string }) {
 
   return (
     <div className="flex flex-col [&>*+*]:mt-10 [&>*+*]:border-t [&>*+*]:border-border [&>*+*]:pt-10">
+      <NearLimitBanner />
       <Alerts
         libraryState={libraryQuery.data}
         libraryError={libraryQuery.error}

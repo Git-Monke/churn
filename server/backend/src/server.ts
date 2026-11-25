@@ -16,6 +16,7 @@ import { ApiError, UpstreamError } from "./errors.js";
 import { createLibraryScanWatcher } from "./library-scan.js";
 import { createIntroDbCache } from "./introdb-cache.js";
 import { createIntroDbService } from "./introdb-warm.js";
+import { createDiskShareService } from "./disk-shares.js";
 import { createMediaAttributionStore } from "./media-attribution.js";
 import { createMediaCache } from "./media-cache.js";
 import { createPasskeyStore } from "./passkey-store.js";
@@ -25,6 +26,7 @@ import { createReleaseEventStore } from "./release-events.js";
 import { registerSecurityHeaders } from "./security-headers.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerActivityRoutes } from "./routes/activity.js";
+import { registerDiskShareRoutes } from "./routes/disk-share.js";
 import { registerHealthRoutes } from "./routes/health.js";
 import { registerLibraryRoutes } from "./routes/library.js";
 import { registerMovieRoutes } from "./routes/movies.js";
@@ -75,6 +77,12 @@ export async function buildServer(
   });
   const mediaAttribution = createMediaAttributionStore({
     stateDir: config.stateDir,
+    onWarning: (message) => app.log.warn(message),
+  });
+  const diskShares = createDiskShareService({
+    config,
+    attribution: mediaAttribution,
+    profiles: () => sessionStore.listProfiles(),
     onWarning: (message) => app.log.warn(message),
   });
   const releaseSearch = createReleaseSearchService(config, mediaCache, {
@@ -186,18 +194,23 @@ export async function buildServer(
   registerHealthRoutes(app);
   registerAuthRoutes(app, config, { store: sessionStore, throttle: loginThrottle });
   const passkeys = registerPasskeyRoutes(app, config, passkeyStore, sessionStore, loginThrottle);
-  registerProfileRoutes(app, config, { store: sessionStore, revokePasskeys: passkeys.revokeForUser });
+  registerProfileRoutes(app, config, {
+    store: sessionStore,
+    revokePasskeys: passkeys.revokeForUser,
+    diskShares,
+  });
+  registerDiskShareRoutes(app, { service: diskShares, sessions: sessionStore });
   registerStatusRoutes(app, config);
   registerStatsRoutes(app, config);
   registerVpnRoutes(app, config);
   registerLibraryRoutes(app, config, releaseSearch, mediaAttribution);
   registerPlaybackRoutes(app, config, introDb);
   registerRequestedLibraryRoutes(app, config, mediaCache, releaseSearch, mediaAttribution);
-  registerMovieRoutes(app, config, releaseSearch);
+  registerMovieRoutes(app, config, releaseSearch, diskShares, mediaAttribution);
   registerSearchRoutes(app, config);
   registerRequestRoutes(app, config, mediaCache, releaseSearch, mediaAttribution);
   registerActivityRoutes(app, config, releaseEvents);
-  registerShowRoutes(app, config, releaseSearch, introDb);
+  registerShowRoutes(app, config, releaseSearch, introDb, diskShares, mediaAttribution);
   registerServiceRoutes(app, config);
 
   const hasFrontend = existsSync(path.join(config.frontendDist, "index.html"));

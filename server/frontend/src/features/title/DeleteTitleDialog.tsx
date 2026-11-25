@@ -67,6 +67,7 @@ export function DeleteTitleDialog({
         "show",
         "search",
         "status",
+        "disk-share",
       ]) {
         void queryClient.invalidateQueries({ queryKey: [key] });
       }

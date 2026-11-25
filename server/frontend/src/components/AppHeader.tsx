@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { usePasskeyAvailability } from "@/features/auth/passkeys";
+import { ShareMeter } from "@/features/disk-share/ShareMeter";
 import type { AppRoute } from "@/hooks/use-hash-route";
 import { useSelectionUnderline } from "@/hooks/use-selection-underline";
 import { cn } from "@/lib/utils";
@@ -77,6 +78,7 @@ export function AppHeader({ route, onManagePasskeys, onChangePassword }: AppHead
 
         {user ? (
           <div className="ml-auto flex items-center gap-2 py-2">
+            <ShareMeter />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" className="h-auto gap-2 py-1 pr-1.5 pl-1">

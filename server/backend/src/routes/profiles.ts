@@ -9,12 +9,14 @@ import {
   type SessionStore,
 } from "../auth.js";
 import type { AppConfig } from "../config.js";
+import type { DiskShareService } from "../disk-shares.js";
 import { ApiError, isUnauthorized, UpstreamError } from "../errors.js";
 import { createJellyfinClient } from "../upstream/jellyfin.js";
 
 export interface ProfileDependencies {
   store: SessionStore;
   revokePasskeys: (userId: string) => Promise<void>;
+  diskShares: Pick<DiskShareService, "removeOverride">;
 }
 
 interface ProfileParams {
@@ -134,6 +136,7 @@ export function registerProfileRoutes(
 
     deps.store.destroyAllForUser(profile.jellyfinUserId);
     deps.store.deleteProfile(profile.id);
+    await deps.diskShares.removeOverride(profile.jellyfinUserId);
     await deps.revokePasskeys(profile.jellyfinUserId);
     return reply.code(204).send();
   });

@@ -1,16 +1,53 @@
+import type { AppConfig } from "./config.js";
 import type { StatsDiskUsage, StatsQbittorrent, StatsTopItem } from "./types.js";
 import { parseMediaDownloadTag } from "./direct-grab.js";
+import { UpstreamError } from "./errors.js";
 import type {
   QbittorrentMainData,
   QbittorrentServerState,
   QbittorrentTorrent,
 } from "./upstream/qbittorrent.js";
-import type {
-  ServarrDiskSpace,
-  ServarrMovieResource,
-  ServarrRootFolder,
-  ServarrSeriesResource,
+import {
+  createArrClient,
+  type ServarrDiskSpace,
+  type ServarrMovieResource,
+  type ServarrRootFolder,
+  type ServarrSeriesResource,
 } from "./upstream/servarr.js";
+
+export interface DiskSourceData {
+  diskSpace: ServarrDiskSpace[];
+  rootFolders: ServarrRootFolder[];
+}
+
+/** First arr that reports positive capacity; throws the last error otherwise. */
+export async function loadDiskSource(config: AppConfig): Promise<DiskSourceData> {
+  let lastError: unknown;
+  for (const service of ["sonarr", "radarr"] as const) {
+    try {
+      const client = createArrClient(
+        service,
+        config.services[service],
+        config.requestTimeoutMs,
+      );
+      const [diskSpace, rootFolders] = await Promise.all([
+        client.getDiskSpace(),
+        client.getRootFolders(),
+      ]);
+      if (diskSpace.some((entry) => (entry.totalSpace ?? 0) > 0)) {
+        return { diskSpace, rootFolders };
+      }
+      lastError = new UpstreamError(
+        service,
+        "invalid_response",
+        `${service} did not report any disk capacity`,
+      );
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError ?? new Error("no arr disk space available");
+}
 
 /**
  * Transfer totals come from qBittorrent; capacity and free space both come

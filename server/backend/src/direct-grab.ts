@@ -1,5 +1,7 @@
+import { createHash } from "node:crypto";
 import path from "node:path";
 
+import type { AuthUser } from "./auth.js";
 import type { AppConfig } from "./config.js";
 import { ApiError, UpstreamError } from "./errors.js";
 import {
@@ -13,9 +15,39 @@ import { errorMessage } from "./upstream/states.js";
 /** Applied to every download churn sends straight to qBittorrent. */
 export const DIRECT_DOWNLOAD_TAG = "churn-direct";
 
+const OWNER_TAG_PREFIX = "churn-user-";
+const OWNER_TAG_PATTERN = /^churn-user-([0-9a-f]{16})$/;
+
 const MEDIA_TAG_PATTERN = /^churn-(movie|series)-(\d+)$/;
 
 const DEFAULT_MEDIA_ROOT = "/data/media";
+
+/** Stable per-user tag; short enough for qBittorrent's tag field. */
+export function mediaOwnerTag(userId: string): string {
+  return `${OWNER_TAG_PREFIX}${createHash("sha256").update(userId).digest("hex").slice(0, 16)}`;
+}
+
+/** True when `tags` already names an owner (any owner, not just `userId`). */
+export function hasOwnerTag(tags: string | undefined): boolean {
+  return splitTags(tags).some((tag) => OWNER_TAG_PATTERN.test(tag));
+}
+
+/** True when the torrent is owned by `userId`. */
+export function ownerTagMatches(tags: string | undefined, userId: string): boolean {
+  const wanted = mediaOwnerTag(userId);
+  return splitTags(tags).includes(wanted);
+}
+
+/** Implemented by the disk-share service; throws ApiError when over the limit. */
+export interface GrabQuota {
+  reserve(actor: AuthUser, bytes: number): Promise<void>;
+  release(actorId: string, bytes: number): void;
+}
+
+export interface DirectGrabOptions {
+  actor?: AuthUser;
+  quota?: GrabQuota;
+}
 
 export interface DirectReleaseSource {
   guid?: string;
@@ -23,6 +55,8 @@ export interface DirectReleaseSource {
   infoHash?: string;
   downloadUrl?: string;
   magnetUrl?: string;
+  /** Release size in bytes; 0 when unknown. */
+  size?: number;
 }
 
 export interface DirectGrabTarget {
@@ -99,6 +133,7 @@ export async function grabTorrentDirect(
   config: AppConfig,
   release: DirectReleaseSource,
   target: DirectGrabTarget,
+  options: DirectGrabOptions = {},
 ): Promise<DirectGrabResult> {
   if (!config.qbittorrent.apiKey) {
     throw new ApiError(
@@ -120,9 +155,10 @@ export async function grabTorrentDirect(
   const client = createQbittorrentClient(config.qbittorrent, config.requestTimeoutMs);
   const savePath = await resolveSavePath(config, target);
   const mediaTag = mediaDownloadTag(target.kind, target.arrId);
+  const ownerTag = options.actor ? mediaOwnerTag(options.actor.id) : undefined;
   const existing = await findExistingTorrent(client, release, false);
   if (existing) {
-    await tagExistingTorrent(client, existing, mediaTag);
+    await tagExistingTorrent(client, existing, missingTags(existing, mediaTag, ownerTag));
     return {
       title: release.title?.trim() || target.title,
       savePath,
@@ -130,12 +166,24 @@ export async function grabTorrentDirect(
     };
   }
 
+  const bytes = release.size ?? 0;
+  if (options.quota && options.actor) {
+    await options.quota.reserve(options.actor, bytes);
+  }
   try {
     await client.addTorrent({
       url,
       savePath,
       category: target.kind === "movie" ? "movies" : "tv",
-      tags: [DIRECT_DOWNLOAD_TAG, mediaTag],
+      tags: [
+        DIRECT_DOWNLOAD_TAG,
+        mediaTag,
+        ...(ownerTag ? [ownerTag] : []),
+      ],
+      // The save path is the finished library folder, so the payload has to
+      // land flat for Jellyfin to see it. The arr only learns about the file
+      // through a library scan, which the disk-share service triggers once the
+      // torrent finishes.
       contentLayout: "NoSubfolder",
       autoTMM: false,
     });
@@ -144,7 +192,7 @@ export async function grabTorrentDirect(
     // failed add so a double click still behaves like the first click.
     const current = await findExistingTorrent(client, release, true);
     if (current) {
-      await tagExistingTorrent(client, current, mediaTag);
+      await tagExistingTorrent(client, current, missingTags(current, mediaTag, ownerTag));
       return {
         title: release.title?.trim() || target.title,
         savePath,
@@ -152,6 +200,10 @@ export async function grabTorrentDirect(
       };
     }
     throw directGrabError(error);
+  } finally {
+    if (options.quota && options.actor) {
+      options.quota.release(options.actor.id, bytes);
+    }
   }
 
   return {
@@ -159,6 +211,19 @@ export async function grabTorrentDirect(
     savePath,
     alreadyDownloading: false,
   };
+}
+
+/** Tags this torrent lacks; an owner tag is only added when none is present. */
+function missingTags(
+  torrent: QbittorrentTorrent,
+  mediaTag: string,
+  ownerTag: string | undefined,
+): string[] {
+  const present = splitTags(torrent.tags);
+  return [
+    mediaTag,
+    ...(ownerTag && !hasOwnerTag(torrent.tags) ? [ownerTag] : []),
+  ].filter((tag) => !present.includes(tag));
 }
 
 export function directGrabError(error: unknown): unknown {
@@ -270,9 +335,9 @@ function normalizeTitle(value: string | undefined): string {
 async function tagExistingTorrent(
   client: ReturnType<typeof createQbittorrentClient>,
   torrent: QbittorrentTorrent,
-  mediaTag: string,
+  tags: string[],
 ): Promise<void> {
-  if (splitTags(torrent.tags).includes(mediaTag)) {
+  if (tags.length === 0) {
     return;
   }
   const hash = [torrent.hash, torrent.infohash_v1, torrent.infohash_v2]
@@ -282,7 +347,7 @@ async function tagExistingTorrent(
     return;
   }
   try {
-    await client.addTags([hash], [mediaTag]);
+    await client.addTags([hash], tags);
   } catch {
     // The torrent already exists; a failed tag must not turn a duplicate grab
     // into an error. The normal title matcher still works for named torrents.

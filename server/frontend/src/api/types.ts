@@ -789,3 +789,38 @@ export interface PlaybackReport {
   isPaused?: boolean;
   playbackMethod?: "direct" | "hls";
 }
+
+export interface DiskShareSummary {
+  enabled: boolean;
+  state: "ok" | "unavailable";
+  detail?: string;
+  userCount: number;
+  limitBytes: number | null;
+  usedBytes: number;
+  libraryBytes: number;
+  downloadBytes: number;
+  remainingBytes: number | null;
+  usedPercent: number | null;
+  nearLimit: boolean;
+  customLimit: boolean;
+}
+
+export interface DiskShareUserShare {
+  profileId: string;
+  jellyfinUserId: string;
+  name: string;
+  limitBytes: number | null;
+  customLimit: boolean;
+  usedBytes: number;
+  nearLimit: boolean;
+}
+
+export interface DiskShareAdminResponse {
+  enabled: boolean;
+  state: "ok" | "unavailable";
+  detail?: string;
+  totalBytes?: number;
+  equalShareBytes?: number;
+  userCount: number;
+  users: DiskShareUserShare[];
+}

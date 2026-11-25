@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   CopyIcon,
+  GaugeIcon,
   KeyRoundIcon,
   Loader2Icon,
   Trash2Icon,
@@ -19,6 +20,7 @@ import type { ManagedProfile } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
@@ -35,7 +37,18 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  DiskShareLimitDialog,
+  DiskShareSettings,
+} from "@/features/disk-share/DiskShareSettings";
+import {
+  useDiskShareAdmin,
+  useDiskShareSettings,
+} from "@/features/disk-share/use-disk-share";
+import { formatBytes } from "@/lib/format";
+import type { DiskShareUserShare } from "@/api/types";
 
 const PROFILES_QUERY_KEY = ["managed-profiles"] as const;
 
@@ -43,12 +56,22 @@ export function PeoplePage() {
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<ManagedProfile | null>(null);
+  const [limitTarget, setLimitTarget] = useState<ManagedProfile | null>(null);
 
   const profilesQuery = useQuery({
     queryKey: PROFILES_QUERY_KEY,
     queryFn: fetchManagedProfiles,
     retry: false,
   });
+  const sharesQuery = useDiskShareAdmin();
+  const settingsMutation = useDiskShareSettings();
+  const shares = sharesQuery.data;
+  const limitShare =
+    limitTarget && shares
+      ? shares.users.find(
+          (share) => share.profileId === limitTarget.id,
+        )
+      : undefined;
 
   const createMutation = useMutation({
     mutationFn: createProfile,
@@ -140,8 +163,25 @@ export function PeoplePage() {
       <Card>
         <CardHeader>
           <CardTitle>Household</CardTitle>
+          <CardAction>
+            <DiskShareSettings
+              enabled={shares?.enabled ?? false}
+              pending={!shares || settingsMutation.isPending}
+              onEnabledChange={(enabled) => settingsMutation.mutate(enabled)}
+            />
+          </CardAction>
           <CardDescription>
             PINs stay visible here until that person sets their own password.
+            {shares?.enabled ? (
+              <span className="mt-2 block">
+                {shares.state === "unavailable"
+                  ? shares.detail ?? "Storage usage is unavailable right now."
+                  : shares.equalShareBytes !== undefined &&
+                      shares.totalBytes !== undefined
+                    ? `Each person can own up to ${formatBytes(shares.equalShareBytes)} (${formatBytes(shares.totalBytes)} divided between ${shares.userCount} people).`
+                    : null}
+              </span>
+            ) : null}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -158,11 +198,16 @@ export function PeoplePage() {
                 <PersonRow
                   key={profile.id}
                   profile={profile}
+                  enabled={shares?.enabled ?? false}
+                  share={shares?.users.find(
+                    (share) => share.profileId === profile.id,
+                  )}
                   resetting={
                     resetMutation.isPending && resetMutation.variables === profile.id
                   }
                   onReset={() => resetMutation.mutate(profile.id)}
                   onDelete={() => setDeleteTarget(profile)}
+                  onChangeLimit={() => setLimitTarget(profile)}
                 />
               ))}
             </ul>
@@ -173,6 +218,14 @@ export function PeoplePage() {
           )}
         </CardContent>
       </Card>
+
+      {limitTarget && limitShare ? (
+        <DiskShareLimitDialog
+          profile={limitTarget}
+          share={limitShare}
+          onClose={() => setLimitTarget(null)}
+        />
+      ) : null}
 
       <Dialog
         open={deleteTarget !== null}
@@ -219,14 +272,20 @@ export function PeoplePage() {
 
 function PersonRow({
   profile,
+  enabled,
+  share,
   resetting,
   onReset,
   onDelete,
+  onChangeLimit,
 }: {
   profile: ManagedProfile;
+  enabled: boolean;
+  share?: DiskShareUserShare;
   resetting: boolean;
   onReset: () => void;
   onDelete: () => void;
+  onChangeLimit: () => void;
 }) {
   async function copyPin() {
     if (!profile.initialPin) {
@@ -261,9 +320,44 @@ function PersonRow({
             <span className="text-xs text-muted-foreground">Password set</span>
           )}
         </div>
+        {enabled && share ? (
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-baseline gap-3 text-xs text-muted-foreground">
+              <span className="tabular-nums">
+                {formatBytes(share.usedBytes)} used
+              </span>
+              <span>
+                {share.customLimit && share.limitBytes !== null
+                  ? `Custom limit: ${formatBytes(share.limitBytes)}`
+                  : "Equal share"}
+              </span>
+            </div>
+            <Progress
+              value={
+                share.limitBytes
+                  ? Math.min(100, (share.usedBytes / share.limitBytes) * 100)
+                  : 0
+              }
+              className="h-1 w-40"
+            />
+          </div>
+        ) : enabled ? null : (
+          <span className="text-xs text-muted-foreground">Limits off</span>
+        )}
       </div>
 
       <div className="flex gap-2">
+        {enabled ? (
+          <button
+            type="button"
+            onClick={onChangeLimit}
+            disabled={!share}
+            className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors hover:bg-accent disabled:opacity-50"
+          >
+            <GaugeIcon className="size-4" />
+            Change limit
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={onReset}

@@ -304,7 +304,7 @@ function VersionPickerCard({
                 </Button>}
               </div>
               {grabError && attemptedReleaseId === bestRelease.id ? (
-                <InlineGrabError />
+                <InlineGrabError message={grabError?.message} />
               ) : null}
             </div>
           ) : null}
@@ -368,7 +368,7 @@ function VersionPickerCard({
                     </Button>}
                   </div>
                   {grabError && attemptedReleaseId === release.id ? (
-                    <InlineGrabError />
+                    <InlineGrabError message={grabError?.message} />
                   ) : null}
                 </li>
               ))}
@@ -486,10 +486,11 @@ function PickerMessage({
   );
 }
 
-function InlineGrabError() {
+function InlineGrabError({ message }: { message: string | undefined }) {
   return (
     <p className="text-sm text-destructive" role="alert">
-      Couldn&apos;t start that download. Retry here or choose another version.
+      {message?.trim() ||
+        "Couldn't start that download. Retry here or choose another version."}
     </p>
   );
 }

@@ -13,6 +13,8 @@ import type {
   CancelEpisodeDownloadResponse,
   CancelMovieDownloadResponse,
   CreateProfileResponse,
+  DiskShareAdminResponse,
+  DiskShareSummary,
   LoginInput,
   LoginResponse,
   ManagedProfile,
@@ -84,6 +86,14 @@ function getJson<T>(path: string): Promise<T> {
 function postJson<T>(path: string, body: unknown): Promise<T> {
   return requestJson<T>(path, {
     method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+function putJson<T>(path: string, body: unknown): Promise<T> {
+  return requestJson<T>(path, {
+    method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
@@ -409,6 +419,30 @@ export function grabShowRelease(
 
 export function createRequest(input: CreateRequestInput): Promise<CreateRequestResponse> {
   return postJson<CreateRequestResponse>("/api/requests", input);
+}
+
+export function fetchDiskShare(): Promise<DiskShareSummary> {
+  return getJson<DiskShareSummary>("/api/disk-share");
+}
+
+export function fetchDiskShareAdmin(): Promise<DiskShareAdminResponse> {
+  return getJson<DiskShareAdminResponse>("/api/disk-share/admin");
+}
+
+export function updateDiskShareSettings(input: {
+  enabled: boolean;
+}): Promise<{ enabled: boolean }> {
+  return putJson<{ enabled: boolean }>("/api/disk-share/settings", input);
+}
+
+export function setDiskShareLimit(
+  profileId: string,
+  limitBytes: number | null,
+): Promise<{ profileId: string; limitBytes: number | null }> {
+  return putJson<{ profileId: string; limitBytes: number | null }>(
+    `/api/disk-share/users/${encodeURIComponent(profileId)}`,
+    { limitBytes },
+  );
 }
 
 function isErrorEnvelope(value: unknown): value is { error: { code?: string; message?: string } } {

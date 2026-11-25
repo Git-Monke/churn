@@ -141,6 +141,12 @@ export function useReleaseSearch(
       void queryClient.invalidateQueries({ queryKey: ["show"] });
       void queryClient.invalidateQueries({ queryKey: ["movie"] });
       void queryClient.invalidateQueries({ queryKey: ["requested-library"] });
+      void queryClient.invalidateQueries({ queryKey: ["disk-share"] });
+      // qBittorrent registers the torrent a moment after add returns, so the
+      // first refetch can still miss it. Ask again once it has landed.
+      setTimeout(() => {
+        void queryClient.invalidateQueries({ queryKey: ["disk-share"] });
+      }, 5_000);
       void queryClient.invalidateQueries({ queryKey });
       onGrabbedRef.current?.();
     },
