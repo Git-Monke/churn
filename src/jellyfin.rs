@@ -28,6 +28,12 @@ const DATA_ROOT: &str = "/data";
 /// it as that series. A typed library never guesses.
 const MEDIA_MOVIES: &str = "/data/media/movies";
 const MEDIA_SHOWS: &str = "/data/media/tv";
+/// The mixed library churn created before the typed pair: this name, no
+/// collection type, and the media root as its only location. Installs made
+/// then still have it, and because Jellyfin rejects a library nested inside
+/// another one, the typed pair cannot be added beside it.
+const LEGACY_MIXED_LIBRARY: &str = "Media";
+const MEDIA_ROOT: &str = "/data/media";
 /// `(name, collectionType, path)`. The collection type is what tells Jellyfin
 /// what the items in the folder are, and it is never omitted.
 const MEDIA_LIBRARIES: &[(&str, &str, &str)] = &[
@@ -361,11 +367,24 @@ impl Jellyfin {
     /// create call comes back with Jellyfin's own explanation.
     ///
     /// Download clients save under DATA_ROOT, so a root-level library makes
-    /// Jellyfin index files that are still downloading. Removing that path is
-    /// the only removal this performs.
+    /// Jellyfin index files that are still downloading. Removing that path,
+    /// and replacing churn's own legacy mixed library (see
+    /// `LEGACY_MIXED_LIBRARY`), are the only removals this performs.
     pub fn ensure_libraries(&self, api_key: &str) -> io::Result<Vec<String>> {
         let mut folders = self.list_virtual_folders(api_key)?;
         let mut changes = Vec::new();
+
+        // Before the create loop: the legacy mixed library covers both typed
+        // folders, so Jellyfin would refuse to create them beside it. It only
+        // holds what Jellyfin indexed, never media, so removing it loses no
+        // files; the typed pair created below re-indexes the same folders.
+        if let Some(index) = folders.iter().position(is_legacy_mixed_library) {
+            self.remove_virtual_folder(api_key, LEGACY_MIXED_LIBRARY)?;
+            folders.remove(index);
+            changes.push(format!(
+                "replaced the mixed Jellyfin library {LEGACY_MIXED_LIBRARY} at {MEDIA_ROOT} with typed Movies and Shows libraries"
+            ));
+        }
 
         // Before the create loop: a library covering `/data` would otherwise
         // leave nothing of itself to reuse.
@@ -582,6 +601,19 @@ impl Jellyfin {
         expect_no_content(response, "add a Jellyfin library path")
     }
 
+    fn remove_virtual_folder(&self, api_key: &str, name: &str) -> io::Result<()> {
+        let response = self.send(
+            ureq::request(
+                "DELETE",
+                &format!("{}/Library/VirtualFolders", self.base_url),
+            )
+            .query("name", name)
+            .query("refreshLibrary", "false")
+            .set("X-Emby-Token", api_key),
+        )?;
+        expect_no_content(response, "remove a Jellyfin library")
+    }
+
     fn remove_media_path(&self, api_key: &str, name: &str, path: &str) -> io::Result<()> {
         let response = self.send(
             ureq::request(
@@ -649,6 +681,21 @@ fn folder_named(folder: &VirtualFolderInfo, name: &str) -> bool {
         .name
         .as_deref()
         .is_some_and(|value| value.eq_ignore_ascii_case(name))
+}
+
+/// Churn's own pre-typed library: named `Media`, untyped, and pointing at the
+/// media root and nothing else. A library the user typed, renamed or extended
+/// with other folders does not match and is left alone.
+fn is_legacy_mixed_library(folder: &VirtualFolderInfo) -> bool {
+    let untyped = folder
+        .collection_type
+        .as_deref()
+        .is_none_or(|value| value.trim().is_empty() || value.eq_ignore_ascii_case("mixed"));
+    let locations = folder.locations.as_deref().unwrap_or_default();
+    folder_named(folder, LEGACY_MIXED_LIBRARY)
+        && untyped
+        && locations.len() == 1
+        && normalize_path(&locations[0]) == MEDIA_ROOT
 }
 
 /// The library whose own location is exactly `path`.

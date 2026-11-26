@@ -427,6 +427,89 @@ fn a_library_pointing_at_the_download_root_keeps_only_its_path_removed() {
     );
 }
 
+/// Installs from before the typed pair still have churn's mixed `Media`
+/// library at the media root. Jellyfin filed the `movies` folder in it as a
+/// series, so finished movies never appeared; it has to go before the typed
+/// libraries can be created beside it.
+#[test]
+fn the_legacy_mixed_media_library_is_replaced_by_the_typed_pair() {
+    let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let calls_for_handler = Arc::clone(&calls);
+
+    let server = mock_server(
+        move |request| match (request.method.as_str(), request.path()) {
+            ("GET", "/Library/VirtualFolders") => (
+                200,
+                r#"[{"Name":"Media","Locations":["/data/media/"],"ItemId":"media-id"}]"#.into(),
+            ),
+            ("DELETE", "/Library/VirtualFolders") | ("POST", "/Library/VirtualFolders") => {
+                calls_for_handler
+                    .lock()
+                    .unwrap()
+                    .push(format!("{} {}", request.method, request.target));
+                (204, String::new())
+            }
+            ("POST", "/Library/Refresh") => (204, String::new()),
+            _ => (404, "{}".into()),
+        },
+    );
+
+    let client = Jellyfin::new(&server.base_url, Duration::from_secs(2));
+    let changes = client
+        .ensure_libraries("api-key")
+        .expect("library setup should succeed");
+
+    let calls = calls.lock().unwrap();
+    assert_eq!(calls.len(), 3, "one removal, then the two typed libraries");
+    assert!(calls[0].starts_with("DELETE /Library/VirtualFolders?"));
+    assert!(calls[0].contains("name=Media"));
+    assert!(calls[1].contains("name=Movies") && calls[1].contains("collectionType=movies"));
+    assert!(calls[2].contains("name=Shows") && calls[2].contains("collectionType=tvshows"));
+    assert!(changes.iter().any(|change| change.contains(
+        "replaced the mixed Jellyfin library Media at /data/media with typed Movies and Shows libraries"
+    )));
+}
+
+/// Only churn's own untyped, root-only `Media` is replaced. A library the user
+/// typed or extended with other folders keeps everything it has.
+#[test]
+fn a_media_library_the_user_changed_is_never_removed() {
+    for folders in [
+        r#"[{"Name":"Media","CollectionType":"movies","Locations":["/data/media"]}]"#,
+        r#"[{"Name":"Media","Locations":["/data/media","/mnt/home-videos"]}]"#,
+        r#"[{"Name":"Family","Locations":["/data/media"]}]"#,
+    ] {
+        let removed = Arc::new(AtomicBool::new(false));
+        let removed_for_handler = Arc::clone(&removed);
+        let server = mock_server(
+            move |request| match (request.method.as_str(), request.path()) {
+                ("GET", "/Library/VirtualFolders") => (200, folders.into()),
+                ("DELETE", "/Library/VirtualFolders") => {
+                    removed_for_handler.store(true, Ordering::Relaxed);
+                    (204, String::new())
+                }
+                ("POST", _) => (204, String::new()),
+                _ => (404, "{}".into()),
+            },
+        );
+
+        let client = Jellyfin::new(&server.base_url, Duration::from_secs(2));
+        let changes = client
+            .ensure_libraries("api-key")
+            .expect("library setup should succeed");
+
+        assert!(
+            !removed.load(Ordering::Relaxed),
+            "{folders} must be left alone"
+        );
+        assert!(
+            !changes
+                .iter()
+                .any(|change| change.contains("replaced the mixed"))
+        );
+    }
+}
+
 /// A rerun finds the typed pair already in place and leaves it alone.
 #[test]
 fn an_existing_typed_pair_is_reused() {
