@@ -1,4 +1,5 @@
-import { ExternalLinkIcon } from "lucide-react";
+import { useState } from "react";
+import { ClapperboardIcon, ExternalLinkIcon, FilmIcon, TvIcon, type LucideIcon } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -26,7 +27,7 @@ export function ServiceStatusGrid({ services, loading, error }: ServiceStatusGri
   if (loading && !services) {
     return (
       <section className="flex flex-col gap-3">
-        <SectionHeading title="Services" description="Jellyfin, Sonarr and Radarr health" />
+        <SectionHeading title="Services" description="Sonarr finds TV and Radarr finds movies; qBittorrent downloads them and Jellyfin plays them." />
         <div className="grid gap-4 md:grid-cols-3">
           {Array.from({ length: 3 }).map((_, index) => (
             <Skeleton key={index} className="h-52 rounded-xl" />
@@ -47,7 +48,7 @@ export function ServiceStatusGrid({ services, loading, error }: ServiceStatusGri
 
   return (
     <section className="flex flex-col gap-3">
-      <SectionHeading title="Services" description="Jellyfin, Sonarr and Radarr health" />
+      <SectionHeading title="Services" description="Sonarr finds TV and Radarr finds movies; qBittorrent downloads them and Jellyfin plays them." />
       <div className="grid gap-4 md:grid-cols-3">
         {services?.map((service) => (
           <ServiceCard key={service.id} service={service} />
@@ -57,13 +58,24 @@ export function ServiceStatusGrid({ services, loading, error }: ServiceStatusGri
   );
 }
 
+/** What each service does for churn, in a line, plus a symbol if its logo cannot load. */
+const SERVICE_ROLES: Record<ServiceStatus["id"], { role: string; fallback: LucideIcon }> = {
+  jellyfin: { role: "Plays your library. Streams your movies and shows to any screen.", fallback: ClapperboardIcon },
+  sonarr: { role: "Handles TV. Follows the shows you add and grabs each new episode as it airs.", fallback: TvIcon },
+  radarr: { role: "Handles movies. Grabs the films you add and upgrades them to better copies.", fallback: FilmIcon },
+};
+
 function ServiceCard({ service }: { service: ServiceStatus }) {
+  const role = SERVICE_ROLES[service.id];
   return (
     <Card size="sm" className="gap-3">
-      <CardHeader>
-        <CardTitle>{service.name}</CardTitle>
-        <CardDescription className="truncate">{service.url}</CardDescription>
-        <CardAction>
+      <CardHeader className="flex items-start gap-3">
+        <ServiceIcon id={service.id} fallback={role?.fallback} />
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <CardTitle>{service.name}</CardTitle>
+          {role ? <CardDescription>{role.role}</CardDescription> : null}
+        </div>
+        <CardAction className="shrink-0">
           <StatusBadge state={service.state} />
         </CardAction>
       </CardHeader>
@@ -92,6 +104,28 @@ function ServiceCard({ service }: { service: ServiceStatus }) {
         </Button>
       </CardFooter>
     </Card>
+  );
+}
+
+/** The service's own logo, served through churn; a matching symbol until it loads or if it can't. */
+function ServiceIcon({ id, fallback: Fallback = FilmIcon }: { id: string; fallback?: LucideIcon }) {
+  const [failed, setFailed] = useState(false);
+  return (
+    <div
+      aria-hidden="true"
+      className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted"
+    >
+      {failed ? (
+        <Fallback className="size-5 text-muted-foreground" />
+      ) : (
+        <img
+          src={`/api/services/${encodeURIComponent(id)}/icon`}
+          alt=""
+          className="size-7 object-contain"
+          onError={() => setFailed(true)}
+        />
+      )}
+    </div>
   );
 }
 
