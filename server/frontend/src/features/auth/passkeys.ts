@@ -71,6 +71,9 @@ export function passkeyErrorMessage(error: unknown, fallback: string) {
         ("code" in error && error.code === "ERROR_CEREMONY_ABORTED")) {
       return "The passkey prompt was dismissed. You can try again.";
     }
+    if (error.name === "InvalidStateError") {
+      return "This authenticator already has a passkey for Churn. Try another device, or remove it from your passkey manager.";
+    }
     return error.message || fallback;
   }
   return fallback;

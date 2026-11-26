@@ -251,9 +251,6 @@ export function registerPasskeyRoutes(
         timeout: TTL,
         attestationType: "none",
         authenticatorSelection: { residentKey: "required", userVerification: "required" },
-        excludeCredentials: registered
-          .filter((record) => record.origin === origin && record.profileId === profile?.id)
-          .map(({ id }) => ({ id })),
       });
       issue(request, reply, options.challenge, {
         label: label.trim(), user, profileId: profile?.id, deviceId, accessToken,

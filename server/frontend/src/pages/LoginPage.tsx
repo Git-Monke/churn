@@ -79,6 +79,7 @@ export function LoginPage() {
   const [stage, setStage] = useState<"pick" | "password">("pick");
   const [pin, setPin] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [passwordStep, setPasswordStep] = useState<ProfileStep>("password");
   const [error, setError] = useState<string | null>(null);
   const busy = isPending || passkeyPending;
@@ -111,6 +112,7 @@ export function LoginPage() {
     setStage("pick");
     setPin("");
     setNewPassword("");
+    setConfirmPassword("");
     setPasswordStep("password");
     setPasskeyName("");
     setError(null);
@@ -121,6 +123,7 @@ export function LoginPage() {
     setStage("password");
     setPin("");
     setNewPassword("");
+    setConfirmPassword("");
     setPasswordStep("password");
     setPasskeyName(passkeySetup ? `${profile.name}'s Passkey` : "");
     setError(null);
@@ -148,6 +151,10 @@ export function LoginPage() {
 
     try {
       if (!selected.passwordSet && passwordStep === "newPassword") {
+        if (newPassword !== confirmPassword) {
+          setError("The passwords do not match.");
+          return;
+        }
         if (newPassword.length < 12) {
           setError("Choose a password with at least 12 characters, upper and lower case, a number, and a symbol.");
           return;
@@ -202,6 +209,7 @@ export function LoginPage() {
     setStage("password");
     setPasswordStep("newPassword");
     setNewPassword("");
+    setConfirmPassword("");
     setError(null);
   }
 
@@ -307,18 +315,34 @@ export function LoginPage() {
                     />
                   </div>
                 ) : (
-                  <div className="flex flex-col gap-2">
-                    <Label htmlFor="profile-new-password">New password</Label>
-                    <PasswordInput
-                      id="profile-new-password"
-                      name="new-password"
-                      autoComplete="new-password"
-                      autoFocus
-                      value={newPassword}
-                      onChange={(event) => setNewPassword(event.target.value)}
-                      disabled={isPending}
-                    />
-                  </div>
+                  <>
+                    <div className="flex flex-col gap-2">
+                      <Label htmlFor="profile-new-password">New password</Label>
+                      <PasswordInput
+                        id="profile-new-password"
+                        name="new-password"
+                        autoComplete="new-password"
+                        autoFocus
+                        value={newPassword}
+                        onChange={(event) => setNewPassword(event.target.value)}
+                        disabled={isPending}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        At least 12 characters, with upper and lower case, a number, and a symbol.
+                      </p>
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      <Label htmlFor="profile-confirm-password">Confirm password</Label>
+                      <PasswordInput
+                        id="profile-confirm-password"
+                        name="confirm-password"
+                        autoComplete="new-password"
+                        value={confirmPassword}
+                        onChange={(event) => setConfirmPassword(event.target.value)}
+                        disabled={isPending}
+                      />
+                    </div>
+                  </>
                 )}
 
                 {error ? <SignInError message={error} /> : null}
